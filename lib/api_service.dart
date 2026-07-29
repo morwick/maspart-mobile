@@ -1617,10 +1617,16 @@ class ApiService {
   /// `\n\n`, baris `data:`). [onProgress] dipanggil tiap label langkah baru.
   /// Cerminan `aiChatStream` di web. Pemanggil sebaiknya fallback ke [aiChat]
   /// bila ini melempar (mis. proxy tak mendukung streaming).
+  ///
+  /// [client] opsional: bila diberikan, PEMANGGIL yang memiliki dan menutupnya.
+  /// Menutup client di tengah aliran = MEMBATALKAN giliran — satu-satunya cara
+  /// keluar dari giliran yang berjalan sampai 4 menit (padanan AbortController
+  /// di web). Bila tak diberikan, client dibuat & ditutup sendiri seperti dulu.
   static Future<AIChatResult> aiChatStream(
     List<Map<String, String>> messages, {
     String? sheetId,
     String? conversationId,
+    http.Client? client,
     required void Function(String label) onProgress,
   }) async {
     final token = await _Api._token();
@@ -1632,9 +1638,10 @@ class ApiService {
         'sheet_id': sheetId ?? '',
         'conversation_id': conversationId ?? '',
       });
-    final client = http.Client();
+    final milikSendiri = client == null;
+    final c = client ?? http.Client();
     try {
-      final streamed = await client.send(req).timeout(_Api._timeoutLong);
+      final streamed = await c.send(req).timeout(_Api._timeoutLong);
       if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
         await _Api._throw(await http.Response.fromStream(streamed));
       }
@@ -1676,7 +1683,7 @@ class ApiService {
       }
       return result;
     } finally {
-      client.close();
+      if (milikSendiri) c.close();
     }
   }
 

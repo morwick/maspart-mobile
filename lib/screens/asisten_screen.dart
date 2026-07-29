@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Clipboard (tombol Salin)
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:http/http.dart' as http;
 import 'package:markdown/markdown.dart' as md;
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
@@ -200,6 +201,15 @@ class _AsistenScreenState extends State<AsistenScreen> {
   final List<String> _steps = [];
   bool _busy = false;
   String? _error;
+
+  /// Menempel di bawah atau tidak (lihat _scrollToBottom).
+  bool _ikutiBawah = true;
+
+  /// Client HTTP giliran yang sedang berjalan. Menutupnya = MEMBATALKAN —
+  /// padanan tombol Stop di web. Giliran bisa berjalan sampai 4 menit, dan
+  /// sebelumnya satu-satunya jalan keluar adalah menutup aplikasi.
+  http.Client? _streamClient;
+  bool _dibatalkan = false;
 
   // Status asisten. `allowed` dan `available` DUA hal berbeda: allowed=false
   // berarti menu Asisten AI dimatikan admin untuk akun ini (Menu Control),
@@ -408,7 +418,18 @@ class _AsistenScreenState extends State<AsistenScreen> {
     return '${n.hour.toString().padLeft(2, '0')}:${n.minute.toString().padLeft(2, '0')}';
   }
 
-  void _scrollToBottom() {
+  /// Ikuti ke bawah HANYA bila user memang sedang di bawah.
+  ///
+  /// Status langkah masuk berkali-kali selama 14-46 detik menunggu; dulu tiap
+  /// langkah menyeret user kembali ke bawah persis saat ia menggulir ke atas
+  /// membaca jawaban sebelumnya. Padanan `stickBottom` di web.
+  bool get _dekatBawah {
+    if (!_scroll.hasClients) return true;
+    return _scroll.position.maxScrollExtent - _scroll.offset < 120;
+  }
+
+  void _scrollToBottom({bool paksa = false}) {
+    if (!paksa && !_ikutiBawah) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
         _scroll.animateTo(_scroll.position.maxScrollExtent,
@@ -434,11 +455,15 @@ class _AsistenScreenState extends State<AsistenScreen> {
       _error = null;
       _steps.clear();
     });
-    _scrollToBottom();
+    _ikutiBawah = true;   // mengirim = user memang ingin melihat jawabannya
+    _dibatalkan = false;
+    _scrollToBottom(paksa: true);
     try {
       final sid = _sheetId.isEmpty ? null : _sheetId;
       final cid = await _convId();
       AIChatResult r;
+      final c = http.Client();
+      _streamClient = c;
       try {
         // Utamakan streaming: status langkah tampil hidup. Bila stream gagal
         // (mis. proxy tak mendukung SSE), jatuh ke chat non-stream — persis web.
@@ -446,6 +471,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
           _payload(),
           sheetId: sid,
           conversationId: cid,
+          client: c,
           onProgress: (label) {
             if (!mounted) return;
             setState(() {
@@ -455,7 +481,13 @@ class _AsistenScreenState extends State<AsistenScreen> {
           },
         );
       } catch (_) {
+        // Pembatalan BUKAN kegagalan stream — tanpa penjagaan ini, tombol Stop
+        // justru memicu permintaan KEDUA lewat jalur non-stream.
+        if (_dibatalkan) rethrow;
         r = await ApiService.aiChat(_payload(), sheetId: sid, conversationId: cid);
+      } finally {
+        c.close();
+        if (identical(_streamClient, c)) _streamClient = null;
       }
       if (!mounted) return;
       setState(() {
@@ -471,8 +503,48 @@ class _AsistenScreenState extends State<AsistenScreen> {
         _busy = false;
         _steps.clear();
       });
+      // Dibatalkan user = bukan kesalahan. Pertanyaannya tetap di transkrip.
+      if (_dibatalkan) {
+        _dibatalkan = false;
+        return;
+      }
       _fail(e, 'Gagal menghubungi Asisten AI.');
     }
+  }
+
+  /// Konfirmasi sebelum menghapus percakapan. Sekali ketuk dulu menghilangkan
+  /// transkrip panjang SEKALIGUS mereset ingatan sesi server, tanpa peringatan
+  /// dan tanpa cara mengembalikannya.
+  Future<void> _konfirmasiChatBaru() async {
+    if (_msgs.isEmpty) return _chatBaru();
+    final m = context.mas;
+    final ya = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Hapus percakapan ini?'),
+        content: const Text(
+            'Riwayat di layar dan ingatan asisten untuk sesi ini akan direset.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Batal', style: TextStyle(color: m.ink500)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Hapus', style: TextStyle(color: Color(0xFFC0392B))),
+          ),
+        ],
+      ),
+    );
+    if (ya == true) await _chatBaru();
+  }
+
+  /// Hentikan giliran yang sedang berjalan (padanan tombol Stop di web).
+  void _stopGiliran() {
+    if (!_busy) return;
+    _dibatalkan = true;
+    _streamClient?.close();   // memutus aliran → _send jatuh ke catch
+    _streamClient = null;
   }
 
   /// Unggah Excel: server membaca kolomnya, menyimpan sheet, dan mengembalikan
@@ -663,12 +735,18 @@ class _AsistenScreenState extends State<AsistenScreen> {
       Expanded(
         child: _msgs.isEmpty
             ? _empty(m)
-            : ListView.builder(
-                controller: _scroll,
-                padding: const EdgeInsets.all(16),
-                itemCount: _msgs.length + (_busy ? 1 : 0),
-                itemBuilder: (ctx, i) =>
-                    i >= _msgs.length ? _typing(m) : _bubble(m, _msgs[i], i),
+            : NotificationListener<ScrollNotification>(
+                onNotification: (n) {
+                  if (n is ScrollUpdateNotification) _ikutiBawah = _dekatBawah;
+                  return false;
+                },
+                child: ListView.builder(
+                  controller: _scroll,
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _msgs.length + (_busy ? 1 : 0),
+                  itemBuilder: (ctx, i) =>
+                      i >= _msgs.length ? _typing(m) : _bubble(m, _msgs[i], i),
+                ),
               ),
       ),
       if (!_statusLoading && _perbaikan)
@@ -717,7 +795,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
         ),
         if (_msgs.isNotEmpty)
           TextButton.icon(
-            onPressed: _busy ? null : _chatBaru,
+            onPressed: _busy ? null : _konfirmasiChatBaru,
             icon: Icon(Icons.refresh_rounded, size: 15, color: m.ink600),
             label: Text('Chat Baru',
                 style: TextStyle(fontSize: 12.5, color: m.ink600)),
@@ -1097,8 +1175,13 @@ class _AsistenScreenState extends State<AsistenScreen> {
             ),
           ),
           const SizedBox(width: 8),
-          _sqBtn(m, Icons.send_rounded,
-              _busy || _locked ? null : () => _send(_ctrl.text), true),
+          // Saat menunggu, tombol Kirim BERUBAH jadi Stop — satu-satunya jalan
+          // keluar dari giliran yang bisa berjalan sampai 4 menit.
+          if (_busy)
+            _sqBtn(m, Icons.stop_rounded, _stopGiliran, false)
+          else
+            _sqBtn(m, Icons.send_rounded,
+                _locked ? null : () => _send(_ctrl.text), true),
         ]),
       ]),
     );
