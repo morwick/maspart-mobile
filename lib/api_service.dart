@@ -1687,34 +1687,10 @@ class ApiService {
     }
   }
 
-  /// Chat dengan FOTO part. Server mengenali foto lewat Cari-by-Foto (DINOv2)
-  /// lalu menyuntikkan kandidat PN ke asisten.
-  ///
-  /// Dipulihkan 2026-07-30 (sebelumnya dibuang 2026-07-21 bersama web) setelah
-  /// akurasinya dibenahi di backend: bila `messages` menyebut NOMOR RANGKA,
-  /// kandidat DISARING ke BOM unit itu — pada uji nyata, part yang benar naik
-  /// dari peringkat #58 (tak masuk top-6) menjadi #2. Karena itu kirim riwayat
-  /// APA ADANYA: di situlah nomor rangkanya terbaca.
-  ///
-  /// Model teks tak bisa 'melihat' foto, jadi asisten akan menampilkan foto
-  /// RESMI kandidat (tool `foto_resmi_part`) dan meminta user memastikan sendiri.
-  /// Menu "Cari by Foto" (`/api/parts/search-image`) terpisah & tak terpengaruh.
-  static Future<AIChatResult> aiChatImage(
-    List<Map<String, String>> messages, {
-    required Uint8List bytes,
-    required String filename,
-    String? conversationId,
-  }) async {
-    final data = await _Api.multipart(
-      '/api/ai/chat-image',
-      files: [(field: 'file', bytes: bytes, filename: filename)],
-      fields: {
-        'messages': jsonEncode(messages),
-        'conversation_id': conversationId ?? '',
-      },
-    );
-    return AIChatResult.fromJson(_Api._obj(data));
-  }
+  // Catatan: aiChatImage (`/api/ai/chat-image`) dihapus 2026-07-21 mengikuti
+  // web — fitur cari part dari foto lewat Asisten dibuang. Endpointnya masih
+  // hidup di backend, tapi tak ada lagi klien yang memakainya. Menu "Cari by
+  // Foto" (`/api/parts/search-image`) TIDAK terpengaruh.
 
   /// Chat dengan LAMPIRAN EXCEL: server membaca kolomnya, asisten bisa mengisi
   /// stok/nama/harga lalu mengeluarkan Excel baru. Balasan memuat `sheetId`

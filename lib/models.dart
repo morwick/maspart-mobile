@@ -1652,18 +1652,11 @@ class AIPhotoCandidate {
   final double similarity;
   final String simsUrl;
 
-  /// true  = PN ini ADA di BOM pabrik unit yang disebut user (kandidat kuat).
-  /// false = di luar BOM — belum tentu salah: Loading List EPC datar, part di
-  ///         dalam assembly tak tercatat di sana; bisa juga part aftermarket.
-  /// null  = kandidat tidak disaring (user belum menyebut nomor rangka).
-  final bool? diBomUnit;
-
   const AIPhotoCandidate({
     required this.partNumber,
     this.partName = '',
     this.similarity = 0,
     this.simsUrl = '',
-    this.diBomUnit,
   });
 
   factory AIPhotoCandidate.fromJson(Map<String, dynamic> j) => AIPhotoCandidate(
@@ -1671,16 +1664,7 @@ class AIPhotoCandidate {
         partName: _s(j['part_name']),
         similarity: _d(j['similarity']),
         simsUrl: _s(j['sims_url']),
-        diBomUnit: j['di_bom_unit'] is bool ? j['di_bom_unit'] as bool : null,
       );
-
-  Map<String, dynamic> toJson() => {
-        'part_number': partNumber,
-        'part_name': partName,
-        'similarity': similarity,
-        'sims_url': simsUrl,
-        'di_bom_unit': diBomUnit,
-      };
 }
 
 class AIBandingExport {
@@ -1820,11 +1804,6 @@ class AIChatResult {
   /// PN yang disebut asisten (grounded) → tampilkan thumbnail foto part.
   final List<String> partPns;
 
-  /// Unit yang dipakai menyaring kandidat foto: frame + jumlah part BOM-nya.
-  /// Kosong bila user tak menyebut nomor rangka (kandidat tak disaring).
-  final String photoUnitFrame;
-  final int photoUnitNPart;
-
   /// Id sheet di server — WAJIB dikirim lagi di giliran berikutnya supaya
   /// lampiran Excel tetap menempel di percakapan.
   final String? sheetId;
@@ -1839,8 +1818,6 @@ class AIChatResult {
     this.excelExports = const [],
     this.explodedImages = const [],
     this.partPns = const [],
-    this.photoUnitFrame = '',
-    this.photoUnitNPart = 0,
     this.sheetId,
     this.sheet,
   });
@@ -1856,11 +1833,6 @@ class AIChatResult {
             .where((e) => e.id.isNotEmpty)
             .toList(),
         partPns: _strList(j['part_pns']),
-        photoUnitFrame:
-            j['photo_unit'] is Map ? _s((j['photo_unit'] as Map)['frame']) : '',
-        photoUnitNPart: j['photo_unit'] is Map
-            ? (int.tryParse('${(j['photo_unit'] as Map)['n_part_bom']}') ?? 0)
-            : 0,
         sheetId: _sOrNull(j['sheet_id']),
         sheet: j['sheet'] is Map
             ? AISheetSummary.fromJson((j['sheet'] as Map).cast<String, dynamic>())
