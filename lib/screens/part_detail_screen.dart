@@ -754,7 +754,9 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     if (d == null && !_explodedBusy && _explodedErr == null) {
       anak.add(Text(
         'Gambar rakitan resmi EPC yang memuat part ini, tanpa perlu nomor rangka. '
-        'Tidak dimuat otomatis karena pencarian pertamanya bisa memakan sampai satu menit.',
+        'Tidak dimuat otomatis karena pencarian pertamanya bisa memakan 1-2 menit '
+        '(terukur 94 detik untuk part yang dipakai belasan ribu model). Sesudah itu '
+        'tersimpan di server 24 jam, jadi pembukaan berikutnya seketika.',
         style: TextStyle(fontSize: 12, height: 1.5, color: m.ink500),
       ));
     }
