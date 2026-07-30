@@ -56,6 +56,10 @@ class _Msg {
   /// Ringkasan kolom Excel hasil deteksi server (menempel di balasan asisten).
   final AISheetSummary? sheet;
   final List<AIPhotoCandidate> photoCandidates;
+
+  /// Asisten bertanya balik -> kartu pilihan. Hanya pesan TERAKHIR yang
+  /// interaktif; kartu di pesan lama sengaja mati (pertanyaannya sudah basi).
+  final List<AIPertanyaan> pertanyaan;
   final List<String> repairkitModels;
   final List<AIBandingExport> bandingExports;
   final List<AIExcelExport> excelExports;
@@ -74,6 +78,7 @@ class _Msg {
     this.sheetName,
     this.sheet,
     this.photoCandidates = const [],
+    this.pertanyaan = const [],
     this.repairkitModels = const [],
     this.bandingExports = const [],
     this.excelExports = const [],
@@ -90,6 +95,7 @@ class _Msg {
         pns: r.partPns,
         sheet: r.sheet,
         photoCandidates: r.photoCandidates,
+        pertanyaan: r.pertanyaan,
         repairkitModels: r.repairkitModels,
         bandingExports: r.bandingExports,
         excelExports: r.excelExports,
@@ -125,6 +131,7 @@ class _Msg {
               'sims_url': c.simsUrl,
             },
         ],
+        'pertanyaan': [for (final q in pertanyaan) q.toJson()],
         'repairkit_models': repairkitModels,
         'banding_exports': [
           for (final b in bandingExports)
@@ -178,6 +185,7 @@ class _Msg {
       sheetName: j['sheet_name']?.toString(),
       sheet: r.sheet,
       photoCandidates: r.photoCandidates,
+      pertanyaan: r.pertanyaan,
       repairkitModels: r.repairkitModels,
       bandingExports: r.bandingExports,
       excelExports: r.excelExports,
@@ -449,6 +457,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
     final body = text.trim();
     if (body.isEmpty) return;
     setState(() {
+      _resetKartu();          // kartu lama tak boleh ikut ke giliran baru
       _msgs.add(_Msg('user', body, _now()));
       _ctrl.clear();
       _busy = true;
@@ -1099,6 +1108,127 @@ class _AsistenScreenState extends State<AsistenScreen> {
       );
   }
 
+  // ── Kartu pertanyaan asisten (tool `tanya_user`) ────────────────────────
+  // Aktif HANYA untuk pesan asisten TERAKHIR & belum ditutup user. Kartu di
+  // pesan lama sengaja mati: pertanyaannya sudah basi.
+  int _tanyaIdx = 0;
+  final List<String> _tanyaJawab = [];
+  bool _tanyaTutup = false;
+
+  List<AIPertanyaan>? get _kartuAktif {
+    if (_tanyaTutup || _busy || _msgs.isEmpty) return null;
+    final t = _msgs.last;
+    if (t.role != 'assistant' || t.pertanyaan.isEmpty) return null;
+    return t.pertanyaan;
+  }
+
+  void _resetKartu() {
+    _tanyaIdx = 0;
+    _tanyaJawab.clear();
+    _tanyaTutup = false;
+  }
+
+  void _jawabKartu(String opsi) {
+    final kartu = _kartuAktif;
+    if (kartu == null) return;
+    while (_tanyaJawab.length <= _tanyaIdx) {
+      _tanyaJawab.add('');
+    }
+    _tanyaJawab[_tanyaIdx] = opsi;
+    if (_tanyaIdx + 1 < kartu.length) {
+      setState(() => _tanyaIdx += 1);
+      return;
+    }
+    // Satu pertanyaan -> kirim jawabannya apa adanya (paling alami di transkrip).
+    // Beberapa -> sertakan teks pertanyaannya supaya tak ambigu.
+    final teks = kartu.length == 1
+        ? _tanyaJawab.first
+        : [
+            for (int i = 0; i < kartu.length; i++)
+              '${kartu[i].teks} ${i < _tanyaJawab.length && _tanyaJawab[i].isNotEmpty ? _tanyaJawab[i] : "(dilewati)"}'
+          ].join('\n');
+    setState(() => _tanyaTutup = true);
+    _send(teks);
+  }
+
+  void _lewatiKartu() {
+    setState(() => _tanyaTutup = true);
+    _send('(lewati) Lanjutkan dengan asumsi terbaik, dan sebutkan asumsinya.');
+  }
+
+  Widget _kartuTanya(MasColors m, List<AIPertanyaan> kartu) {
+    final q = kartu[_tanyaIdx.clamp(0, kartu.length - 1)];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: m.paper,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: m.ink200),
+        boxShadow: m.shadow1,
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+          child: Row(children: [
+            Expanded(
+              child: Text(q.teks,
+                  style: TextStyle(
+                      fontSize: 13.5, fontWeight: FontWeight.w600, color: m.ink900)),
+            ),
+            if (kartu.length > 1)
+              Text('${_tanyaIdx + 1} dari ${kartu.length}',
+                  style: TextStyle(fontSize: 11.5, color: m.ink500)),
+            IconButton(
+              icon: const Icon(Icons.close_rounded, size: 18),
+              color: m.ink500,
+              tooltip: 'Tutup pertanyaan',
+              onPressed: () => setState(() => _tanyaTutup = true),
+            ),
+          ]),
+        ),
+        for (int i = 0; i < q.opsi.length; i++)
+          InkWell(
+            onTap: () => _jawabKartu(q.opsi[i]),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+              decoration: BoxDecoration(border: Border(top: BorderSide(color: m.ink150))),
+              child: Row(children: [
+                Container(
+                  width: 20,
+                  height: 20,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                      color: m.canvas, borderRadius: BorderRadius.circular(5)),
+                  child: Text('${i + 1}',
+                      style: TextStyle(fontSize: 11.5, color: m.ink600)),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(q.opsi[i],
+                      style: TextStyle(fontSize: 13.5, color: m.ink900)),
+                ),
+              ]),
+            ),
+          ),
+        Container(
+          padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+          decoration: BoxDecoration(border: Border(top: BorderSide(color: m.ink150))),
+          child: Row(children: [
+            Expanded(
+              child: Text('Lainnya — tulis sendiri di bawah',
+                  style: TextStyle(fontSize: 12.5, color: m.ink500)),
+            ),
+            TextButton(
+              onPressed: _lewatiKartu,
+              child: const Text('Lewati', style: TextStyle(fontSize: 12)),
+            ),
+          ]),
+        ),
+      ]),
+    );
+  }
+
   Widget _inputBar(MasColors m) {
     final bottom = MediaQuery.of(context).padding.bottom;
     final pending = _pendingSheet;
@@ -1109,6 +1239,9 @@ class _AsistenScreenState extends State<AsistenScreen> {
         border: Border(top: BorderSide(color: m.ink150)),
       ),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
+        // Kartu pertanyaan asisten — DI ATAS kolom input (sesuai mockup web):
+        // persis di jalur mata user saat mau mengetik, dan tetap bisa diabaikan.
+        if (_kartuAktif != null) _kartuTanya(m, _kartuAktif!),
         // Lampiran yang menunggu dikirim.
         if (pending != null) ...[
           _AttachmentBar(
@@ -1167,7 +1300,9 @@ class _AsistenScreenState extends State<AsistenScreen> {
                       ? 'Asisten AI tidak aktif'
                       : (pending != null
                           ? 'Mau diapakan filenya? (mis. isikan stoknya)'
-                          : 'Tanya stok, harga, BOM per-VIN…'),
+                          : _kartuAktif != null
+                              ? 'Atau balas langsung…'
+                              : 'Tanya stok, harga, BOM per-VIN…'),
                   hintStyle: TextStyle(color: m.ink400, fontSize: 13.5),
                   contentPadding: const EdgeInsets.symmetric(vertical: 11),
                 ),

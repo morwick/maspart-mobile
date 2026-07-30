@@ -1713,6 +1713,21 @@ class AIChatTurn {
       );
 }
 
+/// Satu pertanyaan balik dari asisten (tool `tanya_user`) → kartu pilihan.
+///
+/// "Lainnya"/"Lewati" DISEDIAKAN tampilan, bukan oleh model.
+class AIPertanyaan {
+  final String teks;
+  final List<String> opsi;
+
+  const AIPertanyaan({this.teks = '', this.opsi = const []});
+
+  factory AIPertanyaan.fromJson(Map<String, dynamic> j) =>
+      AIPertanyaan(teks: _s(j['teks']), opsi: _strList(j['opsi']));
+
+  Map<String, dynamic> toJson() => {'teks': teks, 'opsi': opsi};
+}
+
 class AIPhotoCandidate {
   final String partNumber;
   final String partName;
@@ -1871,6 +1886,11 @@ class AIChatResult {
   /// PN yang disebut asisten (grounded) → tampilkan thumbnail foto part.
   final List<String> partPns;
 
+  /// Asisten BERTANYA balik (tool `tanya_user`): giliran berhenti menunggu
+  /// jawaban user. `reply` sudah memuat pertanyaan + opsi sebagai teks, jadi
+  /// versi lama yang belum merender kartu tetap berguna.
+  final List<AIPertanyaan> pertanyaan;
+
   /// Id sheet di server — WAJIB dikirim lagi di giliran berikutnya supaya
   /// lampiran Excel tetap menempel di percakapan.
   final String? sheetId;
@@ -1885,6 +1905,7 @@ class AIChatResult {
     this.excelExports = const [],
     this.explodedImages = const [],
     this.partPns = const [],
+    this.pertanyaan = const [],
     this.sheetId,
     this.sheet,
   });
@@ -1900,6 +1921,7 @@ class AIChatResult {
             .where((e) => e.id.isNotEmpty)
             .toList(),
         partPns: _strList(j['part_pns']),
+        pertanyaan: _list(j['pertanyaan'], AIPertanyaan.fromJson),
         sheetId: _sOrNull(j['sheet_id']),
         sheet: j['sheet'] is Map
             ? AISheetSummary.fromJson((j['sheet'] as Map).cast<String, dynamic>())
