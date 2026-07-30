@@ -184,6 +184,35 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     }
   }
 
+  // Exploded view TANPA nomor rangka. SENGAJA tidak dimuat saat layar dibuka:
+  // panggilan pertama bisa 10-60 dtk (PN umum dipakai belasan ribu model), dan
+  // gambar hanya tampil bila user memang meminta.
+  PartExplodedFigure? _exploded;
+  bool _explodedBusy = false;
+  String? _explodedErr;
+
+  Future<void> _loadExploded() async {
+    if (_explodedBusy || _exploded != null || _pn.isEmpty) return;
+    setState(() {
+      _explodedBusy = true;
+      _explodedErr = null;
+    });
+    try {
+      final d = await ApiService.partExplodedFigure(_pn);
+      if (!mounted) return;
+      setState(() {
+        _exploded = d;
+        _explodedBusy = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _explodedBusy = false;
+        _explodedErr = e is ApiException ? e.message : 'Gagal memuat exploded view.';
+      });
+    }
+  }
+
   /// Spesifikasi fisik resmi SIMS — sumber berat untuk hitung ongkir.
   Future<void> _loadSpec() async {
     if (_pn.isEmpty) {
@@ -411,6 +440,8 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
         ],
         const SizedBox(height: 14),
         _specCard(m),
+        const SizedBox(height: 14),
+        _explodedCard(m),
         // Semua unit yang memakai PN ini (web: "Ditemukan di N unit"). Sebelum
         // katalog terjawab, tampilkan dulu unit dari argumen navigasi supaya
         // bagian ini tidak berkedip muncul-hilang.
@@ -687,6 +718,98 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
   }
 
   // ── Spesifikasi fisik (SIMS) ────────────────────────────────────────
+
+  /// Layar penuh + zoom untuk gambar exploded (bytes, bukan URL — jadi tak bisa
+  /// memakai _FullscreenGallery yang menerima daftar URL foto SIMS).
+  void _bukaExplodedPenuh(Uint8List png) {
+    Navigator.of(context).push(PageRouteBuilder(
+      opaque: false,
+      barrierColor: Colors.black87,
+      pageBuilder: (ctx, _, _) => Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.black54,
+          foregroundColor: Colors.white,
+          title: const Text('Exploded view'),
+        ),
+        body: Center(
+          child: InteractiveViewer(
+            minScale: 0.8,
+            maxScale: 6,
+            child: Container(
+              color: Colors.white,
+              child: Image.memory(png, fit: BoxFit.contain),
+            ),
+          ),
+        ),
+      ),
+    ));
+  }
+
+  // ── Exploded view (EPC, tanpa nomor rangka) ─────────────────────────
+  Widget _explodedCard(MasColors m) {
+    final d = _exploded;
+    final anak = <Widget>[];
+
+    if (d == null && !_explodedBusy && _explodedErr == null) {
+      anak.add(Text(
+        'Gambar rakitan resmi EPC yang memuat part ini, tanpa perlu nomor rangka. '
+        'Tidak dimuat otomatis karena pencarian pertamanya bisa memakan sampai satu menit.',
+        style: TextStyle(fontSize: 12, height: 1.5, color: m.ink500),
+      ));
+    }
+    if (_explodedBusy) anak.add(const MasSkeleton(height: 180));
+    if (_explodedErr != null) anak.add(_alertBox(m, _explodedErr!));
+    if (d != null && !d.found) {
+      anak.add(_alertBox(
+          m, d.alasan ?? 'Figure exploded view tidak ditemukan untuk part ini.'));
+    }
+    if (d != null && d.found && d.png != null) {
+      anak.addAll([
+        GestureDetector(
+          onTap: () => _bukaExplodedPenuh(d.png!),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              color: Colors.white,
+              width: double.infinity,
+              child: Image.memory(d.png!, fit: BoxFit.contain, gaplessPlayback: true),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (d.figureNama != null)
+          Text(
+            'Figure: ${d.figureNama}'
+            '${d.figurePn != null ? ' (${d.figurePn})' : ''}'
+            '${d.jumlahItem != null ? ' · ${d.jumlahItem} part di gambar' : ''}',
+            style: TextStyle(fontSize: 12, height: 1.5, color: m.ink600),
+          ),
+        // Peringatan lintas-model dari server — tampil apa adanya.
+        if (d.catatan != null) ...[
+          const SizedBox(height: 4),
+          Text('⚠️ ${d.catatan}',
+              style: TextStyle(fontSize: 11.5, height: 1.5, color: m.ink500)),
+        ],
+      ]);
+    }
+
+    return MasSectionCard(
+      title: 'Exploded View',
+      trailing: Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        const MasPill(label: 'sumber: EPC', tone: MasPillTone.neutral, height: 20),
+        if (d != null && d.found && d.balon != null)
+          MasPill(label: 'balon ${d.balon}', tone: MasPillTone.neutral, height: 20),
+        if (d == null)
+          TextButton(
+            onPressed: _explodedBusy ? null : _loadExploded,
+            child: Text(_explodedBusy ? 'memuat…' : 'Tampilkan',
+                style: const TextStyle(fontSize: 12)),
+          ),
+      ]),
+      children: anak,
+    );
+  }
 
   Widget _specCard(MasColors m) {
     if (_loadingSpec) return const MasSkeleton(height: 120);

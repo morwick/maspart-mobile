@@ -491,6 +491,18 @@ class ApiService {
     return PartSpecResponse.fromJson(_Api._obj(data));
   }
 
+  /// Exploded view sebuah PN TANPA nomor rangka (jalur global EPC).
+  ///
+  /// ⚠️ LAMBAT: panggilan pertama 10-60 dtk (pernah 105 dtk) karena PN umum
+  /// dipakai belasan ribu model; server men-cache 24 jam. Karena itu pakai
+  /// `_timeoutLong` (180 dtk) dan JANGAN dipanggil saat layar dibuka — hanya
+  /// saat user menekan tombol.
+  static Future<PartExplodedFigure> partExplodedFigure(String pn) async {
+    final data = await _Api.get('/api/parts/exploded-figure',
+        query: {'pn': pn}, timeout: _Api._timeoutLong);
+    return PartExplodedFigure.fromJson(_Api._obj(data));
+  }
+
   /// Stok live satu part dari Accurate, termasuk rincian per gudang.
   static Future<AccurateStock> accurateStock(String pn) async {
     final data = await _Api.get('/api/parts/accurate-stock', query: {'pn': pn});

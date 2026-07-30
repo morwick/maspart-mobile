@@ -2,6 +2,9 @@
 // Model data MASPART — cerminan tipe di frontend web (`frontend/src/lib/api.ts`).
 // Nama field JSON dipertahankan persis seperti backend supaya kontraknya sama.
 
+import 'dart:convert';
+import 'dart:typed_data';
+
 // ── Helper parsing ───────────────────────────────────────────────────
 // Backend kadang mengirim angka sebagai string ("1.500") dan kadang sebagai
 // num. Helper ini memaafkan keduanya supaya UI tak pernah crash karena tipe.
@@ -598,6 +601,70 @@ class PartSpec {
       beratBersihKg == null &&
       beratKirimKg == null &&
       (dimensiCm == null || dimensiCm!.isEmpty);
+}
+
+/// Exploded view sebuah PN TANPA nomor rangka (jalur global EPC).
+///
+/// ⚠️ Figure-nya LINTAS MODEL: memuat PN ini tapi dari model mana pun, bukan unit
+/// tertentu. Untuk unit spesifik, jalur per-VIN (cek unit) tetap yang benar —
+/// `catatan` dari server membawa peringatan itu dan WAJIB ditampilkan apa adanya.
+class PartExplodedFigure {
+  final bool found;
+  final String partNumber;
+
+  /// PNG mentah (server mengirim base64) — balon PN ini disorot kuning bila
+  /// nomornya terdeteksi.
+  final Uint8List? png;
+  final String? figurePn;
+  final String? figureNama;
+  final String? namaItem;
+  final String? balon;
+  final int? jumlahItem;
+  final String? sumberModel;
+  final int? jumlahModelPemakai;
+  final String? catatan;
+  final String? alasan;
+
+  const PartExplodedFigure({
+    this.found = false,
+    this.partNumber = '',
+    this.png,
+    this.figurePn,
+    this.figureNama,
+    this.namaItem,
+    this.balon,
+    this.jumlahItem,
+    this.sumberModel,
+    this.jumlahModelPemakai,
+    this.catatan,
+    this.alasan,
+  });
+
+  factory PartExplodedFigure.fromJson(Map<String, dynamic> j) {
+    Uint8List? bytes;
+    final b64 = _sOrNull(j['png_base64']);
+    if (b64 != null && b64.isNotEmpty) {
+      try {
+        bytes = base64Decode(b64);
+      } catch (_) {
+        bytes = null;
+      }
+    }
+    return PartExplodedFigure(
+      found: j['found'] == true && bytes != null,
+      partNumber: _s(j['part_number']),
+      png: bytes,
+      figurePn: _sOrNull(j['figure_pn']),
+      figureNama: _sOrNull(j['figure_nama']),
+      namaItem: _sOrNull(j['nama_item']),
+      balon: _sOrNull(j['balon']),
+      jumlahItem: _iOrNull(j['jumlah_item']),
+      sumberModel: _sOrNull(j['sumber_model']),
+      jumlahModelPemakai: _iOrNull(j['jumlah_model_pemakai']),
+      catatan: _sOrNull(j['catatan']),
+      alasan: _sOrNull(j['alasan']),
+    );
+  }
 }
 
 class PartSpecResponse {
