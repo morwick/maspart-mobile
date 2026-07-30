@@ -1455,7 +1455,16 @@ const _kolomBatch = <({String key, String label, String desc})>[
     desc: 'Dari daftar harga internal'
   ),
   (key: 'kecocokan', label: 'Kecocokan', desc: 'File katalog lokal yang cocok'),
+  (
+    key: 'exploded',
+    label: 'Exploded View',
+    desc: 'Gambar rakitan EPC yang memuat part ini (lintas model) - SANGAT lambat, maks 25 PN'
+  ),
 ];
+
+/// Cap khusus kolom Exploded View - cermin `catalog.MAX_BATCH_EXPLODED` backend.
+/// Satu PN yang belum pernah dibuka bisa 90 detik (server EPC + server 1 vCPU).
+const _maksPnExploded = 25;
 
 /// Kolom harga hanya untuk akun berizin — backend juga menegakkan ini, tapi
 /// menyembunyikannya di sini mencegah user menunggu proses panjang lalu ditolak.
@@ -1553,6 +1562,19 @@ class _BatchScreenState extends State<BatchScreen> {
       setState(() => _error = 'Pilih minimal satu kolom untuk disertakan.');
       return;
     }
+    // Cap exploded dicek di sini HANYA untuk input teks (jumlahnya diketahui)
+    // supaya user tak menunggu lama lalu ditolak server. Untuk unggahan file,
+    // pesan backend yang bicara.
+    if (_columns.contains('exploded') &&
+        _file == null &&
+        _jumlahBaris > _maksPnExploded) {
+      setState(() => _error =
+          'Kolom Exploded View maksimum $_maksPnExploded PN (sekarang '
+          '$_jumlahBaris). Gambar exploded diambil satu per satu dari '
+          'server EPC. Kurangi part number, atau matikan kolom Exploded View '
+          'untuk memakai batas 300 PN.');
+      return;
+    }
     final nav = AppNav.of(context);
     setState(() {
       _busy = true;
@@ -1593,7 +1615,8 @@ class _BatchScreenState extends State<BatchScreen> {
       children: [
         Text(
           'Masukkan banyak part number sekaligus → unduh katalog Excel. Pilih sendiri '
-          'kolom yang disertakan. Maksimum 300 PN per batch.',
+          'kolom yang disertakan. Maksimum 300 PN per batch - atau 25 PN bila '
+          'kolom Exploded View dipilih.',
           style: TextStyle(fontSize: 12.5, color: m.ink500, height: 1.5),
         ),
         const SizedBox(height: 12),
@@ -1627,6 +1650,29 @@ class _BatchScreenState extends State<BatchScreen> {
         const SizedBox(height: 8),
         Text('Tip: matikan Foto agar jauh lebih cepat bila hanya butuh stok/harga.',
             style: TextStyle(fontSize: 11.5, color: m.ink400)),
+        if (_columns.contains('exploded')) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: m.canvas,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: m.ink200),
+            ),
+            child: Text(
+              'Exploded View aktif. Gambar diambil satu per satu dari server EPC: '
+              'sekitar 30-90 detik untuk tiap PN yang belum pernah dibuka, jadi '
+              '25 PN bisa 5-15 menit.\n\n'
+              'Biarkan aplikasi TERBUKA di layar - kalau di-minimize, Android/iOS '
+              'bisa memutus koneksi dan proses 15 menit itu hilang. Di HP '
+              'disarankan maksimum 10 PN.\n\n'
+              'PN yang exploded view-nya sudah pernah dibuka di halaman detail part '
+              'dalam 24 jam terakhir diproses seketika. Gambarnya bersifat lintas '
+              'model - memuat part ini dari model mana pun, bukan gambar unit tertentu.',
+              style: TextStyle(fontSize: 11.5, height: 1.5, color: m.ink600),
+            ),
+          ),
+        ],
 
         if (_error != null) ...[
           const SizedBox(height: 14),
@@ -1688,9 +1734,12 @@ class _BatchScreenState extends State<BatchScreen> {
         if (_busy) ...[
           const SizedBox(height: 8),
           Text(
-            lambat
-                ? 'Mengambil data SIMS untuk tiap part — bisa beberapa menit untuk banyak PN.'
-                : 'Menyusun katalog — sebentar lagi selesai.',
+            _columns.contains('exploded')
+                ? 'Mencari figure exploded view di EPC untuk tiap part - 5-15 menit '
+                    'untuk 25 PN. Jangan tutup aplikasi.'
+                : lambat
+                    ? 'Mengambil data SIMS untuk tiap part — bisa beberapa menit untuk banyak PN.'
+                    : 'Menyusun katalog — sebentar lagi selesai.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 11.5, color: m.ink400),
           ),

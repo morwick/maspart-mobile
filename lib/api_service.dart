@@ -62,6 +62,12 @@ class _Api {
   /// pencarian foto) yang di server memang bisa makan puluhan detik.
   static const _timeoutLong = Duration(seconds: 180);
 
+  /// Khusus Batch Download berkolom exploded: gambar diambil satu per satu dari
+  /// EPC (±94 dtk per PN yang belum pernah dibuka, cap 25 PN, 3 pekerja) → bisa
+  /// 15 menit. ⚠️ Di HP, request sepanjang itu tetap rawan diputus OS bila
+  /// aplikasi di-minimize — layarnya memperingatkan user soal ini.
+  static const _timeoutExploded = Duration(minutes: 20);
+
   static Future<String> _token() async {
     final t = await AuthStorage.getToken();
     if (t == null) throw ApiException(401, 'Belum login');
@@ -549,6 +555,11 @@ class ApiService {
         if (columns.isNotEmpty) 'columns': columns.join(','),
       },
       expectBytes: true,
+      // Kolom exploded: 94 dtk/PN dingin, cap 25 PN, 3 pekerja paralel → bisa
+      // 15 menit. `_timeoutLong` (180 dtk) jauh tak cukup untuk itu.
+      timeout: columns.contains('exploded')
+          ? _Api._timeoutExploded
+          : _Api._timeoutLong,
     ) as Uint8List;
   }
 
