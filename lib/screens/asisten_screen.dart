@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Clipboard (tombol Salin)
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -55,7 +56,15 @@ class _Msg {
 
   /// Ringkasan kolom Excel hasil deteksi server (menempel di balasan asisten).
   final AISheetSummary? sheet;
+
+  /// Foto yang DIKIRIM user pada pesan ini (ditampilkan di bubble-nya sendiri).
+  /// Tidak ikut disimpan ke riwayat — bytes-nya bisa besar dan tak perlu abadi.
+  final Uint8List? photo;
   final List<AIPhotoCandidate> photoCandidates;
+
+  /// Unit yang dipakai menyaring kandidat foto (frame + jumlah part BOM).
+  final String photoUnitFrame;
+  final int photoUnitNPart;
   final List<String> repairkitModels;
   final List<AIBandingExport> bandingExports;
   final List<AIExcelExport> excelExports;
@@ -73,7 +82,10 @@ class _Msg {
     this.pns = const [],
     this.sheetName,
     this.sheet,
+    this.photo,
     this.photoCandidates = const [],
+    this.photoUnitFrame = '',
+    this.photoUnitNPart = 0,
     this.repairkitModels = const [],
     this.bandingExports = const [],
     this.excelExports = const [],
@@ -90,6 +102,8 @@ class _Msg {
         pns: r.partPns,
         sheet: r.sheet,
         photoCandidates: r.photoCandidates,
+        photoUnitFrame: r.photoUnitFrame,
+        photoUnitNPart: r.photoUnitNPart,
         repairkitModels: r.repairkitModels,
         bandingExports: r.bandingExports,
         excelExports: r.excelExports,
@@ -116,15 +130,10 @@ class _Msg {
               'kategori': e.kategori,
             },
         ],
-        'photo_candidates': [
-          for (final c in photoCandidates)
-            {
-              'part_number': c.partNumber,
-              'part_name': c.partName,
-              'similarity': c.similarity,
-              'sims_url': c.simsUrl,
-            },
-        ],
+        // Pakai toJson() modelnya, bukan salinan map di sini: `di_bom_unit`
+        // pernah terlewat karena ada DUA tempat menulis bentuk yang sama.
+        'photo_candidates': [for (final c in photoCandidates) c.toJson()],
+        'photo_unit': {'frame': photoUnitFrame, 'n_part_bom': photoUnitNPart},
         'repairkit_models': repairkitModels,
         'banding_exports': [
           for (final b in bandingExports)
@@ -178,6 +187,8 @@ class _Msg {
       sheetName: j['sheet_name']?.toString(),
       sheet: r.sheet,
       photoCandidates: r.photoCandidates,
+      photoUnitFrame: r.photoUnitFrame,
+      photoUnitNPart: r.photoUnitNPart,
       repairkitModels: r.repairkitModels,
       bandingExports: r.bandingExports,
       excelExports: r.excelExports,
@@ -591,6 +602,86 @@ class _AsistenScreenState extends State<AsistenScreen> {
     }
   }
 
+  /// Kirim FOTO part. Server mengenali foto (Cari-by-Foto/DINOv2) dan bila pesan
+  /// menyebut NOMOR RANGKA, kandidat disaring ke BOM unit itu — itu yang membuat
+  /// akurasinya melonjak, jadi riwayat dikirim apa adanya. Asisten lalu
+  /// menampilkan foto RESMI kandidat dan meminta user memastikan kecocokannya.
+  Future<void> _sendWithPhoto(Uint8List bytes, String filename) async {
+    final caption = _ctrl.text.trim();
+    final userText =
+        caption.isEmpty ? 'Tolong kenali part di foto ini.' : caption;
+    setState(() {
+      _msgs.add(_Msg('user', userText, _now(), photo: bytes));
+      _ctrl.clear();
+      _busy = true;
+      _error = null;
+    });
+    _scrollToBottom();
+    try {
+      final r = await ApiService.aiChatImage(_payload(),
+          bytes: bytes, filename: filename, conversationId: await _convId());
+      if (!mounted) return;
+      setState(() {
+        _msgs.add(_Msg.assistant(r, _now()));
+        _busy = false;
+      });
+      _scrollToBottom();
+      _simpanChat();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _msgs.removeLast();
+        _ctrl.text = caption; // jangan paksa user menulis ulang
+      });
+      _fail(e, 'Gagal mengirim foto.');
+    }
+  }
+
+  /// Pilih sumber foto: kamera (foto part di lapangan) atau galeri.
+  Future<void> _pickPhoto() async {
+    final nav = AppNav.of(context);
+    final sumber = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.photo_camera_rounded),
+            title: const Text('Ambil foto'),
+            subtitle: const Text('Sebut nomor rangka di pesan agar akurat'),
+            onTap: () => Navigator.pop(ctx, ImageSource.camera),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_library_rounded),
+            title: const Text('Pilih dari galeri'),
+            onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+          ),
+        ]),
+      ),
+    );
+    if (sumber == null) return;
+    try {
+      // Diperkecil di HP dulu: hemat kuota user, dan embedding DINOv2 memakai
+      // 224 px — foto 12 MP tak menambah akurasi sama sekali.
+      final x = await ImagePicker().pickImage(
+        source: sumber,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 88,
+      );
+      if (x == null) return;
+      final b = await x.readAsBytes();
+      if (!mounted) return;
+      if (b.lengthInBytes > 12 * 1024 * 1024) {
+        setState(() => _error = 'Foto maksimal 12 MB.');
+        return;
+      }
+      await _sendWithPhoto(b, x.name.isEmpty ? 'foto.jpg' : x.name);
+    } catch (e) {
+      nav.toast(e is ApiException ? e.message : 'Gagal membuka kamera/galeri.');
+    }
+  }
+
   Future<void> _pickSheet() async {
     final nav = AppNav.of(context);
     try {
@@ -883,6 +974,14 @@ class _AsistenScreenState extends State<AsistenScreen> {
           constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.82),
           margin: const EdgeInsets.only(bottom: 14),
           child: Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+            if (msg.photo != null) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.memory(msg.photo!,
+                    width: 190, fit: BoxFit.cover, gaplessPlayback: true),
+              ),
+              const SizedBox(height: 5),
+            ],
             if (msg.sheetName != null) ...[
               _FileChip(name: msg.sheetName!),
               const SizedBox(height: 5),
@@ -935,9 +1034,19 @@ class _AsistenScreenState extends State<AsistenScreen> {
               const SizedBox(height: 8),
               _SheetCard(s: msg.sheet!),
             ],
-            // Thumbnail kandidat-foto (photoCandidates) & foto part SIMS (pns)
-            // SENGAJA tidak dirender — dimatikan di web atas permintaan pemilik
-            // (2026-07-08). Hanya exploded view yang ditampilkan.
+            // Thumbnail kandidat-foto & foto part SIMS tetap TIDAK dirender —
+            // dimatikan atas permintaan pemilik (2026-07-08). Yang ditampilkan
+            // di bawah hanyalah CHIP TEKS (PN + skor + tanda BOM unit): itu
+            // transparansi yang wajib ada sejak kandidat foto disaring per-unit,
+            // dan tak melanggar aturan 'tanpa thumbnail'.
+            if (msg.photoCandidates.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _PhotoCandidateChips(
+                cands: msg.photoCandidates,
+                frame: msg.photoUnitFrame,
+                nPart: msg.photoUnitNPart,
+              ),
+            ],
             if (msg.exploded.isNotEmpty) ...[
               const SizedBox(height: 8),
               _ExplodedImages(images: msg.exploded),
@@ -1134,6 +1243,13 @@ class _AsistenScreenState extends State<AsistenScreen> {
           const SizedBox(height: 8),
         ],
         Row(children: [
+          // Kamera = kirim foto part LANGSUNG (setara tombol kamera web).
+          Tooltip(
+            message: 'Cari part dari foto — sebut nomor rangka (VIN) agar akurat',
+            child: _sqBtn(m, Icons.photo_camera_rounded,
+                _busy || _locked ? null : _pickPhoto, false),
+          ),
+          const SizedBox(width: 8),
           // Klip = lampirkan Excel, persis tombol paperclip web. Memilih file
           // hanya MELAMPIRKAN; pengiriman menunggu user menekan Kirim.
           Tooltip(
@@ -1749,6 +1865,80 @@ class _SheetCard extends StatelessWidget {
 // ── Chip lampiran ───────────────────────────────────────────────────
 
 /// Chip nama file di gelembung pesan user (Excel yang ia lampirkan).
+/// Kandidat hasil Cari-by-Foto sebagai CHIP TEKS (tanpa thumbnail).
+///
+/// Skor kemiripan DINOv2 di rentang 40–60% TIDAK membedakan benar/salah — pada
+/// uji nyata part yang BENAR berskor 44% sementara part yang SALAH 56%. Karena
+/// itu skor ditampilkan sebagai info saja; penanda "✓ ada di BOM unit" jauh
+/// lebih berarti, dan kandidat di luar BOM ditampilkan redup TAPI tidak
+/// disembunyikan (Loading List EPC datar — part di dalam assembly tak tercatat).
+class _PhotoCandidateChips extends StatelessWidget {
+  const _PhotoCandidateChips({
+    required this.cands,
+    required this.frame,
+    required this.nPart,
+  });
+
+  final List<AIPhotoCandidate> cands;
+  final String frame;
+  final int nPart;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = context.mas;
+    final list = cands.take(9).toList();
+    final disaring = list.any((c) => c.diBomUnit == true);
+    final judul = frame.isEmpty
+        ? 'Kandidat dari foto — sebut nomor rangka (VIN) agar bisa disaring ke unit Anda'
+        : 'Kandidat dari foto — disaring ke BOM unit $frame'
+            '${nPart > 0 ? ' ($nPart part)' : ''}';
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(judul, style: TextStyle(fontSize: 11.5, color: m.ink500)),
+      const SizedBox(height: 5),
+      Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final c in list)
+            _chip(m, c, luar: disaring && c.diBomUnit == false),
+        ],
+      ),
+    ]);
+  }
+
+  Widget _chip(MasColors m, AIPhotoCandidate c, {required bool luar}) {
+    final pct = (c.similarity * 100).round();
+    return Tooltip(
+      message: luar
+          ? '${c.partName}\nDi luar BOM unit — belum tentu salah (part di dalam '
+              'assembly tak tercatat di Loading List)'
+          : c.partName,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: luar ? Colors.transparent : m.canvas,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: m.ink200),
+        ),
+        child: Opacity(
+          opacity: luar ? 0.72 : 1,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (c.diBomUnit == true) ...[
+              Icon(Icons.check_rounded, size: 13, color: m.brand600),
+              const SizedBox(width: 3),
+            ],
+            Text(c.partNumber,
+                style: const TextStyle(
+                    fontSize: 11.5, fontFeatures: [FontFeature.tabularFigures()])),
+            const SizedBox(width: 5),
+            Text('$pct%', style: TextStyle(fontSize: 11, color: m.ink500)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
 class _FileChip extends StatelessWidget {
   final String name;
   const _FileChip({required this.name});
