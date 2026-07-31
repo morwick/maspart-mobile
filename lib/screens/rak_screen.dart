@@ -38,6 +38,25 @@ class _RakScreenState extends State<RakScreen> {
   String? _err;
   bool _siap = false; // daftar gudang cukup disiapkan sekali
 
+  /// Saring "kartunya belum difoto" — kelengkapan foto adalah misi staf,
+  /// jadi sisa kerjaannya harus bisa dipanggil satu ketukan (paritas web).
+  bool _tanpaFoto = false;
+
+  /// Saringan LIVE di klien atas baris yang sudah dimuat: mengetik menyaring
+  /// seketika; tombol Cari tetap menembak server (utk gudang > limit baris).
+  List<RakInfo> get _shown {
+    final q = _cariCtrl.text.trim().toLowerCase();
+    return [
+      for (final r in _items)
+        if ((!_tanpaFoto || r.fotoUrl.isEmpty) &&
+            (q.isEmpty ||
+                r.partNumber.toLowerCase().contains(q) ||
+                r.rak.toLowerCase().contains(q) ||
+                r.catatan.toLowerCase().contains(q)))
+          r,
+    ];
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -190,6 +209,8 @@ class _RakScreenState extends State<RakScreen> {
                 hint: 'Cari PN, kode rak, atau catatan',
                 prefix: Icon(Icons.search_rounded, size: 16, color: m.ink400),
                 action: TextInputAction.search,
+                // Mengetik = saring live atas baris termuat; submit = server.
+                onChanged: (_) => setState(() {}),
                 onSubmitted: (_) => _muat(),
               ),
             ),
@@ -218,17 +239,17 @@ class _RakScreenState extends State<RakScreen> {
             const MasSkeleton(height: 66),
             const SizedBox(height: 8),
             const MasSkeleton(height: 66),
-          ] else if (_items.isEmpty)
+          ] else if (_shown.isEmpty)
             MasEmpty(
               icon: Icons.inventory_2_outlined,
-              title: _cariCtrl.text.trim().isEmpty
+              title: _items.isEmpty && _cariCtrl.text.trim().isEmpty
                   ? 'Gudang ini belum punya data rak'
                   : 'Tidak ada yang cocok',
-              subtitle: _cariCtrl.text.trim().isEmpty
+              subtitle: _items.isEmpty && _cariCtrl.text.trim().isEmpty
                   ? 'Mulai dengan menambahkan satu part beserta kode raknya.'
                   : 'Coba kata kunci lain — pencarian menyisir PN, kode rak, '
                       'dan catatan.',
-              action: _cariCtrl.text.trim().isEmpty
+              action: _items.isEmpty && _cariCtrl.text.trim().isEmpty
                   ? (nav.bolehUbahRak(g)
                       ? MasButton(
                           label: 'Tambah lokasi rak',
@@ -237,19 +258,51 @@ class _RakScreenState extends State<RakScreen> {
                         )
                       : null)
                   : MasButton(
-                      label: 'Hapus pencarian',
+                      label: 'Hapus saringan',
                       primary: false,
                       onTap: () {
                         _cariCtrl.clear();
+                        setState(() => _tanpaFoto = false);
                         _muat();
                       },
                     ),
             )
           else ...[
-            Text('${_items.length} part tercatat',
-                style: TextStyle(fontSize: 12, color: m.ink500)),
+            // Bilah statistik: kelengkapan foto = misi ("semua kartu terpotret");
+            // chip menyaring sisa kerjaan, bukan sekadar angka pasif.
+            Builder(builder: (_) {
+              final berfoto =
+                  _items.where((r) => r.fotoUrl.isNotEmpty).length;
+              final saring =
+                  _cariCtrl.text.trim().isNotEmpty || _tanpaFoto;
+              return Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 10,
+                runSpacing: 6,
+                children: [
+                  Text(
+                    saring
+                        ? '${_shown.length} dari ${_items.length} baris · $berfoto berfoto'
+                        : '${_items.length} baris · $berfoto berfoto',
+                    style: TextStyle(fontSize: 12, color: m.ink500),
+                  ),
+                  if (berfoto < _items.length)
+                    GestureDetector(
+                      onTap: () =>
+                          setState(() => _tanpaFoto = !_tanpaFoto),
+                      child: MasPill(
+                        label:
+                            '${_tanpaFoto ? "✕ " : ""}tanpa foto: ${_items.length - berfoto}',
+                        tone: _tanpaFoto
+                            ? MasPillTone.warn
+                            : MasPillTone.neutral,
+                      ),
+                    ),
+                ],
+              );
+            }),
             const SizedBox(height: 8),
-            for (final it in _items) ...[
+            for (final it in _shown) ...[
               _baris(m, nav, it),
               const SizedBox(height: 8),
             ],
