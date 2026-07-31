@@ -3,15 +3,18 @@
 Aplikasi Android untuk MASPART (katalog & penjualan suku cadang truk Sinotruk).
 Klien Flutter di atas backend FastAPI yang sama dengan web (`maspart.tech`).
 
-- **Versi:** 2.1.8 (`pubspec.yaml` → `version: 2.1.8+11`; versionCode arm64 = 2011)
+- **Versi:** 2.2.0 (`pubspec.yaml` → `version: 2.2.0+13`) — rilis 2026-07-31
 - **Package id:** `com.example.maspart_mobile`
 - **Backend default:** `https://maspart.tech`
-- **Disajikan di:** <https://maspart.tech/download>
-- **Kode:** ~26.000 baris Dart di `lib/`
+- **Disajikan di:** <https://maspart.tech/download> (APK = `frontend/public/maspart.apk`
+  di repo utama — terpanggang di image frontend, deploy = `push.sh frontend` + recreate)
+- **Kode:** ~27.000 baris Dart di `lib/`
 
-> ⚠️ **Repo ini masih NOL COMMIT** (branch `master` kosong, seluruh file untracked).
-> Satu-satunya salinan kode ada di disk laptop ini. Prioritaskan `git add` + commit +
-> push ke remote sebelum kerjaan besar berikutnya.
+> ⚠️ Repo ini punya riwayat commit sejak 2026-07-29 (`66fbc2b`) tapi **masih TANPA
+> REMOTE** — commit hanya ada di laptop ini. Prioritaskan menambah remote + push.
+> ⚠️ Jebakan build rilis (2026-07-31): `flutter build` yang di-background-kan harness
+> AI bisa TERBUNUH — jalankan sebagai proses Windows terlepas (path penuh Git Bash;
+> `cmd /c bash` jatuh ke WSL kosong) + pantau file log.
 
 > **Perubahan sejak 2.1.4 (sesi 21–23 Juli 2026):**
 > - **2.1.5** — fix stok tampil `—` di Detail Part HP.
@@ -23,6 +26,25 @@ Klien Flutter di atas backend FastAPI yang sama dengan web (`maspart.tech`).
 >   web. File terkait: `asisten_screen.dart`, `api_service.dart`, `shell.dart`,
 >   `admin_ai_screens.dart`.
 > - Auto-logout idle 5 menit sempat masuk lalu **dibatalkan pemilik** (di-revert web+mobile).
+>
+> **Perubahan 2.1.9 → 2.2.0 (sesi 29–31 Juli 2026):**
+> - **2.1.9** — commit awal repo; Stop giliran asisten + konfirmasi hapus chat +
+>   autoscroll cerdas (paritas UI/UX web Fase 1).
+> - **2.2.0** (`a68dc84`) — rilis besar:
+>   - **Rak & Kartu Stok**: stok per gudang di Detail Part bisa dibuka → rak/catatan/
+>     foto kartu + tombol Ubah (gate `AppNav.bolehUbahRak` per label gudang PENUH);
+>     layar "Rak & Kartu Stok" (daftar/cari live/edit; impor Excel = web-only); foto
+>     via `image_picker` KAMERA dulu (use-case utama: memotret kartu di depan rak;
+>     kompresi di sumber 1600px/q85 — backend mengompres lagi sbg penegak). Form ubah
+>     bersama `widgets/rak_editor.dart` mengunci urutan kritis simpan-rak-DULU-baru-
+>     foto. Semua endpoint pakai alias `{pn:path}` + encode (PN bisa ber-'/').
+>   - **Kartu pertanyaan asisten** (`tanya_user`) — pilihan bergaya kartu; juga
+>     dipakai alur konfirmasi fitur backend "Ajarkan Lewat Chat" (jalan TANPA
+>     perubahan klien — kartu & chat generik).
+>   - **Panel "Sebab guard menyala"** di Observabilitas AI (`guardSebab`).
+>   - Saring live + bilah "N baris · M berfoto" (rak & pengetahuan).
+> - **Ter-commit, menunggu APK berikutnya** (`5472690`): label "💬 dari chat" + chip
+>   filter di layar Pengetahuan AI (`PengetahuanDok.asal`).
 
 > **Perubahan besar sejak 2.0.0 (sesi 16 Juli 2026):**
 > - **Notifikasi update in-app + config server-driven** (§9) — aplikasi cek versi
