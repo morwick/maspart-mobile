@@ -44,7 +44,10 @@ Klien Flutter di atas backend FastAPI yang sama dengan web (`maspart.tech`).
 >   - **Panel "Sebab guard menyala"** di Observabilitas AI (`guardSebab`).
 >   - Saring live + bilah "N baris · M berfoto" (rak & pengetahuan).
 > - **Ter-commit, menunggu APK berikutnya** (`5472690`): label "💬 dari chat" + chip
->   filter di layar Pengetahuan AI (`PengetahuanDok.asal`).
+>   filter di layar Pengetahuan AI (`PengetahuanDok.asal`); (`b5e64a1`) chip
+>   TAWARAN AJAR di layar pembuka asisten — "💡 N topik berulang gagal saya
+>   jawab — Ajari saya?" (aiStatusFull += gapAjar/gapTopik dari gap_ajar;
+>   hanya terisi utk akun yang boleh mengajar).
 
 > **Perubahan besar sejak 2.0.0 (sesi 16 Juli 2026):**
 > - **Notifikasi update in-app + config server-driven** (§9) — aplikasi cek versi
