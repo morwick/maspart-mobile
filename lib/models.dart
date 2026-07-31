@@ -120,6 +120,14 @@ class MyPermissions {
   final String? branch;
   final bool canPrice;
 
+  /// Gudang yang boleh DITULIS user pada fitur Rak & Kartu Stok — label PENUH
+  /// ("01.Jakarta"), bukan key lokasi pembeli ('jakarta').
+  /// ⚠️ Kosong ≠ tak boleh melihat: MELIHAT rak terbuka untuk semua staf
+  /// internal, daftar ini hanya memagari tombol Ubah/Hapus & menu pengelola.
+  /// Server lama (belum ada kolomnya) tak mengirim field ini → tetap kosong,
+  /// jadi fiturnya dorman, bukan error.
+  final List<String> gudangKelola;
+
   const MyPermissions({
     this.menus = const [],
     this.columns = const [],
@@ -127,6 +135,7 @@ class MyPermissions {
     this.role = '',
     this.branch,
     this.canPrice = false,
+    this.gudangKelola = const [],
   });
 
   factory MyPermissions.fromJson(Map<String, dynamic> j) => MyPermissions(
@@ -136,6 +145,7 @@ class MyPermissions {
         role: _s(j['role']),
         branch: _sOrNull(j['branch']),
         canPrice: _b(j['can_price']),
+        gudangKelola: _strList(j['gudang_kelola']),
       );
 }
 
@@ -2664,6 +2674,12 @@ class ChatLogSummary {
   final ({int nf, int err, int legacy})? toolGagalRincian;
   final Map<String, int> outcome;
 
+  /// Sebab guard menyala → jumlah (migrasi 026): pn/angka = dugaan karangan,
+  /// subst = PN per-model menyalip EPC per-VIN, dtc/epc/excel = jawaban tanpa
+  /// tool wajib. KOSONG pada ringkasan lama — dan `guardMenyala` baris lama
+  /// UNDERCOUNT (dulu hanya guard anti-karangan yang terhitung).
+  final Map<String, int> guardSebab;
+
   // Rata-rata token DeepSeek per giliran (migrasi 021).
   final int tokenRata2In;
   final int tokenRata2Out;
@@ -2683,6 +2699,7 @@ class ChatLogSummary {
     this.toolGagalTersering = const [],
     this.toolGagalRincian,
     this.outcome = const {},
+    this.guardSebab = const {},
     this.tokenRata2In = 0,
     this.tokenRata2Out = 0,
     this.tokenCacheHitPersen = 0,
@@ -2728,6 +2745,9 @@ class ChatLogSummary {
       },
       outcome: (j['outcome'] as Map?)?.map((k, v) => MapEntry('$k', _i(v))) ??
           const {},
+      guardSebab:
+          (j['guard_sebab'] as Map?)?.map((k, v) => MapEntry('$k', _i(v))) ??
+              const {},
       tokenRata2In: _i(tok['rata2_in']),
       tokenRata2Out: _i(tok['rata2_out']),
       tokenCacheHitPersen: _d(tok['cache_hit_persen']),
@@ -3229,5 +3249,73 @@ class AdminGudang {
         pic: pic ?? this.pic,
         canShip: canShip ?? this.canShip,
         nearest: nearest,
+      );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Rak & Kartu Stok
+// ══════════════════════════════════════════════════════════════════════
+
+/// Lokasi fisik satu part di SATU gudang (kunci data = pasangan pn × gudang).
+/// Sistem sudah tahu BERAPA stoknya dari Accurate; baris ini menjawab DI MANA
+/// barangnya, plus foto kartu stok sebagai bukti visual (bukan sumber angka).
+class RakInfo {
+  /// PN apa adanya seperti yang diketik pengisi (bisa ber-suffix varian).
+  final String partNumber;
+
+  /// PN ter-normalisasi milik server — dipakai server untuk mencocokkan
+  /// 'WG9525160004/2' dengan 'WG9525160004'. Klien tak perlu menghitungnya.
+  final String pnKey;
+
+  /// Label PENUH gudang ("01.Jakarta") — sama persis dengan `per_gudang`
+  /// Accurate. ⛔ Jangan pakai nama lokasi versi pembeli untuk mencocokkan.
+  final String gudang;
+  final String rak;
+  final String catatan;
+
+  /// URL publik foto kartu stok. Kosong = belum ada foto (hanya yang TERBARU
+  /// disimpan server — tanpa riwayat).
+  final String fotoUrl;
+  final String updatedBy;
+  final String updatedAt;
+
+  const RakInfo({
+    this.partNumber = '',
+    this.pnKey = '',
+    this.gudang = '',
+    this.rak = '',
+    this.catatan = '',
+    this.fotoUrl = '',
+    this.updatedBy = '',
+    this.updatedAt = '',
+  });
+
+  factory RakInfo.fromJson(Map<String, dynamic> j) => RakInfo(
+        partNumber: _s(j['part_number']),
+        pnKey: _s(j['pn_key']),
+        gudang: _s(j['gudang']),
+        rak: _s(j['rak']),
+        catatan: _s(j['catatan']),
+        fotoUrl: _s(j['foto_url']),
+        updatedBy: _s(j['updated_by']),
+        updatedAt: _s(j['updated_at']),
+      );
+
+  /// Baris yang benar-benar kosong (server bisa membalas objek kosong saat
+  /// baris baru saja dihapus) — dipakai UI untuk memutuskan tampil/tidak.
+  bool get kosong => rak.trim().isEmpty && catatan.trim().isEmpty && fotoUrl.isEmpty;
+
+  /// Dipakai setelah unggah/hapus foto: simpan rak & unggah foto adalah DUA
+  /// panggilan (server menolak foto pada baris yang belum punya kode rak),
+  /// jadi hasil panggilan pertama perlu ditambal URL dari panggilan kedua.
+  RakInfo copyWith({String? fotoUrl}) => RakInfo(
+        partNumber: partNumber,
+        pnKey: pnKey,
+        gudang: gudang,
+        rak: rak,
+        catatan: catatan,
+        fotoUrl: fotoUrl ?? this.fotoUrl,
+        updatedBy: updatedBy,
+        updatedAt: updatedAt,
       );
 }

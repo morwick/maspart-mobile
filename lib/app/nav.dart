@@ -18,6 +18,7 @@ enum MasScreen {
   populasi,
   stok,
   opname,
+  rak,
 
   // Pembeli
   toko,
@@ -64,6 +65,7 @@ const Map<MasScreen, (String, String)> kScreenTitles = {
   MasScreen.populasi: ('Populasi Unit', 'Daftar unit & spesifikasi armada'),
   MasScreen.stok: ('Stok', 'Stok seluruh barang dari Accurate'),
   MasScreen.opname: ('Stok Opname', 'Hitung fisik & bandingkan dengan sistem'),
+  MasScreen.rak: ('Rak & Kartu Stok', 'Lokasi rak & foto kartu stok per gudang'),
 
   MasScreen.toko: ('Belanja Part', 'Etalase part siap kirim dari gudang terdekat'),
   MasScreen.keranjang: ('Keranjang', 'Tinjau part, pilih ekspedisi, lalu bayar'),
@@ -141,6 +143,7 @@ const List<NavItem> _navData = [
   NavItem('Harga', Icons.payments_outlined, MasScreen.harga, permKey: 'harga'),
   NavItem('Stok', Icons.grid_view_rounded, MasScreen.stok, permKey: 'stok'),
   NavItem('Stok Opname', Icons.fact_check_outlined, MasScreen.opname),
+  NavItem('Rak & Kartu Stok', Icons.shelves, MasScreen.rak, permKey: 'rak'),
 ];
 
 const List<NavItem> _navAdmin = [
@@ -184,16 +187,27 @@ const Set<MasScreen> _kChildScreens = {
 ///
 /// [allowed] null = izin belum dimuat → tampilkan semua item ber-permKey (aman:
 /// seksi Admin tetap digembok oleh role, bukan oleh izin).
+///
+/// [gudangKelola] = daftar gudang yang boleh DITULIS user (izin Rak & Kartu
+/// Stok); kosong berarti user hanya bisa MELIHAT rak dari Detail Part.
 List<NavSection> buildNavSections({
   required String role,
   required Set<String>? allowed,
   String? branch,
+  List<String> gudangKelola = const [],
 }) {
   final isAdmin = role == 'admin';
   final isBuyer = role == 'pembeli';
 
-  bool show(NavItem it) =>
-      it.permKey == null || allowed == null || allowed.contains(it.permKey);
+  bool show(NavItem it) {
+    // "Rak & Kartu Stok" adalah menu PENGELOLA. Melihat rak terbuka untuk semua
+    // staf lewat Detail Part, tapi halaman ini isinya aksi tulis — tanpa syarat
+    // gudang_kelola, staf biasa membuka layar yang semua tombolnya mati.
+    if (it.screen == MasScreen.rak && !isAdmin && gudangKelola.isEmpty) {
+      return false;
+    }
+    return it.permKey == null || allowed == null || allowed.contains(it.permKey);
+  }
 
   if (isBuyer) {
     return [
@@ -235,6 +249,10 @@ class AppNav extends InheritedWidget {
   /// null = izin belum dimuat → default tampilkan (persis web sebelum ensurePerms).
   final Set<String>? columns;
 
+  /// Gudang yang boleh DITULIS user pada fitur Rak & Kartu Stok — label PENUH
+  /// ("01.Jakarta"). Kosong = user hanya boleh MELIHAT rak.
+  final List<String> gudangKelola;
+
   /// Config server-driven (`/api/app/meta` → `config`). Kosong = pakai default
   /// hardcoded tiap layar. Baca lewat helper di bawah agar fallback konsisten.
   final Map<String, dynamic> config;
@@ -254,6 +272,7 @@ class AppNav extends InheritedWidget {
     required this.username,
     required this.role,
     this.columns,
+    this.gudangKelola = const [],
     this.config = const {},
     required this.accessible,
     required this.go,
@@ -279,6 +298,12 @@ class AppNav extends InheritedWidget {
   /// khusus di layar itu karena pembeli perlu harga untuk belanja.)
   bool get showHarga =>
       isAdmin || columns == null || columns!.contains('col_harga');
+
+  /// Boleh mengubah rak gudang ini? [gudangPenuh] WAJIB label penuh Accurate
+  /// ("01.Jakarta") — nama lokasi versi pembeli tak akan pernah cocok.
+  /// Ini pagar TAMPILAN saja; penegakan sesungguhnya tetap 403 dari server.
+  bool bolehUbahRak(String gudangPenuh) =>
+      isAdmin || gudangKelola.contains(gudangPenuh);
 
   // ── Helper config server-driven (semua dengan fallback aman) ─────────
 
@@ -340,5 +365,6 @@ class AppNav extends InheritedWidget {
       old.username != username ||
       old.role != role ||
       old.columns != columns ||
+      old.gudangKelola != gudangKelola ||
       old.config != config;
 }

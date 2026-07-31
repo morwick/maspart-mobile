@@ -1543,6 +1543,89 @@ class ApiService {
       );
 
   // ────────────────────────────────────────────────────────────────────
+  // Rak & Kartu Stok
+  // ────────────────────────────────────────────────────────────────────
+  //
+  // ⚠️ PN bisa mengandung '/' ('WG9525160004/2'). Karena itu SEMUA endpoint di
+  // sini memakai bentuk alias yang menaruh PN di segmen TERAKHIR path
+  // (`.../gudang/{gudang}/part/{pn}`) — server mendeklarasikannya sebagai
+  // `{pn:path}` sehingga garis miringnya ikut terbaca. ⛔ Jangan pindah ke
+  // bentuk `/api/rak/part/{pn}/{gudang}`: PN ber-suffix akan memecah rute.
+
+  /// Rak satu part di SEMUA gudang → {label gudang penuh: RakInfo}.
+  static Future<Map<String, RakInfo>> rakForPart(String pn) async {
+    final data = _Api._obj(
+      await _Api.get('/api/rak/part-of/${Uri.encodeComponent(pn)}'),
+    );
+    final rak = data['rak'];
+    if (rak is! Map) return const {};
+    return {
+      for (final e in rak.entries)
+        if (e.value is Map)
+          '${e.key}': RakInfo.fromJson((e.value as Map).cast<String, dynamic>()),
+    };
+  }
+
+  /// Lookup TERBALIK: isi satu gudang. [q] mencari di PN, kode rak & catatan —
+  /// staf lebih sering bertanya "rak A-12 isinya apa" daripada mencari PN.
+  static Future<List<RakInfo>> rakGudang(String label, {String q = ''}) async {
+    final data = _Api._obj(await _Api.get(
+      '/api/rak/gudang/${Uri.encodeComponent(label)}',
+      query: {if (q.trim().isNotEmpty) 'q': q.trim(), 'limit': 300},
+    ));
+    return (data['items'] as List?)
+            ?.whereType<Map>()
+            .map((e) => RakInfo.fromJson(e.cast<String, dynamic>()))
+            .toList() ??
+        const [];
+  }
+
+  /// Simpan rak (upsert). 403 = gudang ini bukan wewenang user (ApiException).
+  static Future<RakInfo> saveRak({
+    required String pn,
+    required String gudang,
+    required String rak,
+    String catatan = '',
+  }) async {
+    final data = _Api._obj(await _Api.put(
+      '/api/rak/gudang/${Uri.encodeComponent(gudang)}/part/${Uri.encodeComponent(pn)}',
+      body: {'rak': rak, 'catatan': catatan},
+    ));
+    final row = data['rak'];
+    return row is Map
+        ? RakInfo.fromJson(row.cast<String, dynamic>())
+        : const RakInfo();
+  }
+
+  static Future<void> deleteRak({required String pn, required String gudang}) =>
+      _Api.delete(
+        '/api/rak/gudang/${Uri.encodeComponent(gudang)}/part/${Uri.encodeComponent(pn)}',
+      );
+
+  /// Unggah/ganti foto kartu stok → URL publik foto baru. Server hanya menyimpan
+  /// yang TERBARU: foto lama ikut dihapus dari storage.
+  static Future<String> uploadRakFoto({
+    required String pn,
+    required String gudang,
+    required Uint8List bytes,
+    required String filename,
+  }) async {
+    final data = _Api._obj(await _Api.multipart(
+      '/api/rak/foto/${Uri.encodeComponent(gudang)}/part/${Uri.encodeComponent(pn)}',
+      files: [(field: 'file', bytes: bytes, filename: filename)],
+    ));
+    return '${data['foto_url'] ?? ''}';
+  }
+
+  static Future<void> deleteRakFoto({
+    required String pn,
+    required String gudang,
+  }) =>
+      _Api.delete(
+        '/api/rak/foto/${Uri.encodeComponent(gudang)}/part/${Uri.encodeComponent(pn)}',
+      );
+
+  // ────────────────────────────────────────────────────────────────────
   // Stok opname
   // ────────────────────────────────────────────────────────────────────
 

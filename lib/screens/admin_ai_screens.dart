@@ -845,6 +845,31 @@ class _ChatLogScreenState extends State<ChatLogScreen> {
               const SizedBox(height: 12),
             ],
 
+            // Sebab guard — memisahkan dugaan KARANGAN (pn/angka) dari
+            // SUBSTITUSI (subst) dan guard wajib-tool (dtc/epc/excel). Dulu
+            // semuanya cuma satu angka, sehingga guard paling berharga (dtc)
+            // tak terlihat sama sekali. Paritas dgn web (migrasi 026).
+            if (s.guardSebab.isNotEmpty) ...[
+              MasSectionCard(
+                title: 'Sebab guard menyala',
+                children: [
+                  for (final e in (s.guardSebab.entries.toList()
+                    ..sort((a, b) => b.value.compareTo(a.value))))
+                    MasKeyValue(
+                        label: e.key, value: thousands(e.value), mono: true),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      'pn/angka = dugaan karangan · subst = PN per-model '
+                      'menyalip EPC · dtc/epc/excel = jawaban tanpa tool wajib',
+                      style: TextStyle(fontSize: 11, color: m.ink500, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+
             if (s.outcome.isNotEmpty) ...[
               MasSectionCard(
                 title: 'Outcome jawaban',

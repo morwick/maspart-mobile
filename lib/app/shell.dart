@@ -34,6 +34,7 @@ import '../screens/part_detail_screen.dart';
 import '../screens/pesanan_detail_screen.dart';
 import '../screens/pesanan_screen.dart';
 import '../screens/pilih_lokasi_screen.dart';
+import '../screens/rak_screen.dart';
 import '../screens/search_screen.dart';
 import '../screens/toko_screen.dart';
 
@@ -63,6 +64,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Set<String>? _allowedMenus; // null = izin belum dimuat
   Set<String>? _columns; // izin kolom (col_stok/col_harga); null = belum dimuat
   String? _branch;
+
+  /// Gudang yang boleh DITULIS pada Rak & Kartu Stok (label penuh). Kosong =
+  /// user bukan pengelola gudang → menunya disembunyikan (lihat buildNavSections).
+  List<String> _gudangKelola = const [];
   bool _navigated = false;
 
   // Config server-driven + notifikasi update.
@@ -72,8 +77,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _updateDismissed = false; // user menutup banner
   String _downloadUrl = 'https://maspart.tech/download';
 
-  List<NavSection> get _sections =>
-      buildNavSections(role: _role, allowed: _allowedMenus, branch: _branch);
+  List<NavSection> get _sections => buildNavSections(
+        role: _role,
+        allowed: _allowedMenus,
+        branch: _branch,
+        gudangKelola: _gudangKelola,
+      );
 
   @override
   void initState() {
@@ -103,6 +112,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         _allowedMenus = p.menus.toSet();
         _columns = p.columns.toSet();
         _branch = p.branch?.trim();
+        _gudangKelola = p.gudangKelola;
       });
       _applyHomeAndGuard();
     } catch (_) {
@@ -204,6 +214,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         _allowedMenus = p.menus.toSet();
         _columns = p.columns.toSet();
         _branch = p.branch?.trim();
+        _gudangKelola = p.gudangKelola;
       });
       _applyHomeAndGuard();
     } on ApiException {
@@ -312,6 +323,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         return const StokScreen();
       case MasScreen.opname:
         return const OpnameScreen();
+      case MasScreen.rak:
+        return const RakScreen();
 
       // Pembeli
       case MasScreen.toko:
@@ -419,6 +432,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         username: _username,
         role: _role,
         columns: _columns,
+        gudangKelola: _gudangKelola,
         config: _appConfig,
         accessible: accessibleScreens(_sections),
         go: _go,

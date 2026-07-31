@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../theme/mas_theme.dart';
 import '../widgets/mas_ui.dart';
+import '../widgets/rak_editor.dart';
 import '../utils.dart';
 import '../api_service.dart';
 import '../app/nav.dart';
@@ -48,6 +49,15 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
   bool _loadingSpec = true;
   String? _specErr;
 
+  /// Lokasi rak per gudang (label PENUH Accurate → baris). Dimuat TERPISAH dari
+  /// stok: rak yang gagal terbaca tak boleh ikut menghilangkan angka stoknya.
+  Map<String, RakInfo> _rak = const {};
+  bool _loadingRak = false;
+  bool _rakDiminta = false; // didChangeDependencies bisa dipanggil berkali-kali
+
+  /// Baris gudang yang sedang dibentangkan (hanya satu, biar kartunya pendek).
+  String? _bukaGudang;
+
   String get _pn => '${_part['part_number'] ?? ''}';
   String get _name => '${_part['part_name'] ?? ''}';
 
@@ -59,6 +69,40 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     _loadPhotos();
     _loadStock();
     _loadSpec();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // AppNav baru bisa dibaca di sini, bukan di initState. Rak hanya relevan
+    // untuk staf internal yang boleh melihat stok — pembeli malah ditolak 403
+    // di pintu server, jadi panggilannya jangan dibuang percuma.
+    if (_rakDiminta) return;
+    final nav = AppNav.of(context);
+    if (nav.isBuyer || !nav.showStok) return;
+    _rakDiminta = true;
+    _loadingRak = true; // build menyusul; setState di sini tak diperlukan
+    _loadRak();
+  }
+
+  /// Rak & kartu stok part ini di semua gudang. Ini fitur PELENGKAP: server
+  /// lama / migrasi belum jalan → diamkan saja, kartu stok tetap tampil utuh.
+  Future<void> _loadRak() async {
+    final pn = _pn;
+    if (pn.isEmpty) {
+      _loadingRak = false;
+      return;
+    }
+    try {
+      final r = await ApiService.rakForPart(pn);
+      if (!mounted) return;
+      setState(() {
+        _rak = r;
+        _loadingRak = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingRak = false);
+    }
   }
 
   /// Ambil baris katalog by PN. Dua kegunaan, itulah kenapa fetch ini SELALU
@@ -662,49 +706,74 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     final lokal = _gudangLokal;
     final children = <Widget>[];
 
-    if (acc != null && acc.perGudang.isNotEmpty) {
-      final g = acc.perGudang;
-      for (int i = 0; i < g.length; i++) {
-        final nama = g[i].deskripsi.isNotEmpty ? g[i].deskripsi : g[i].gudang;
-        children.add(MasKeyValue(
-          label: nama,
-          value: thousands(g[i].qty),
-          mono: true,
-          divider: i < g.length - 1,
-        ));
-      }
-    } else if (_stokGagal) {
+    // Angka stok benar-benar terbaca hanya bila Accurate menjawab & tidak gagal.
+    // Membedakan ini penting: gudang tanpa angka boleh ditulis '0' saat datanya
+    // lengkap, tapi harus '—' saat stok live-nya memang tak diketahui.
+    final stokTerbaca = acc != null && !_stokGagal;
+
+    // Baris = gabungan gudang ber-STOK (Accurate) dan gudang ber-RAK. Gudang
+    // yang stoknya 0 tapi punya rak TETAP ditampilkan: justru saat barang habis
+    // orang paling butuh tahu rak lamanya (buat dicek ulang / diisi kembali).
+    final labels = <String>[];
+    final qty = <String, int>{};
+    final display = <String, String>{};
+    for (final g in acc?.perGudang ?? const <GudangQty>[]) {
+      // ⚠️ Kunci rak WAJIB label PENUH Accurate (`gudang`); `deskripsi` hanya
+      // untuk dibaca manusia dan tak pernah cocok dengan baris rak.
+      final key = g.gudang;
+      if (key.isEmpty) continue;
+      if (!labels.contains(key)) labels.add(key);
+      qty[key] = g.qty;
+      display[key] = g.deskripsi.isNotEmpty ? g.deskripsi : g.gudang;
+    }
+    for (final key in _rak.keys) {
+      if (!labels.contains(key)) labels.add(key);
+    }
+
+    if (_stokGagal) {
       children.add(Padding(
         padding: const EdgeInsets.all(14),
         child: _alertBox(m, _stokGagalPesan),
       ));
-      // Data katalog masih berguna sebagai perkiraan — tapi harus jelas labelnya.
-      if (lokal.isNotEmpty) {
-        children.add(_subHeader(m, 'Cadangan dari katalog (export Accurate) — bisa basi'));
-        for (int i = 0; i < lokal.length; i++) {
-          children.add(MasKeyValue(
-            label: lokal[i].$1,
-            value: lokal[i].$2,
-            mono: true,
-            divider: i < lokal.length - 1,
-          ));
-        }
+    }
+
+    if (labels.isNotEmpty) {
+      for (int i = 0; i < labels.length; i++) {
+        final key = labels[i];
+        children.add(_gudangRow(
+          m,
+          label: key,
+          display: display[key] ?? key,
+          qty: qty[key],
+          stokTerbaca: stokTerbaca,
+          divider: i < labels.length - 1,
+        ));
       }
-    } else if (acc != null) {
-      children.add(_infoText(m, 'Accurate tidak memberi rincian per gudang untuk part ini.'));
-    } else {
-      // Accurate hidup & terkonfigurasi, tapi PN-nya tidak ada di sana.
-      children.add(_infoText(m, 'Part ini tidak ditemukan di Accurate.'));
-      if (lokal.isNotEmpty) {
-        children.add(_subHeader(m, 'Stok menurut katalog'));
-        for (int i = 0; i < lokal.length; i++) {
-          children.add(MasKeyValue(
-            label: lokal[i].$1,
-            value: lokal[i].$2,
-            mono: true,
-            divider: i < lokal.length - 1,
-          ));
-        }
+    } else if (!_stokGagal) {
+      children.add(_infoText(
+        m,
+        acc != null
+            ? 'Accurate tidak memberi rincian per gudang untuk part ini.'
+            // Accurate hidup & terkonfigurasi, tapi PN-nya tidak ada di sana.
+            : 'Part ini tidak ditemukan di Accurate.',
+      ));
+    }
+
+    // Data katalog masih berguna sebagai perkiraan — tapi harus jelas labelnya.
+    if ((_stokGagal || acc == null) && lokal.isNotEmpty) {
+      children.add(_subHeader(
+        m,
+        _stokGagal
+            ? 'Cadangan dari katalog (export Accurate) — bisa basi'
+            : 'Stok menurut katalog',
+      ));
+      for (int i = 0; i < lokal.length; i++) {
+        children.add(MasKeyValue(
+          label: lokal[i].$1,
+          value: lokal[i].$2,
+          mono: true,
+          divider: i < lokal.length - 1,
+        ));
       }
     }
 
@@ -715,6 +784,153 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
           : null,
       children: children,
     );
+  }
+
+  /// Satu baris gudang — bentuknya meniru MasKeyValue, tapi BISA DIBUKA (ketuk)
+  /// untuk menampilkan lokasi rak, catatan & foto kartu stok gudang itu.
+  Widget _gudangRow(
+    MasColors m, {
+    required String label,
+    required String display,
+    required int? qty,
+    required bool stokTerbaca,
+    required bool divider,
+  }) {
+    final info = _rak[label];
+    final terbuka = _bukaGudang == label;
+    final nilai = qty != null ? thousands(qty) : (stokTerbaca ? '0' : '—');
+
+    return Container(
+      decoration: BoxDecoration(
+        border: divider ? Border(bottom: BorderSide(color: m.ink100)) : null,
+      ),
+      child: Column(children: [
+        InkWell(
+          // Hanya satu baris terbuka: kartu ini bisa berisi belasan gudang.
+          onTap: () => setState(() => _bukaGudang = terbuka ? null : label),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+            child: Row(children: [
+              Icon(terbuka ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                  size: 16, color: m.ink400),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(display, style: TextStyle(fontSize: 13, color: m.ink600)),
+                    // Kode rak ikut terbaca TANPA membuka barisnya — itu satu
+                    // informasi yang paling dicari staf saat menyisir gudang.
+                    if (info != null && info.rak.trim().isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text('rak ${info.rak}',
+                          style: masMono(size: 11.5, color: m.brand700)),
+                    ],
+                  ],
+                ),
+              ),
+              if (qty == null && stokTerbaca) ...[
+                const MasPill(label: 'stok 0', tone: MasPillTone.warn, height: 20),
+                const SizedBox(width: 8),
+              ],
+              Text(nilai,
+                  style: masMono(size: 13, weight: FontWeight.w600, color: m.ink900)),
+            ]),
+          ),
+        ),
+        if (terbuka) _panelRak(m, label),
+      ]),
+    );
+  }
+
+  /// Isi baris yang dibentangkan: rak · catatan · foto kartu stok · jejak.
+  Widget _panelRak(MasColors m, String label) {
+    final nav = AppNav.of(context);
+    final info = _rak[label];
+    final kosong = info == null || info.kosong;
+    final anak = <Widget>[];
+
+    if (_loadingRak) {
+      anak.add(const MasSkeleton(height: 56));
+    } else if (kosong) {
+      anak.add(Text(
+        'Belum ada lokasi rak tercatat untuk gudang ini.',
+        style: TextStyle(fontSize: 12.5, height: 1.45, color: m.ink500),
+      ));
+    } else {
+      anak.add(Row(children: [
+        Icon(Icons.shelves, size: 15, color: m.brand600),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Text('Rak ${info.rak}',
+              style: masMono(size: 13.5, weight: FontWeight.w600, color: m.ink900)),
+        ),
+      ]));
+      if (info.catatan.trim().isNotEmpty) {
+        anak
+          ..add(const SizedBox(height: 6))
+          ..add(Text(info.catatan,
+              style: TextStyle(fontSize: 12.5, height: 1.45, color: m.ink600)));
+      }
+      if (info.fotoUrl.isNotEmpty) {
+        anak
+          ..add(const SizedBox(height: 10))
+          ..add(RakFotoView(url: info.fotoUrl))
+          ..add(const SizedBox(height: 4))
+          ..add(Text('Foto kartu stok · ketuk untuk perbesar',
+              style: TextStyle(fontSize: 11, color: m.ink400)));
+      }
+      final jejak = jejakRak(info);
+      if (jejak.isNotEmpty) {
+        anak
+          ..add(const SizedBox(height: 8))
+          ..add(Text(jejak, style: TextStyle(fontSize: 11, color: m.ink400)));
+      }
+    }
+
+    // Tombol ubah hanya untuk pengelola gudang INI (admin kebal). Pagar tampilan
+    // saja — server tetap menolak 403 kalau ditembus.
+    if (nav.bolehUbahRak(label)) {
+      anak
+        ..add(const SizedBox(height: 10))
+        ..add(MasButton(
+          label: kosong ? 'Isi rak' : 'Ubah',
+          icon: Icons.edit_outlined,
+          primary: false,
+          height: 38,
+          expand: true,
+          onTap: () => _ubahRak(label),
+        ));
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+      decoration: BoxDecoration(
+        color: m.ink50,
+        border: Border(top: BorderSide(color: m.ink100)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: anak),
+    );
+  }
+
+  Future<void> _ubahRak(String label) async {
+    final hasil = await showRakEditor(
+      context,
+      pn: _pn,
+      gudang: label,
+      awal: _rak[label],
+    );
+    if (hasil == null || !mounted) return;
+    final baru = Map<String, RakInfo>.from(_rak);
+    if (hasil.dihapus || hasil.info == null) {
+      baru.remove(label);
+    } else {
+      baru[label] = hasil.info!;
+    }
+    setState(() => _rak = baru);
+    AppNav.of(context).toast(hasil.dihapus ? 'Data rak dihapus.' : 'Rak disimpan.');
   }
 
   // ── Spesifikasi fisik (SIMS) ────────────────────────────────────────
