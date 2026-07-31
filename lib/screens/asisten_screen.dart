@@ -232,6 +232,12 @@ class _AsistenScreenState extends State<AsistenScreen> {
   bool _statusLoading = true;
   bool _available = true;
   bool _allowed = true;
+
+  /// Tawaran belajar (hanya terisi utk akun yang boleh MENGAJAR): jumlah topik
+  /// yang berulang gagal dijawab + contoh pertamanya. Lingkaran
+  /// gagal→terdeteksi→diajarkan menutup lewat chip di layar kosong.
+  int _gapAjar = 0;
+  List<String> _gapTopik = const [];
   // Mode perbaikan global (Menu Control → Asisten AI). Server yang memutuskan;
   // admin dikecualikan di sana. true → popup + input terkunci.
   bool _perbaikan = false;
@@ -362,6 +368,8 @@ class _AsistenScreenState extends State<AsistenScreen> {
         _available = s.available;
         _allowed = s.allowed;
         _perbaikan = s.perbaikan;
+        _gapAjar = s.gapAjar;
+        _gapTopik = s.gapTopik;
         _statusLoading = false;
       });
       // Popup mode perbaikan — sekali saat layar dibuka; input tetap terkunci
@@ -933,6 +941,63 @@ class _AsistenScreenState extends State<AsistenScreen> {
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12.5, color: m.ink500, height: 1.5)),
         const SizedBox(height: 20),
+        // Tawaran belajar — hanya muncul utk yang boleh MENGAJAR & memang ada
+        // topik yang berulang gagal (paritas web). Ketuk = kirim pertanyaan
+        // pembuka; model memanggil topik_gagal lalu memandu alur ajar.
+        if (_gapAjar > 0)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Material(
+              color: m.warn50,
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                onTap: () => _send(
+                    'Tampilkan topik yang berulang gagal kamu jawab, lalu bantu '
+                    'saya mengajarkannya satu per satu.'),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: m.warn600.withValues(alpha: .35)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('💡', style: TextStyle(fontSize: 15)),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Text.rich(
+                          TextSpan(children: [
+                            TextSpan(
+                                text: '$_gapAjar topik',
+                                style:
+                                    const TextStyle(fontWeight: FontWeight.w700)),
+                            const TextSpan(
+                                text: ' berulang gagal saya jawab'),
+                            if (_gapTopik.isNotEmpty)
+                              TextSpan(
+                                  text: ' — mis. "${_gapTopik.first}"',
+                                  style: const TextStyle(
+                                      fontStyle: FontStyle.italic)),
+                            TextSpan(
+                                text: '. Ajari saya?',
+                                style: TextStyle(
+                                    color: m.warn600,
+                                    fontWeight: FontWeight.w600)),
+                          ]),
+                          style: TextStyle(
+                              fontSize: 12.5, height: 1.5, color: m.ink800),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
         for (final s in suggestions)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),

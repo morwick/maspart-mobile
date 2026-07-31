@@ -1674,13 +1674,22 @@ class ApiService {
   /// Asisten AI tidak dimatikan admin untuk akun ini (Menu Control);
   /// `perbaikan` = mode perbaikan global menyala (admin dikecualikan server)
   /// → layar asisten menampilkan popup "sedang perbaikan".
-  static Future<({bool available, bool allowed, bool perbaikan})>
+  ///
+  /// [gapAjar]/[gapTopik] = tawaran belajar (hanya terisi utk akun yang boleh
+  /// MENGAJAR): jumlah & contoh topik yang berulang gagal dijawab asisten.
+  static Future<
+      ({bool available, bool allowed, bool perbaikan, int gapAjar, List<String> gapTopik})>
       aiStatusFull() async {
     final data = _Api._obj(await _Api.get('/api/ai/status'));
+    final gap = data['gap_ajar'];
     return (
       available: data['available'] == true,
       allowed: data['allowed'] != false,
       perbaikan: data['perbaikan'] == true,
+      gapAjar: gap is Map ? (gap['jumlah'] as num?)?.toInt() ?? 0 : 0,
+      gapTopik: gap is Map
+          ? [for (final t in (gap['topik'] as List? ?? const [])) '$t']
+          : const <String>[],
     );
   }
 
