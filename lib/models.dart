@@ -2841,6 +2841,10 @@ class PengetahuanDok {
   final String error;
   final String oleh;
 
+  /// Dari mana entri ini lahir. "chat" = diajarkan lewat chat (tool
+  /// `ajarkan_pengetahuan`); '' = jalur lama (diketik/diunggah lewat menu).
+  final String asal;
+
   /// Diindeks sebelum pembedahan dokumen ditingkatkan — perlu indeks ulang
   /// agar gambar, breadcrumb bab, dan nama kolom tabel ikut terambil.
   final bool perluReindex;
@@ -2860,6 +2864,7 @@ class PengetahuanDok {
     this.pengayaan = '',
     this.error = '',
     this.oleh = '',
+    this.asal = '',
     this.perluReindex = false,
   });
 
@@ -2883,6 +2888,7 @@ class PengetahuanDok {
         pengayaan: _s(j['pengayaan']),
         error: _s(j['error']),
         oleh: _s(j['oleh']),
+        asal: _s(j['asal']),
         perluReindex: _b(j['perlu_reindex']),
       );
 
@@ -2903,6 +2909,9 @@ class PengetahuanDok {
         pengayaan: s.pengayaan,
         error: s.error,
         oleh: oleh,
+        // `asal` melekat pada entri, bukan pada status indexing — ikut disalin
+        // dari `this` supaya label "dari chat" tidak hilang saat polling.
+        asal: asal,
         perluReindex: perluReindex,
       );
 

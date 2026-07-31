@@ -59,6 +59,10 @@ class _PengetahuanScreenState extends State<PengetahuanScreen> {
   /// Id dokumen yang aksinya sedang berjalan ('semua' = reindex massal).
   String _busyId = '';
 
+  /// Saring daftar ke entri yang diajarkan lewat chat saja — admin biasanya
+  /// ingin meninjau yang baru diajari asisten tanpa menyisir seluruh daftar.
+  bool _dariChat = false;
+
   // ── Uji pencarian ──
   final _uji = TextEditingController();
   List<PengetahuanChunk>? _ujiHasil;
@@ -401,6 +405,12 @@ class _PengetahuanScreenState extends State<PengetahuanScreen> {
   Widget build(BuildContext context) {
     final m = context.mas;
     final perluReindex = _docs.where((d) => d.perluReindex).length;
+    final jumlahChat = _docs.where((d) => d.asal == 'chat').length;
+    // Saringan hanya berlaku bila memang ada entri chat — kalau entri terakhir
+    // terhapus, daftar kembali penuh dan tidak menyisakan layar kosong.
+    final saringChat = _dariChat && jumlahChat > 0;
+    final tampil =
+        saringChat ? _docs.where((d) => d.asal == 'chat').toList() : _docs;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
@@ -427,13 +437,31 @@ class _PengetahuanScreenState extends State<PengetahuanScreen> {
 
         Row(children: [
           Expanded(
-            child: Text('Pengetahuan tersimpan (${_docs.length})',
+            // Angka di judul mengikuti apa yang benar-benar tampil; saat
+            // tersaring sebutkan totalnya agar tidak terbaca seperti kehilangan
+            // data.
+            child: Text(
+                'Pengetahuan tersimpan (${tampil.length}'
+                '${saringChat ? " dari ${_docs.length}" : ""})',
                 style: TextStyle(
                     fontSize: 14, fontWeight: FontWeight.w700, color: m.ink900)),
           ),
           Text('$_jumlahChunk bagian',
               style: TextStyle(fontSize: 11.5, color: m.ink500)),
         ]),
+        if (jumlahChat > 0) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: GestureDetector(
+              onTap: () => setState(() => _dariChat = !_dariChat),
+              child: MasPill(
+                label: '${saringChat ? "✕ " : ""}dari chat ($jumlahChat)',
+                tone: saringChat ? MasPillTone.brand : MasPillTone.neutral,
+              ),
+            ),
+          ),
+        ],
         if (perluReindex > 0) ...[
           const SizedBox(height: 8),
           MasButton(
@@ -456,7 +484,7 @@ class _PengetahuanScreenState extends State<PengetahuanScreen> {
                 'lampirkan berkas.',
           )
         else
-          for (final d in _docs) ...[
+          for (final d in tampil) ...[
             _kartuDokumen(m, d),
             const SizedBox(height: 10),
           ],
@@ -647,9 +675,14 @@ class _PengetahuanScreenState extends State<PengetahuanScreen> {
   Widget _kartuDokumen(MasColors m, PengetahuanDok d) {
     final terbuka = _dibuka == d.id;
     final sibuk = _busyId == d.id;
-    final sumber = d.berkas.isEmpty
-        ? 'diketik admin'
-        : d.berkas.map((b) => b.nama).join(', ');
+    // Entri hasil "ajarkan lewat chat" tidak punya berkas dan bukan hasil
+    // ketikan di form ini — tanpa penanda ia tampak seperti entri manual,
+    // padahal asalnya beda (dan siapa yang mengajari itu penting saat audit).
+    final sumber = d.asal == 'chat'
+        ? '💬 dari chat${d.oleh.isEmpty ? "" : " · ${d.oleh}"}'
+        : d.berkas.isEmpty
+            ? 'diketik admin'
+            : d.berkas.map((b) => b.nama).join(', ');
 
     return Opacity(
       opacity: d.aktif ? 1 : 0.6,
