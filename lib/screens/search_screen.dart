@@ -310,12 +310,11 @@ class _SearchPartScreenState extends State<SearchPartScreen> {
         Expanded(
           child: Padding(
             padding: const EdgeInsets.only(top: 6),
+            // Saat hasil NOL, keterangannya pindah ke MasEmpty di bawah —
+            // dulu ia jadi teks 12px abu-abu yang mudah terlewat, lalu di
+            // bawahnya cuma ada ruang kosong (paritas dgn web).
             child: Text(
-              shown > 0
-                  ? 'Menampilkan $from–$to · ketuk baris untuk detail'
-                  : (_refine.trim().isNotEmpty
-                      ? 'Tidak ada hasil cocok dengan saringan "${_refine.trim()}"'
-                      : 'Tidak ada part yang cocok'),
+              shown > 0 ? 'Menampilkan $from–$to · ketuk baris untuk detail' : '',
               style: TextStyle(fontSize: 12, color: m.ink500),
             ),
           ),
@@ -329,16 +328,42 @@ class _SearchPartScreenState extends State<SearchPartScreen> {
         ),
       ],
 
-      // "Mungkin maksud Anda" saat 0 hasil (tanpa saring).
-      if (shown == 0 && _refine.trim().isEmpty && _saran.isNotEmpty) ...[
-        const SizedBox(height: 10),
-        Text('Mungkin maksud Anda:',
-            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: m.ink700)),
-        const SizedBox(height: 6),
-        Wrap(spacing: 6, runSpacing: 6, children: [
-          for (final s in _saran) _saranChip(m, s),
-        ]),
-      ],
+      // Hasil NOL → empty state penuh dengan jalan keluar, bukan ruang kosong.
+      if (shown == 0)
+        MasEmpty(
+          icon: Icons.search_off_rounded,
+          title: _refine.trim().isNotEmpty
+              ? 'Saringan tidak menyisakan hasil'
+              : 'Tidak ada part yang cocok',
+          subtitle: _refine.trim().isNotEmpty
+              ? 'Tidak ada baris yang mengandung "${_refine.trim()}" di antara ${thousands(_all.length)} hasil pencarian.'
+              : 'Coba kata kunci lain, atau beralih ke mode ${_byName ? "Part Number" : "Nama Part"}.',
+          action: _refine.trim().isNotEmpty
+              ? MasButton(
+                  label: 'Hapus saringan',
+                  primary: false,
+                  height: 36,
+                  onTap: () => setState(() {
+                    _refine = '';
+                    _refineCtrl.clear();
+                    _page = 1;
+                  }),
+                )
+              : (_saran.isNotEmpty
+                  ? Column(children: [
+                      Text('Mungkin maksud Anda:',
+                          style: TextStyle(
+                              fontSize: 12.5, fontWeight: FontWeight.w600, color: m.ink700)),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        alignment: WrapAlignment.center,
+                        children: [for (final s in _saran) _saranChip(m, s)],
+                      ),
+                    ])
+                  : null),
+        ),
 
       // Kontrol urut + per-halaman (hanya bila ada hasil).
       if (shown > 0) ...[

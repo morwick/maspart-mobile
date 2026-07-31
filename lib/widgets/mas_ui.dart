@@ -495,7 +495,18 @@ class MasEmpty extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
-  const MasEmpty({super.key, required this.icon, required this.title, required this.subtitle});
+
+  /// Jalan keluar opsional (tombol / chip saran). Layar kosong tanpa aksi
+  /// membuat user mengira aplikasinya rusak, bukan mengira pencariannya meleset.
+  final Widget? action;
+
+  const MasEmpty({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.action,
+  });
   @override
   Widget build(BuildContext context) {
     final m = context.mas;
@@ -513,6 +524,10 @@ class MasEmpty extends StatelessWidget {
         Text(subtitle,
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12.5, color: m.ink500, height: 1.5)),
+        if (action != null) ...[
+          const SizedBox(height: 14),
+          action!,
+        ],
       ]),
     );
   }

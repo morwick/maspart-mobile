@@ -213,6 +213,13 @@ class _AsistenScreenState extends State<AsistenScreen> {
   /// Menempel di bawah atau tidak (lihat _scrollToBottom).
   bool _ikutiBawah = true;
 
+  /// Cerminan `_ikutiBawah` untuk RENDER: begitu user menggulir ke atas ia
+  /// kehilangan jalan kembali, dan selama 14-254 detik menunggu ia juga tak
+  /// tahu jawabannya sudah datang. Dua penanda, bukan satu, supaya tombolnya
+  /// bisa berubah dari "Ke bawah" jadi "Jawaban baru" (paritas dgn web).
+  bool _jauhDariBawah = false;
+  bool _adaBaru = false;
+
   /// Client HTTP giliran yang sedang berjalan. Menutupnya = MEMBATALKAN —
   /// padanan tombol Stop di web. Giliran bisa berjalan sampai 4 menit, dan
   /// sebelumnya satu-satunya jalan keluar adalah menutup aplikasi.
@@ -437,13 +444,36 @@ class _AsistenScreenState extends State<AsistenScreen> {
   }
 
   void _scrollToBottom({bool paksa = false}) {
-    if (!paksa && !_ikutiBawah) return;
+    if (!paksa && !_ikutiBawah) {
+      // Tertinggal di atas: tandai ada isi baru supaya tombol lompat berubah
+      // jadi ajakan hijau. Lewat post-frame karena pemanggilnya kadang sudah
+      // berada di dalam setState — setState bersarang akan melempar.
+      if (!_adaBaru) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && !_adaBaru) setState(() => _adaBaru = true);
+        });
+      }
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
         _scroll.animateTo(_scroll.position.maxScrollExtent,
             duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
       }
     });
+  }
+
+  /// Dipakai tombol lompat: kembali ke bawah DAN menyambung lagi mode ikut.
+  void _turunKeBawah() {
+    setState(() {
+      _ikutiBawah = true;
+      _jauhDariBawah = false;
+      _adaBaru = false;
+    });
+    if (_scroll.hasClients) {
+      _scroll.animateTo(_scroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+    }
   }
 
   List<Map<String, String>> _payload() =>
@@ -746,16 +776,34 @@ class _AsistenScreenState extends State<AsistenScreen> {
             ? _empty(m)
             : NotificationListener<ScrollNotification>(
                 onNotification: (n) {
-                  if (n is ScrollUpdateNotification) _ikutiBawah = _dekatBawah;
+                  if (n is ScrollUpdateNotification) {
+                    final dekat = _dekatBawah;
+                    _ikutiBawah = dekat;
+                    // setState hanya saat nilainya BERUBAH — notifikasi scroll
+                    // datang tiap frame dan rebuild tiap frame akan tersendat.
+                    if (!dekat != _jauhDariBawah || (dekat && _adaBaru)) {
+                      setState(() {
+                        _jauhDariBawah = !dekat;
+                        if (dekat) _adaBaru = false;
+                      });
+                    }
+                  }
                   return false;
                 },
-                child: ListView.builder(
-                  controller: _scroll,
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _msgs.length + (_busy ? 1 : 0),
-                  itemBuilder: (ctx, i) =>
-                      i >= _msgs.length ? _typing(m) : _bubble(m, _msgs[i], i),
-                ),
+                child: Stack(children: [
+                  ListView.builder(
+                    controller: _scroll,
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _msgs.length + (_busy ? 1 : 0),
+                    itemBuilder: (ctx, i) =>
+                        i >= _msgs.length ? _typing(m) : _bubble(m, _msgs[i], i),
+                  ),
+                  if (_jauhDariBawah)
+                    Positioned(
+                      left: 0, right: 0, bottom: 12,
+                      child: Center(child: _tombolLompat(m)),
+                    ),
+                ]),
               ),
       ),
       if (!_statusLoading && _perbaikan)
@@ -774,6 +822,43 @@ class _AsistenScreenState extends State<AsistenScreen> {
         ),
       _inputBar(m),
     ]);
+  }
+
+  /// Jalan kembali ke bawah. Muncul hanya saat user memang tertinggal di atas;
+  /// berubah hijau bila ada jawaban yang belum ia lihat (paritas dgn web).
+  Widget _tombolLompat(MasColors m) {
+    final baru = _adaBaru;
+    return Material(
+      color: baru ? m.brand600 : m.paper,
+      borderRadius: BorderRadius.circular(999),
+      elevation: 3,
+      shadowColor: Colors.black.withValues(alpha: 0.25),
+      child: InkWell(
+        onTap: _turunKeBawah,
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            border: baru ? null : Border.all(color: m.ink200),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.arrow_downward_rounded,
+                size: 15, color: baru ? Colors.white : m.ink700),
+            const SizedBox(width: 6),
+            Text(
+              baru ? 'Jawaban baru' : 'Ke bawah',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: baru ? Colors.white : m.ink700,
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
   }
 
   Widget _statusBar(MasColors m) {
