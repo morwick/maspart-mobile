@@ -1,15 +1,17 @@
 // lib/screens/admin_ai_screens.dart
-// Empat layar admin untuk MERAWAT ASISTEN AI, semuanya bersumber dari API nyata:
+// Lima layar admin untuk MERAWAT ASISTEN AI, semuanya bersumber dari API nyata:
 //
 //   FeedbackScreen  — 👍/👎 user atas jawaban asisten (antrean perbaikan).
 //   ChatLogScreen   — observabilitas: latensi, guard, tool gagal.
 //   MissesScreen    — query yang 0 hasil (umpan untuk Kamus Sinonim).
 //   SinonimScreen   — kamus istilah lapangan → kata kunci katalog + usulan LLM.
+//   MaksudScreen    — rute frasa khas bengkel → TOOL yang dipakai asisten.
 //
-// Keempatnya membentuk satu lingkaran perbaikan: user memberi 👎 / mencari
+// Semuanya membentuk satu lingkaran perbaikan: user memberi 👎 / mencari
 // istilah yang nihil → admin melihatnya di Umpan Balik & Pencarian Nihil →
 // dipetakan jadi sinonim → asisten langsung lebih pintar (kamus dibaca ulang
-// per-mtime, tanpa restart server).
+// per-mtime, tanpa restart server). Rute Maksud menutup sisi yang tak bisa
+// disentuh kamus: bukan KATA yang dicari, melainkan ALAT yang dipakai.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -1878,4 +1880,462 @@ class _SinonimScreenState extends State<SinonimScreen> {
       ),
     );
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 5. Rute Maksud (frasa user → TOOL)
+// ══════════════════════════════════════════════════════════════════════
+
+/// Saudara Kamus Sinonim, tapi mengendalikan PEMILIHAN ALAT.
+///
+/// Kamus sinonim menjawab "kata apa yang dicari di katalog"; rute menjawab
+/// "alat mana yang dipakai". Sebelum store ini ada (2026-08-01), aturan seperti
+/// "kalau user minta gambar teknis, itu maksudnya exploded view" hanya bisa
+/// ditulis di berkas prompt server — artinya butuh deploy tiap kali.
+class MaksudScreen extends StatefulWidget {
+  const MaksudScreen({super.key});
+
+  @override
+  State<MaksudScreen> createState() => _MaksudScreenState();
+}
+
+class _MaksudScreenState extends State<MaksudScreen> {
+  List<MaksudEntry> _entries = [];
+
+  /// Nama tool yang SAH — datang dari server (sumber kebenaran sama dengan yang
+  /// ditawarkan ke model), supaya rute tak pernah menunjuk tool yang tak ada.
+  List<String> _tools = [];
+  int _maks = 60;
+
+  bool _loading = true;
+  bool _saving = false;
+  String? _error;
+  String? _notice;
+
+  final _filterCtl = TextEditingController();
+  final _frasaCtl = TextEditingController();
+  final _catatanCtl = TextEditingController();
+  String _tool = '';
+
+  /// null = mode tambah; selain itu = indeks rute yang sedang diedit.
+  int? _editIdx;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _filterCtl.dispose();
+    _frasaCtl.dispose();
+    _catatanCtl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final r = await ApiService.maksud();
+      if (!mounted) return;
+      setState(() {
+        _entries = r.entries;
+        _tools = r.tools;
+        _maks = r.maks;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
+  }
+
+  void _resetForm() {
+    _editIdx = null;
+    _frasaCtl.clear();
+    _catatanCtl.clear();
+    _tool = '';
+  }
+
+  void _startEdit(int idx) {
+    final e = _entries[idx];
+    setState(() {
+      _editIdx = idx;
+      _frasaCtl.text = e.frasa.join(', ');
+      _catatanCtl.text = e.catatan;
+      _tool = e.tool;
+      _notice = null;
+    });
+  }
+
+  /// Pemilih alat: daftarnya panjang, jadi ada kolom saring di atasnya.
+  Future<void> _pilihTool() async {
+    final cariCtl = TextEditingController();
+    final pilih = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.mas.paper,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(MasRadii.sheet)),
+      ),
+      builder: (ctx) {
+        final m = ctx.mas;
+        return StatefulBuilder(
+          builder: (ctx, setSheet) {
+            final q = cariCtl.text.trim().toLowerCase();
+            final view = q.isEmpty
+                ? _tools
+                : _tools.where((t) => t.toLowerCase().contains(q)).toList();
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.only(
+                    bottom: MediaQuery.of(ctx).viewInsets.bottom),
+                child: SizedBox(
+                  height: MediaQuery.of(ctx).size.height * 0.7,
+                  child: Column(children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                      child: Text('Pilih alat tujuan',
+                          style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: m.ink900)),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: MasInput(
+                        controller: cariCtl,
+                        hint: 'Cari nama alat…',
+                        prefix: Icon(Icons.search_rounded,
+                            size: 17, color: m.ink400),
+                        onChanged: (_) => setSheet(() {}),
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: view.length,
+                        itemBuilder: (ctx, i) => ListTile(
+                          dense: true,
+                          title: Text(view[i],
+                              style: TextStyle(fontSize: 13, color: m.ink900)),
+                          onTap: () => Navigator.pop(ctx, view[i]),
+                        ),
+                      ),
+                    ),
+                  ]),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    cariCtl.dispose();
+    if (pilih != null && mounted) setState(() => _tool = pilih);
+  }
+
+  Future<void> _save() async {
+    final entry = MaksudEntry(
+      frasa: _splitTerms(_frasaCtl.text),
+      tool: _tool.trim(),
+      catatan: _catatanCtl.text.trim(),
+    );
+    if (entry.frasa.isEmpty || entry.tool.isEmpty) {
+      setState(
+          () => _error = 'Isi minimal satu frasa dan pilih alat tujuannya.');
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+      _error = null;
+      _notice = null;
+    });
+    try {
+      if (_editIdx == null) {
+        await ApiService.addMaksud(entry);
+      } else {
+        await ApiService.updateMaksud(_editIdx!, entry);
+      }
+      if (!mounted) return;
+      setState(() {
+        _notice = 'Tersimpan: "${entry.frasa.first}" → ${entry.tool}. '
+            'Asisten AI langsung mematuhinya — tanpa restart.';
+        _saving = false;
+        _resetForm();
+      });
+      await _load();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _saving = false;
+      });
+    }
+  }
+
+  Future<void> _delete(int idx) async {
+    final e = _entries[idx];
+    final ok = await _confirm(
+      context,
+      'Hapus rute maksud',
+      'Hapus "${e.frasa.join(', ')}" → ${e.tool}?',
+    );
+    if (!ok || !mounted) return;
+
+    setState(() => _error = null);
+    try {
+      await ApiService.deleteMaksud(idx);
+      if (!mounted) return;
+      if (_editIdx == idx) setState(_resetForm);
+      await _load();
+    } on ApiException catch (err) {
+      if (!mounted) return;
+      setState(() => _error = err.message);
+    }
+  }
+
+  /// Rute yang lolos saringan, tetap membawa indeks aslinya — API CRUD memakai
+  /// indeks di store utuh, bukan indeks hasil saring.
+  List<({MaksudEntry entry, int idx})> get _view {
+    final q = _filterCtl.text.trim().toLowerCase();
+    final all = [
+      for (int i = 0; i < _entries.length; i++) (entry: _entries[i], idx: i),
+    ];
+    if (q.isEmpty) return all;
+    return all.where((e) {
+      final x = e.entry;
+      return x.tool.toLowerCase().contains(q) ||
+          x.catatan.toLowerCase().contains(q) ||
+          x.frasa.any((f) => f.toLowerCase().contains(q));
+    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final m = context.mas;
+    final view = _view;
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        children: [
+          Text(
+            'Kalau di tempat Anda sebuah istilah punya arti khusus, daftarkan di '
+            'sini supaya Asisten AI langsung memakai ALAT yang benar. Contoh: '
+            '“gambar teknis” → gambar_exploded. Bedanya dengan Kamus Sinonim: '
+            'kamus mengubah kata yang DICARI, rute mengubah alat yang DIPAKAI.',
+            style: TextStyle(fontSize: 12.5, color: m.ink500, height: 1.5),
+          ),
+          const SizedBox(height: 10),
+          const _Alert(
+            'Hindari kata yang terlalu umum ("gambar", "part", "cek") — rute '
+            'seperti itu ikut campur di percakapan lain dan akan ditolak server. '
+            'Rute adalah arahan KUAT, bukan paksaan: asisten tetap boleh memilih '
+            'lain bila kalimat user jelas berkata lain.',
+            tone: MasPillTone.warn,
+          ),
+          const SizedBox(height: 10),
+          const _Alert(
+            'Rute juga bisa dibuat langsung dari chat: "ingat ya, kalau saya '
+            'minta gambar teknis itu maksudnya exploded view".',
+            tone: MasPillTone.info,
+          ),
+          const SizedBox(height: 14),
+          if (_error != null) ...[
+            _Alert(_error!),
+            const SizedBox(height: 12),
+          ],
+          if (_notice != null) ...[
+            _Alert(_notice!, tone: MasPillTone.brand),
+            const SizedBox(height: 12),
+          ],
+          if (_loading)
+            Column(children: [
+              for (int i = 0; i < 3; i++)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 10),
+                  child: MasSkeleton(height: 90),
+                ),
+            ])
+          else ...[
+            MasSectionCard(
+              title: _editIdx == null
+                  ? '➕ Tambah rute'
+                  : '✏️ Edit rute #${_editIdx! + 1}',
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _label(m, 'Frasa yang dipakai user — pisah koma'),
+                      const SizedBox(height: 6),
+                      MasInput(
+                        controller: _frasaCtl,
+                        hint: 'gambar teknis, gambar urai',
+                        maxLines: 2,
+                      ),
+                      const SizedBox(height: 12),
+                      _label(m, 'Alat tujuan'),
+                      const SizedBox(height: 6),
+                      GestureDetector(
+                        onTap: _tools.isEmpty ? null : _pilihTool,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 13),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: m.ink200),
+                            borderRadius:
+                                BorderRadius.circular(MasRadii.input),
+                          ),
+                          child: Row(children: [
+                            Expanded(
+                              child: Text(
+                                _tool.isEmpty ? '— pilih alat —' : _tool,
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    color: _tool.isEmpty ? m.ink400 : m.ink900),
+                              ),
+                            ),
+                            Icon(Icons.expand_more_rounded,
+                                size: 18, color: m.ink500),
+                          ]),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      _label(m, 'Catatan pembeda (opsional, maks 160 huruf)'),
+                      const SizedBox(height: 6),
+                      MasInput(
+                        controller: _catatanCtl,
+                        hint: 'maksudnya exploded view, bukan foto part',
+                      ),
+                      const SizedBox(height: 14),
+                      Row(children: [
+                        if (_editIdx != null) ...[
+                          Expanded(
+                            child: MasButton(
+                              label: 'Batal edit',
+                              primary: false,
+                              expand: true,
+                              onTap:
+                                  _saving ? null : () => setState(_resetForm),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        Expanded(
+                          child: MasButton(
+                            label: _editIdx == null
+                                ? 'Simpan rute'
+                                : 'Simpan perubahan',
+                            expand: true,
+                            loading: _saving,
+                            onTap: _saving ? null : _save,
+                          ),
+                        ),
+                      ]),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            MasInput(
+              controller: _filterCtl,
+              hint: 'Saring: frasa, alat, atau catatan…',
+              prefix: Icon(Icons.search_rounded, size: 17, color: m.ink400),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 6),
+            Text('${view.length} dari ${_entries.length} rute (plafon $_maks)',
+                style: TextStyle(fontSize: 12, color: m.ink500)),
+            const SizedBox(height: 10),
+            if (view.isEmpty)
+              MasEmpty(
+                icon: Icons.alt_route_rounded,
+                title: _entries.isEmpty
+                    ? 'Belum ada rute'
+                    : 'Tidak ada yang cocok',
+                subtitle: _entries.isEmpty
+                    ? 'Tambah rute pertama lewat formulir di atas.'
+                    : 'Tidak ada rute yang cocok dengan saringan.',
+              )
+            else
+              for (final v in view)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _ruteCard(m, v.entry, v.idx),
+                ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _label(MasColors m, String text) => Text(text,
+      style: TextStyle(
+          fontSize: 12.5, fontWeight: FontWeight.w600, color: m.ink700));
+
+  Widget _ruteCard(MasColors m, MaksudEntry e, int idx) => MasCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Expanded(
+                child: Wrap(
+                  spacing: 5,
+                  runSpacing: 5,
+                  children: [
+                    for (final f in e.frasa) _Chip(f, tone: MasPillTone.brand),
+                  ],
+                ),
+              ),
+              GestureDetector(
+                onTap: () => _startEdit(idx),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Icon(Icons.edit_outlined, size: 17, color: m.ink600),
+                ),
+              ),
+              const SizedBox(width: 4),
+              GestureDetector(
+                onTap: () => _delete(idx),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Icon(Icons.delete_outline_rounded,
+                      size: 18, color: m.danger600),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 8),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.arrow_forward_rounded, size: 14, color: m.ink400),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(e.tool,
+                    style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: m.ink900)),
+              ),
+            ]),
+            if (e.catatan.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(e.catatan,
+                  style:
+                      TextStyle(fontSize: 12, color: m.ink600, height: 1.45)),
+            ],
+          ],
+        ),
+      );
 }

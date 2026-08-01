@@ -1487,6 +1487,35 @@ class ApiService {
   static Future<void> deleteSinonim(int index) =>
       _Api.delete('/api/admin/sinonim/$index');
 
+  /// Rute Maksud + daftar nama tool yang SAH (server yang menentukan, supaya
+  /// rute tak pernah menunjuk tool yang tidak ada).
+  static Future<({List<MaksudEntry> entries, List<String> tools, int maks})>
+      maksud() async {
+    final data = _Api._obj(await _Api.get('/api/admin/maksud'));
+    return (
+      entries: (data['entries'] as List?)
+              ?.whereType<Map>()
+              .map((e) => MaksudEntry.fromJson(e.cast<String, dynamic>()))
+              .toList() ??
+          const <MaksudEntry>[],
+      tools: (data['tools'] as List?)
+              ?.map((t) => '$t')
+              .where((t) => t.isNotEmpty)
+              .toList() ??
+          const <String>[],
+      maks: (data['maks'] as num?)?.toInt() ?? 60,
+    );
+  }
+
+  static Future<void> addMaksud(MaksudEntry entry) =>
+      _Api.post('/api/admin/maksud', body: entry.toJson());
+
+  static Future<void> updateMaksud(int index, MaksudEntry entry) =>
+      _Api.put('/api/admin/maksud/$index', body: entry.toJson());
+
+  static Future<void> deleteMaksud(int index) =>
+      _Api.delete('/api/admin/maksud/$index');
+
   static Future<List<SinonimUsulan>> sinonimUsulan() async {
     final data = _Api._obj(await _Api.get('/api/admin/sinonim/usulan'));
     return (data['usulan'] as List?)

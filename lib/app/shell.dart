@@ -365,6 +365,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         return const MissesScreen();
       case MasScreen.sinonim:
         return SinonimScreen(args: args);
+      case MasScreen.maksud:
+        return const MaksudScreen();
       case MasScreen.pengetahuan:
         return const PengetahuanScreen();
       case MasScreen.menu:

@@ -3068,6 +3068,39 @@ class SinonimEntry {
       };
 }
 
+/// Rute Maksud: frasa khas bengkel → TOOL yang dipakai asisten.
+///
+/// Beda dari [SinonimEntry]: kamus sinonim mengubah KATA yang dicari (ekspansi
+/// query), rute mengubah ALAT yang dipakai. Sebelum store ini ada, aturan
+/// semacam "gambar teknis = exploded view" cuma bisa ditulis di berkas prompt
+/// server — artinya butuh deploy.
+class MaksudEntry {
+  final List<String> frasa;
+  final String tool;
+  final String catatan;
+  final String oleh;
+
+  const MaksudEntry({
+    this.frasa = const [],
+    required this.tool,
+    this.catatan = '',
+    this.oleh = '',
+  });
+
+  factory MaksudEntry.fromJson(Map<String, dynamic> j) => MaksudEntry(
+        frasa: _strList(j['frasa']),
+        tool: _s(j['tool']),
+        catatan: _s(j['catatan']),
+        oleh: _s(j['oleh']),
+      );
+
+  Map<String, dynamic> toJson() => {
+        'frasa': frasa,
+        'tool': tool,
+        'catatan': catatan,
+      };
+}
+
 class SinonimUsulan {
   final String id;
   final String query;

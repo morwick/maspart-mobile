@@ -42,6 +42,7 @@ enum MasScreen {
   chatlog,
   misses,
   sinonim,
+  maksud,
   pengetahuan,
   menu,
   monitoring,
@@ -86,6 +87,7 @@ const Map<MasScreen, (String, String)> kScreenTitles = {
   MasScreen.chatlog: ('Observabilitas AI', 'Latensi, guard & tool asisten'),
   MasScreen.misses: ('Pencarian Nihil', 'Query 0 hasil — kandidat sinonim'),
   MasScreen.sinonim: ('Kamus Sinonim', 'Istilah lapangan → kata kunci katalog'),
+  MasScreen.maksud: ('Rute Maksud', 'Istilah khas bengkel → alat yang dipakai Asisten AI'),
   MasScreen.pengetahuan:
       ('Pengetahuan AI', 'Isi yang diindeks & dipakai Asisten AI saat menjawab'),
   MasScreen.menu: ('Menu Control', 'Atur izin menu, kolom & sub-tab per user'),
@@ -153,6 +155,7 @@ const List<NavItem> _navAdmin = [
   NavItem('Observabilitas AI', Icons.monitor_heart_outlined, MasScreen.chatlog),
   NavItem('Pencarian Nihil', Icons.search_off_rounded, MasScreen.misses),
   NavItem('Kamus Sinonim', Icons.menu_book_outlined, MasScreen.sinonim),
+  NavItem('Rute Maksud', Icons.alt_route_rounded, MasScreen.maksud),
   NavItem('Pengetahuan AI', Icons.auto_stories_outlined, MasScreen.pengetahuan),
   NavItem('Menu Control', Icons.shield_outlined, MasScreen.menu),
   NavItem('Monitoring User', Icons.pie_chart_outline_rounded, MasScreen.monitoring),
