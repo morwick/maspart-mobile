@@ -1,4 +1,5 @@
 // lib/screens/asisten_screen.dart — Asisten AI (chat live via /api/ai/chat).
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -34,6 +35,18 @@ const String _convKey = 'maspart_asisten_conv';
 
 /// Simpan hanya 60 pesan terakhir supaya penyimpanan tetap ringan.
 const int _chatMaxSimpan = 60;
+
+/// Status yang ditampilkan saat server MEMBUANG draf yang sudah mengalir
+/// (frame `reset`: guard menyala / model diulang / salvage jalan). Draf hilang
+/// dari layar, tampilan menunggu kembali — jawaban final tetap datang lewat
+/// frame `done`. Sama persis dengan web (`LABEL_RAPI`).
+const String _labelRapi = 'Memeriksa & merapikan jawaban…';
+
+/// Jeda minimal antar-lukis saat draf mengalir. Potongan token datang puluhan
+/// kali per detik; setState + parse markdown tiap potongan membuat layar
+/// tersendat di HP (alasan yang sama dengan penjagaan setState pada notifikasi
+/// scroll di bawah).
+const Duration _drafJeda = Duration(milliseconds: 120);
 
 /// Id percakapan acak (32 hex) — memenuhi pola `^[A-Za-z0-9-]{8,64}$` yang
 /// divalidasi server. Tanpa paket `uuid`: cukup Random.secure().
@@ -210,6 +223,16 @@ class _AsistenScreenState extends State<AsistenScreen> {
   bool _busy = false;
   String? _error;
 
+  /// DRAF jawaban yang sedang mengalir (opt-in `stream_tokens`) — teks MENTAH
+  /// dari model yang BELUM lewat guard. Kosong = tak ada draf (gelembung
+  /// menunggu menampilkan langkah seperti dulu). Sengaja hidup di luar `_msgs`:
+  /// draf tak boleh ikut disimpan ke SharedPreferences dan tak boleh bisa
+  /// dinilai/disalin — frame `done` yang mengganti seluruh isinya dengan
+  /// jawaban final.
+  String _draf = '';
+  Timer? _drafTimer;
+  DateTime _drafLukis = DateTime.fromMillisecondsSinceEpoch(0);
+
   /// Menempel di bawah atau tidak (lihat _scrollToBottom).
   bool _ikutiBawah = true;
 
@@ -355,6 +378,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
 
   @override
   void dispose() {
+    _drafTimer?.cancel();
     _ctrl.dispose();
     _scroll.dispose();
     super.dispose();
@@ -487,6 +511,55 @@ class _AsistenScreenState extends State<AsistenScreen> {
   List<Map<String, String>> _payload() =>
       _msgs.map((m) => {'role': m.role, 'content': m.content}).toList();
 
+  // ── Draf token (frame `delta`/`reset`) ──────────────────────────────────
+  //
+  // Kontraknya sederhana: potongan di-APPEND, `reset` membuang SELURUH draf,
+  // dan `done` mengganti semuanya dengan jawaban final. Draf tak pernah masuk
+  // `_msgs` maupun penyimpanan.
+
+  /// Buang draf TANPA setState — dipakai dari dalam blok setState yang sudah
+  /// ada (kirim baru / jawaban final / giliran gagal / batal).
+  void _drafBersih() {
+    _drafTimer?.cancel();
+    _drafTimer = null;
+    _draf = '';
+  }
+
+  /// Potongan teks baru dari model.
+  void _tambahDraf(String potongan) {
+    _draf += potongan;
+    if (DateTime.now().difference(_drafLukis) < _drafJeda) {
+      // Terlalu rapat: tunda satu lukisan. Timer-nya wajib — tanpa itu potongan
+      // terakhir sebelum jeda panjang (mis. model berhenti menulis untuk
+      // memanggil tool) menggantung basi di layar.
+      _drafTimer ??= Timer(_drafJeda, () {
+        _drafTimer = null;
+        if (mounted && _draf.isNotEmpty) _lukisDraf();
+      });
+      return;
+    }
+    _lukisDraf();
+  }
+
+  void _lukisDraf() {
+    _drafTimer?.cancel();
+    _drafTimer = null;
+    _drafLukis = DateTime.now();
+    setState(() {});
+    _scrollToBottom();
+  }
+
+  /// Frame `reset`: draf dibuang server (guard/retry/salvage). Layar kembali ke
+  /// tampilan menunggu, dengan langkah "Memeriksa & merapikan jawaban…" supaya
+  /// teks yang tiba-tiba lenyap ada penjelasannya. Bisa terjadi berkali-kali.
+  void _resetDraf() {
+    setState(() {
+      _drafBersih();
+      if (_steps.isEmpty || _steps.last != _labelRapi) _steps.add(_labelRapi);
+    });
+    _scrollToBottom();
+  }
+
   Future<void> _send(String text) async {
     if (_busy || _locked) return;
     final pending = _pendingSheet;
@@ -501,6 +574,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
       _busy = true;
       _error = null;
       _steps.clear();
+      _drafBersih();
     });
     _ikutiBawah = true;   // mengirim = user memang ingin melihat jawabannya
     _dibatalkan = false;
@@ -526,11 +600,22 @@ class _AsistenScreenState extends State<AsistenScreen> {
             });
             _scrollToBottom();
           },
+          // Draf token: potongan di-append, `null` = server membuangnya.
+          onDelta: (potongan) {
+            if (!mounted) return;
+            if (potongan == null) {
+              _resetDraf();
+            } else {
+              _tambahDraf(potongan);
+            }
+          },
         );
       } catch (_) {
         // Pembatalan BUKAN kegagalan stream — tanpa penjagaan ini, tombol Stop
         // justru memicu permintaan KEDUA lewat jalur non-stream.
         if (_dibatalkan) rethrow;
+        // Draf separuh jalan tak boleh menggantung selama fallback berjalan.
+        if (mounted && _draf.isNotEmpty) _resetDraf();
         r = await ApiService.aiChat(_payload(), sheetId: sid, conversationId: cid);
       } finally {
         c.close();
@@ -538,6 +623,9 @@ class _AsistenScreenState extends State<AsistenScreen> {
       }
       if (!mounted) return;
       setState(() {
+        // Jawaban final MENGGANTI draf seutuhnya (bukan menambahnya): isinya
+        // sudah lewat semua guard, draf belum.
+        _drafBersih();
         _msgs.add(_Msg.assistant(r, _now()));
         _busy = false;
         _steps.clear();
@@ -547,6 +635,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
+        _drafBersih();   // batal / gagal → draf ikut hilang, tak menggantung
         _busy = false;
         _steps.clear();
       });
@@ -1183,6 +1272,10 @@ class _AsistenScreenState extends State<AsistenScreen> {
       );
 
   Widget _typing(MasColors m) {
+    // Draf token sudah mengalir → tampilkan ISI jawabannya, bukan lagi daftar
+    // langkah. Begitu server membuang draf (`reset`), `_draf` kosong lagi dan
+    // tampilan kembali ke langkah di bawah ini.
+    if (_draf.isNotEmpty) return _drafBubble(m);
     // Saat streaming: tampilkan langkah live — ✓ untuk yang selesai, ⏳ untuk
     // yang sedang berjalan (langkah terakhir). Persis web.
     if (_steps.isNotEmpty) {
@@ -1256,6 +1349,68 @@ class _AsistenScreenState extends State<AsistenScreen> {
           ),
         ]),
       );
+  }
+
+  /// Gelembung DRAF: jawaban mentah yang masih mengalir dan belum lewat guard.
+  /// Dirender dengan markdown yang SAMA seperti jawaban final — tabel separuh
+  /// jadi memang berkedip sesaat — tapi diredupkan + diberi titik mengetik agar
+  /// jelas ini belum final. Tanpa footer (sumber/salin/👍👎) dan tanpa teks
+  /// bisa diseleksi: itu hak jawaban final, yang menggantikannya beberapa detik
+  /// lagi lewat frame `done`.
+  Widget _drafBubble(MasColors m) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _avatar(30),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Opacity(
+                  opacity: 0.8,
+                  child: Container(
+                    width: double.infinity,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: m.paper,
+                      borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(4), topRight: Radius.circular(14),
+                        bottomLeft: Radius.circular(14),
+                        bottomRight: Radius.circular(14),
+                      ),
+                      border: Border.all(color: m.ink150),
+                      boxShadow: m.shadow1,
+                    ),
+                    child: MarkdownBody(
+                      data: _draf,
+                      selectable: false,
+                      styleSheet: _mdStyle(m),
+                      extensionSet: md.ExtensionSet.gitHubFlavored,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Row(children: [
+                  SizedBox(
+                    width: 18, height: 8,
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      for (int i = 0; i < 3; i++) ...[
+                        _Dot(delay: i * 0.15, color: m.ink400),
+                        if (i < 2) const SizedBox(width: 4),
+                      ],
+                    ]),
+                  ),
+                  const SizedBox(width: 8),
+                  Text('Menulis jawaban…',
+                      style: TextStyle(fontSize: 10.5, color: m.ink400)),
+                ]),
+              ]),
+        ),
+      ]),
+    );
   }
 
   // ── Kartu pertanyaan asisten (tool `tanya_user`) ────────────────────────

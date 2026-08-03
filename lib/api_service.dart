@@ -1757,10 +1757,21 @@ class ApiService {
   }
 
   /// Versi STREAMING dari [aiChat] — server mengirim status langkah live lewat
-  /// SSE (`/api/ai/chat-stream`, event `progress`/`done`/`error`, frame dipisah
-  /// `\n\n`, baris `data:`). [onProgress] dipanggil tiap label langkah baru.
-  /// Cerminan `aiChatStream` di web. Pemanggil sebaiknya fallback ke [aiChat]
-  /// bila ini melempar (mis. proxy tak mendukung streaming).
+  /// SSE (`/api/ai/chat-stream`, event `progress`/`delta`/`reset`/`done`/`error`,
+  /// frame dipisah `\n\n`, baris `data:`). [onProgress] dipanggil tiap label
+  /// langkah baru. Cerminan `aiChatStream` di web. Pemanggil sebaiknya fallback
+  /// ke [aiChat] bila ini melempar (mis. proxy tak mendukung streaming).
+  ///
+  /// [onDelta] OPT-IN: bila diisi, permintaan membawa `stream_tokens:true` dan
+  /// server ikut mengalirkan DRAF jawaban potongan demi potongan.
+  ///   - dipanggil dengan POTONGAN teks → APPEND ke draf di layar;
+  ///   - dipanggil dengan `null` (frame `reset`) → BUANG SELURUH draf, kembali
+  ///     ke tampilan menunggu; bisa terjadi berkali-kali dalam satu giliran.
+  /// ⚠️ Draf BELUM lewat guard (PN/angka bisa berubah). Frame `done` tetap
+  /// satu-satunya kebenaran: hasilnya MENGGANTI draf, bukan menambahnya —
+  /// karena itu delta yang telat (datang setelah `done`) sengaja dibuang di
+  /// sini, supaya layar tak bisa mengotori jawaban final. Tanpa [onDelta]
+  /// protokolnya identik dengan sebelum fitur ini (progress+done saja).
   ///
   /// [client] opsional: bila diberikan, PEMANGGIL yang memiliki dan menutupnya.
   /// Menutup client di tengah aliran = MEMBATALKAN giliran — satu-satunya cara
@@ -1772,6 +1783,7 @@ class ApiService {
     String? conversationId,
     http.Client? client,
     required void Function(String label) onProgress,
+    void Function(String? potongan)? onDelta,
   }) async {
     final token = await _Api._token();
     final req = http.Request('POST', _Api._uri('/api/ai/chat-stream'))
@@ -1781,6 +1793,9 @@ class ApiService {
         'messages': messages,
         'sheet_id': sheetId ?? '',
         'conversation_id': conversationId ?? '',
+        // Opt-in — tanpa ini server tak pernah mengirim delta/reset, persis
+        // seperti APK 2.2.0 ke bawah.
+        if (onDelta != null) 'stream_tokens': true,
       });
     final milikSendiri = client == null;
     final c = client ?? http.Client();
@@ -1811,6 +1826,15 @@ class ApiService {
           switch (ev['type']) {
             case 'progress':
               if (ev['label'] != null) onProgress('${ev['label']}');
+            case 'delta':
+              final teks = ev['text'];
+              // Potongan kosong tak berarti apa-apa; delta setelah `done`
+              // diabaikan (jawaban final tak boleh dikotori draf yang telat).
+              if (result == null && teks is String && teks.isNotEmpty) {
+                onDelta?.call(teks);
+              }
+            case 'reset':
+              if (result == null) onDelta?.call(null);
             case 'done':
               if (ev['result'] != null) {
                 result = AIChatResult.fromJson(
@@ -1819,6 +1843,7 @@ class ApiService {
             case 'error':
               errMsg = ev['message']?.toString() ?? 'Asisten AI gagal merespons.';
           }
+          // Frame lain (tipe baru dari server yang lebih baru) sengaja diabaikan.
         }
       }
       if (errMsg != null) throw ApiException(500, errMsg);

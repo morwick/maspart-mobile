@@ -48,6 +48,14 @@ Klien Flutter di atas backend FastAPI yang sama dengan web (`maspart.tech`).
 >   TAWARAN AJAR di layar pembuka asisten — "💡 N topik berulang gagal saya
 >   jawab — Ajari saya?" (aiStatusFull += gapAjar/gapTopik dari gap_ajar;
 >   hanya terisi utk akun yang boleh mengajar).
+> - **Menunggu APK berikutnya (2026-08-03) — DRAF TOKEN ASISTEN**: `aiChatStream`
+>   kirim `stream_tokens:true` + `onDelta`; frame `delta` di-append ke gelembung
+>   draf (markdown sama, diredupkan 0.8 + titik "Menulis jawaban…"), frame
+>   `reset` membuang SELURUH draf & kembali ke langkah "Memeriksa & merapikan
+>   jawaban…", `done` tetap otoritatif (mengganti draf, bukan menambah). Draf tak
+>   pernah masuk SharedPreferences; Stop & fallback `/api/ai/chat` seperti dulu.
+>   Rebuild draf dijeda 120 ms (token datang puluhan kali/detik). Spec protokol
+>   lengkap: blok **2026-08-03** di PROJECT.md repo utama.
 
 > **Perubahan besar sejak 2.0.0 (sesi 16 Juli 2026):**
 > - **Notifikasi update in-app + config server-driven** (§9) — aplikasi cek versi
