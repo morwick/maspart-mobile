@@ -783,6 +783,103 @@ class AccurateStock {
       );
 }
 
+// ── Keluarga varian pemasok (kartu Accurate ganda utk 1 part fisik) ──
+//
+// Satu part fisik bisa dipecah per PEMASOK di Accurate dengan suffix huruf
+// (PN dasar + '/SN' + '/SH' dst) — stok DAN harga beda tiap kartu.
+// ⛔ Aturan pemilik: harga TIDAK PERNAH dirata-rata. `hargaMin`/`hargaMax`
+// murni LABEL rentang; keranjang & penawaran selalu menunjuk `kode` varian
+// yang dipilih user secara eksplisit.
+
+class PartVarianItem {
+  /// PN kartu APA ADANYA, suffix ikut — inilah yang dipesan.
+  final String kode;
+
+  /// Nomor kartu barang Accurate (`000951.<pn>`).
+  final String no;
+  final String nama;
+  final String unit;
+
+  /// Angka stok/harga bisa HILANG (bukan 0) bila gerbang kolom server
+  /// mencabutnya untuk akun tanpa centang col_stok/col_harga → null artinya
+  /// "dirahasiakan", jangan dirender sebagai 0 (itu memalsukan "habis").
+  final int? stok;
+  final double? harga;
+
+  /// Sebaran antar-gudang — staf/admin saja (pembeli tak berhak melihatnya).
+  final List<GudangQty> perGudang;
+
+  /// Pengganti [perGudang] untuk PEMBELI: stok di wilayahnya saja.
+  final int? stokWilayah;
+
+  const PartVarianItem({
+    this.kode = '',
+    this.no = '',
+    this.nama = '',
+    this.unit = '',
+    this.stok,
+    this.harga,
+    this.perGudang = const [],
+    this.stokWilayah,
+  });
+
+  factory PartVarianItem.fromJson(Map<String, dynamic> j) => PartVarianItem(
+        kode: _s(j['kode']),
+        no: _s(j['no']),
+        nama: _s(j['nama']),
+        unit: _s(j['unit']),
+        stok: _iOrNull(j['stok']),
+        harga: _dOrNull(j['harga']),
+        perGudang: _list(j['per_gudang'], GudangQty.fromJson),
+        stokWilayah: _iOrNull(j['stok_wilayah']),
+      );
+}
+
+class PartVarian {
+  final bool configured;
+  final bool found;
+  final bool sessionExpired;
+  final bool error;
+  final String? reason;
+
+  /// PN dasar keluarga (tanpa suffix pemasok).
+  final String base;
+  final int? totalAvailable;
+  final double? hargaMin;
+  final double? hargaMax;
+  final List<PartVarianItem> varian;
+
+  const PartVarian({
+    this.configured = false,
+    this.found = false,
+    this.sessionExpired = false,
+    this.error = false,
+    this.reason,
+    this.base = '',
+    this.totalAvailable,
+    this.hargaMin,
+    this.hargaMax,
+    this.varian = const [],
+  });
+
+  /// True hanya bila keluarganya memang LEBIH DARI SATU kartu Accurate.
+  /// Satu anggota = part biasa → UI varian tak boleh muncul sama sekali.
+  bool get keluarga => found && varian.length > 1;
+
+  factory PartVarian.fromJson(Map<String, dynamic> j) => PartVarian(
+        configured: _b(j['configured']),
+        found: _b(j['found']),
+        sessionExpired: _b(j['session_expired']),
+        error: _b(j['error']),
+        reason: _sOrNull(j['reason']),
+        base: _s(j['base']),
+        totalAvailable: _iOrNull(j['total_available']),
+        hargaMin: _dOrNull(j['harga_min']),
+        hargaMax: _dOrNull(j['harga_max']),
+        varian: _list(j['varian'], PartVarianItem.fromJson),
+      );
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // Harga
 // ══════════════════════════════════════════════════════════════════════

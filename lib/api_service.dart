@@ -515,6 +515,24 @@ class ApiService {
     return AccurateStock.fromJson(_Api._obj(data));
   }
 
+  /// Keluarga varian pemasok satu PN — kartu Accurate ganda untuk part fisik
+  /// yang sama (PN dasar + '/SN' + '/SH' dst): stok DAN harga beda tiap kartu.
+  ///
+  /// ⚠️ PN dikirim lewat QUERY param, JANGAN di path: kode varian mengandung
+  /// '/' dan garis miring di path segment kena jebakan %2F (proxy
+  /// menormalkannya → 404).
+  ///
+  /// Ini fitur PELENGKAP: gagal/timeout → null, dan layar detail memakai
+  /// tampilan lamanya apa adanya (pola sama dengan rak).
+  static Future<PartVarian?> partVarian(String pn) async {
+    try {
+      final data = await _Api.get('/api/parts/varian', query: {'pn': pn});
+      return PartVarian.fromJson(_Api._obj(data));
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// "Cocok di unit saya?" — verifikasi part terhadap BOM EPC unit pembeli.
   static Future<CekUnitResult> cekPartDiUnit({
     required String partNumber,

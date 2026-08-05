@@ -58,6 +58,15 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
   /// Baris gudang yang sedang dibentangkan (hanya satu, biar kartunya pendek).
   String? _bukaGudang;
 
+  /// Keluarga varian pemasok — part fisik yang SAMA dipecah jadi beberapa kartu
+  /// barang Accurate per pemasok (PN dasar + '/SN' + '/SH' dst), stok DAN harga
+  /// beda tiap kartu. null = bukan keluarga varian / gagal / tak dikonfigurasi
+  /// → seluruh tampilan lama dipakai apa adanya.
+  PartVarian? _varianData;
+
+  /// Kode varian yang sedang dilihat; '' = "Semua varian" (gabungan).
+  String _tabVarian = '';
+
   String get _pn => '${_part['part_number'] ?? ''}';
   String get _name => '${_part['part_name'] ?? ''}';
 
@@ -68,6 +77,7 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     _backfillFromCatalog();
     _loadPhotos();
     _loadStock();
+    _loadVarian();
     _loadSpec();
   }
 
@@ -226,6 +236,17 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
         _loadingStock = false;
       });
     }
+  }
+
+  /// Keluarga varian pemasok. Fitur PELENGKAP: `ApiService.partVarian` sudah
+  /// menelan galatnya jadi null, dan hasil yang bukan keluarga (1 kartu saja)
+  /// sengaja TIDAK disimpan — supaya `_varian` cukup dicek null untuk memilih
+  /// antara tampilan varian dan tampilan lama.
+  Future<void> _loadVarian() async {
+    if (_pn.isEmpty) return;
+    final v = await ApiService.partVarian(_pn);
+    if (!mounted || v == null || !v.keluarga) return;
+    setState(() => _varianData = v);
   }
 
   // Exploded view TANPA nomor rangka. SENGAJA tidak dimuat saat layar dibuka:
@@ -387,6 +408,48 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     return g.isNotEmpty ? g.first.$1 : null;
   }
 
+  // ── Varian pemasok ──────────────────────────────────────────────────
+  //
+  // UI varian hanya hidup bila keluarganya memang > 1 kartu Accurate (dijaga
+  // saat `_loadVarian` menyimpan). ⛔ Aturan pemilik: harga TIDAK PERNAH
+  // dirata-rata — rentang hanya LABEL, dan keranjang selalu menunjuk `kode`
+  // varian yang dipilih user secara eksplisit.
+
+  List<PartVarianItem>? get _varian => _varianData?.varian;
+
+  /// Varian yang sedang dipilih; null = tab gabungan "Semua varian".
+  PartVarianItem? get _varianAktif {
+    final v = _varian;
+    if (v == null || _tabVarian.isEmpty) return null;
+    for (final x in v) {
+      if (x.kode == _tabVarian) return x;
+    }
+    return null;
+  }
+
+  /// Label pendek untuk chip & rincian: `<base>/SN` → "/SN", kartu dasar →
+  /// "base". Kode utuh tetap dipakai di tempat yang menentukan pesanan.
+  String _labelVarian(String kode) {
+    final b = (_varianData?.base ?? '').toUpperCase();
+    final k = kode.toUpperCase();
+    if (b.isEmpty) return kode;
+    if (k == b) return 'base';
+    return k.startsWith(b) ? kode.substring(b.length) : kode;
+  }
+
+  /// Harga satu varian sebagai teks. Harga yang HILANG (gerbang kolom server)
+  /// jadi '—', bukan 'Rp 0' — dirahasiakan ≠ gratis.
+  String _hargaVarian(PartVarianItem v) =>
+      (v.harga ?? 0) > 0 ? formatRupiah(v.harga) : '—';
+
+  /// LABEL rentang harga keluarga — tidak pernah dirata-rata.
+  String? get _rentangHarga {
+    final lo = _varianData?.hargaMin;
+    final hi = _varianData?.hargaMax;
+    if (lo == null || hi == null || lo <= 0 || hi <= 0) return null;
+    return lo == hi ? formatRupiah(lo) : '${formatRupiah(lo)} – ${thousands(hi)}';
+  }
+
   /// Harga tampilan. Accurate = sumber utama (juga mengisi part yang harga
   /// lokalnya kosong); katalog lokal = cadangan.
   String get _hargaStr {
@@ -422,6 +485,21 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     nav.toast('$_pn masuk keranjang');
   }
 
+  /// Keranjang untuk SATU varian pemasok. `part_number` = kode varian apa
+  /// adanya (suffix ikut) supaya server bisa mengunci kartu barang yang persis
+  /// itu — harga tiap pemasok beda, jadi tak boleh diwakili PN dasar.
+  void _tambahVarian(PartVarianItem v) {
+    final nav = AppNav.of(context);
+    _cart.add(CartItem(
+      partNumber: v.kode,
+      name: v.nama.isNotEmpty ? v.nama : _name,
+      harga: _hargaVarian(v),
+      // Berat part FISIK sama untuk semua varian — yang beda hanya pemasoknya.
+      berat: _beratGram,
+    ));
+    nav.toast('${v.kode} masuk keranjang');
+  }
+
   @override
   Widget build(BuildContext context) {
     final m = context.mas;
@@ -450,7 +528,16 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
           child: Row(children: [
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                Text(pn, style: masMono(size: 22, weight: FontWeight.w600, color: m.ink900)),
+                Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                  Text(pn, style: masMono(size: 22, weight: FontWeight.w600, color: m.ink900)),
+                  // Part yang sama dipecah jadi beberapa kartu barang Accurate —
+                  // beda pemasok, beda harga.
+                  if (_varian != null)
+                    MasPill(
+                        label: '${_varian!.length} varian pemasok',
+                        tone: MasPillTone.warn,
+                        height: 20),
+                ]),
                 if (name.isNotEmpty) ...[
                   const SizedBox(height: 2),
                   Text(name, style: TextStyle(fontSize: 13.5, color: m.ink600)),
@@ -464,12 +551,20 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
         _imageCard(m),
         // Pembeli: kartu ringkas stok (daerah sendiri) + harga.
         // Internal: kartu ringkas hanya sejauh izin kolom mengizinkan.
+        // Keluarga varian pemasok MENGGANTI kartu-kartu itu (jangan dobel):
+        // pembeli dapat daftar varian + keranjang per varian, internal dapat
+        // pemilih varian + angka yang mengikuti pilihannya.
         if (isBuyer) ...[
           const SizedBox(height: 14),
-          _buyerStatRow(m),
+          if (_varian != null) _buyerVarianCard(m) else _buyerStatRow(m),
         ] else if (showStok || showHarga) ...[
           const SizedBox(height: 14),
-          _statRow(m, showStok, showHarga),
+          if (_varian != null) ...[
+            _varianChips(m, showStok, showHarga),
+            const SizedBox(height: 12),
+            _statRowVarian(m, showStok, showHarga),
+          ] else
+            _statRow(m, showStok, showHarga),
         ],
         // Tombol beli hanya untuk pembeli — peran internal tidak berbelanja.
         if (isBuyer) ...[
@@ -559,6 +654,276 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     );
   }
 
+  // ── Pemilih varian pemasok (internal) ───────────────────────────────
+
+  /// Chip mendatar yang MENGGESER — sengaja bukan `MasSegmentTabs` (lebarnya
+  /// dibagi rata & tak bisa digeser): kode varian panjang dan jumlahnya bisa
+  /// beberapa, di lebar HP pasti meluber. Default "Semua varian".
+  Widget _varianChips(MasColors m, bool showStok, bool showHarga) {
+    final varian = _varian!;
+    final total = _varianData?.totalAvailable;
+    final aktif = _varianAktif;
+
+    Widget chip({
+      required String label,
+      required String sub,
+      required bool dipilih,
+      required VoidCallback onTap,
+      bool mono = false,
+    }) {
+      final fg = dipilih ? Colors.white : m.ink700;
+      return Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: dipilih ? m.brand700 : m.paper,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: dipilih ? m.brand700 : m.ink200),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Text(
+                label,
+                style: mono
+                    ? masMono(size: 12, weight: FontWeight.w600, color: fg)
+                    : TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: fg),
+              ),
+              if (sub.isNotEmpty) ...[
+                const SizedBox(width: 5),
+                Text(sub,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      color: dipilih ? Colors.white.withValues(alpha: 0.75) : m.ink500,
+                    )),
+              ],
+            ]),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 34,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          chip(
+            label: 'Semua varian',
+            sub: showStok && total != null ? thousands(total) : '',
+            dipilih: aktif == null,
+            onTap: () => setState(() => _tabVarian = ''),
+          ),
+          for (final v in varian)
+            chip(
+              label: v.kode,
+              mono: true,
+              // Angka yang dicabut gerbang kolom cukup dihilangkan dari chip —
+              // jangan diganti 0 (itu terbaca "habis"/"gratis").
+              sub: [
+                if (showStok && v.stok != null) thousands(v.stok),
+                if (showHarga && (v.harga ?? 0) > 0) formatRupiah(v.harga),
+              ].join(' · '),
+              dipilih: aktif?.kode == v.kode,
+              onTap: () => setState(() => _tabVarian = v.kode),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ── Kartu ringkas versi VARIAN (internal) ───────────────────────────
+
+  /// Menggantikan `_statRow` (jangan dirender dobel). Tab "Semua" = total
+  /// keluarga + LABEL rentang harga; tab satu varian = angka PASTI kartu itu
+  /// plus kode Accurate-nya. Ditumpuk ke bawah, bukan dua kolom: teks rentang
+  /// ("Rp 285.000 – 455.000") tak muat di setengah lebar HP.
+  Widget _statRowVarian(MasColors m, bool showStok, bool showHarga) {
+    final varian = _varian!;
+    final aktif = _varianAktif;
+    final total = _varianData?.totalAvailable;
+    final unit = aktif?.unit ?? (varian.isNotEmpty ? varian.first.unit : '');
+
+    String satuan(String s) => unit.isEmpty ? s : '$s $unit';
+    final stokTeks = aktif != null
+        ? (aktif.stok != null ? satuan(thousands(aktif.stok)) : '—')
+        : (total != null ? satuan(thousands(total)) : '—');
+
+    final kartu = <Widget>[];
+
+    if (showStok) {
+      kartu.add(MasCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+          Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            MasEyebrow(aktif != null ? 'Stok varian ini' : 'Stok total'),
+            const MasPill(label: 'Accurate', tone: MasPillTone.brand, height: 18),
+          ]),
+          const SizedBox(height: 6),
+          Text(stokTeks,
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: m.ink900)),
+          const SizedBox(height: 6),
+          if (aktif != null)
+            Text(aktif.nama, style: TextStyle(fontSize: 11.5, color: m.ink500))
+          else
+            Wrap(spacing: 6, runSpacing: 6, children: [
+              for (final v in varian)
+                MasPill(
+                  label: '${_labelVarian(v.kode)} ${v.stok != null ? thousands(v.stok) : '—'}',
+                  tone: MasPillTone.neutral,
+                  height: 20,
+                ),
+            ]),
+        ]),
+      ));
+    }
+
+    if (showHarga) {
+      kartu.add(MasCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+          Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            MasEyebrow('Harga'),
+            const MasPill(label: 'Accurate', tone: MasPillTone.brand, height: 18),
+          ]),
+          const SizedBox(height: 8),
+          Text(aktif != null ? _hargaVarian(aktif) : (_rentangHarga ?? '—'),
+              style: masMono(size: 17, weight: FontWeight.w600, color: m.brand700)),
+          const SizedBox(height: 4),
+          Text(
+            aktif != null
+                ? 'harga pasti varian ini — dipakai keranjang & penawaran'
+                : 'beda per pemasok — pilih varian untuk harga pasti',
+            style: TextStyle(fontSize: 11.5, height: 1.4, color: m.ink500),
+          ),
+        ]),
+      ));
+    }
+
+    kartu.add(MasCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        MasEyebrow('Kode Accurate'),
+        const SizedBox(height: 6),
+        Text(aktif != null ? aktif.kode : '${varian.length} kartu barang',
+            style: masMono(size: 14, weight: FontWeight.w600, color: m.ink900)),
+        const SizedBox(height: 4),
+        Text(
+          aktif != null
+              ? (aktif.no.isEmpty ? '—' : aktif.no)
+              : [for (final v in varian) v.kode].join(' · '),
+          style: masMono(size: 11.5, color: m.ink500),
+        ),
+      ]),
+    ));
+
+    return Column(children: [
+      for (int i = 0; i < kartu.length; i++) ...[
+        if (i > 0) const SizedBox(height: 12),
+        kartu[i],
+      ],
+    ]);
+  }
+
+  // ── Pembeli: pilih varian pemasok ───────────────────────────────────
+
+  /// SATU BARIS per kartu Accurate — harga & stok wilayah PASTI milik varian
+  /// itu, dan tombol keranjang menunjuk `kode` spesifik (tak ada penjualan
+  /// atas nama "gabungan"). Tetap TANPA sebaran antar-gudang: pembeli tidak
+  /// berhak melihat stok cabang lain.
+  Widget _buyerVarianCard(MasColors m) {
+    final varian = _varian!;
+    final berat = _beratGram;
+    final baris = <Widget>[];
+
+    for (int i = 0; i < varian.length; i++) {
+      final v = varian[i];
+      final harga = _hargaVarian(v);
+      final stok = v.stokWilayah; // null = TIDAK DIKETAHUI, bukan habis
+      final qty = _qtyDiKeranjang(v.kode);
+
+      Widget aksi;
+      if (stok != null && stok <= 0) {
+        // Tombol hanya ditutup bila stok BENAR-BENAR diketahui nol; stok yang
+        // tak terbaca dibiarkan lewat — server memvalidasi ulang saat checkout.
+        aksi = _alertBox(m, 'Stok habis di wilayahmu.', danger: true);
+      } else if (!hasPrice(harga)) {
+        aksi = _alertBox(m, 'Harga varian ini belum tersedia, jadi belum bisa dibeli.');
+      } else if (!hasWeight(berat)) {
+        // Tanpa berat, ongkir tak bisa dihitung → checkout pasti ditolak server.
+        aksi = _alertBox(m,
+            'Berat part belum ditetapkan, jadi ongkir tidak bisa dihitung dan varian ini belum bisa dibeli.');
+      } else if (qty > 0) {
+        aksi = Row(children: [
+          _stepBtn(m, Icons.remove_rounded,
+              () => qty <= 1 ? _cart.remove(v.kode) : _cart.setQty(v.kode, qty - 1)),
+          SizedBox(
+            width: 46,
+            child: Center(
+              child: Text('$qty', style: masMono(size: 14, weight: FontWeight.w700, color: m.ink900)),
+            ),
+          ),
+          _stepBtn(m, Icons.add_rounded, () => _cart.setQty(v.kode, qty + 1)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text('sudah di keranjang',
+                style: TextStyle(fontSize: 11.5, color: m.ink500)),
+          ),
+        ]);
+      } else {
+        aksi = MasButton(
+          label: '+ Keranjang',
+          icon: Icons.shopping_cart_outlined,
+          height: 38,
+          expand: true,
+          onTap: () => _tambahVarian(v),
+        );
+      }
+
+      baris.add(Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: m.ink100)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                Text(v.kode, style: masMono(size: 13, weight: FontWeight.w600, color: m.ink900)),
+                if ((v.nama.isNotEmpty ? v.nama : _name).isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(v.nama.isNotEmpty ? v.nama : _name,
+                      style: TextStyle(fontSize: 11.5, color: m.ink500)),
+                ],
+              ]),
+            ),
+            const SizedBox(width: 10),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+              Text(harga, style: masMono(size: 14, weight: FontWeight.w600, color: m.brand700)),
+              const SizedBox(height: 2),
+              // Stok yang tak terbaca ditulis '—': dirahasiakan ≠ habis.
+              Text('stok wilayahmu: ${stok != null ? thousands(stok) : '—'}',
+                  style: TextStyle(fontSize: 11.5, color: m.ink500)),
+            ]),
+          ]),
+          const SizedBox(height: 10),
+          aksi,
+        ]),
+      ));
+    }
+
+    baris.add(Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+      child: Text('Part fisik sama, pemasok berbeda — harga mengikuti varian yang dipilih.',
+          style: TextStyle(fontSize: 11.5, height: 1.45, color: m.ink400)),
+    ));
+
+    return MasSectionCard(
+      title: 'Pilih varian pemasok',
+      trailing: MasPill(label: '${varian.length} pilihan', tone: MasPillTone.warn, height: 20),
+      children: baris,
+    );
+  }
+
   // ── Kartu ringkas pembeli: stok daerah sendiri + harga (selalu) ─────
 
   Widget _buyerStatRow(MasColors m) {
@@ -608,8 +973,16 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     final berat = _beratGram;
     final qty = _qtyDiKeranjang(pn);
 
+    final varian = _varian;
+
     Widget aksi;
-    if (stok != null && stok <= 0) {
+    if (varian != null) {
+      // Keluarga varian pemasok: harga & stok BEDA tiap kartu, jadi tak ada
+      // tombol beli "gabungan" di sini — keranjang diisi dari kartu "Pilih
+      // varian pemasok" di atas supaya pesanan selalu menunjuk kode spesifik.
+      aksi = _alertBox(m,
+          'Part ini punya ${varian.length} varian pemasok dengan harga berbeda — pilih salah satunya di kartu di atas.');
+    } else if (stok != null && stok <= 0) {
       // Hanya menutup tombol bila stok BENAR-BENAR diketahui nol. Stok yang gagal
       // diambil dibiarkan lewat — server tetap memvalidasi ulang saat checkout.
       aksi = _alertBox(m, 'Stok habis — part ini belum bisa dibeli.', danger: true);
@@ -703,13 +1076,17 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     if (_loadingStock) return const MasSkeleton(height: 120);
 
     final acc = _acc;
+    final varian = _varian;
+    final aktif = _varianAktif;
     final lokal = _gudangLokal;
     final children = <Widget>[];
 
     // Angka stok benar-benar terbaca hanya bila Accurate menjawab & tidak gagal.
     // Membedakan ini penting: gudang tanpa angka boleh ditulis '0' saat datanya
     // lengkap, tapi harus '—' saat stok live-nya memang tak diketahui.
-    final stokTerbaca = acc != null && !_stokGagal;
+    // Di mode varian sumbernya endpoint varian (Accurate juga) yang SUDAH
+    // menjawab, jadi 0 di sana memang berarti kosong.
+    final stokTerbaca = varian != null || (acc != null && !_stokGagal);
 
     // Baris = gabungan gudang ber-STOK (Accurate) dan gudang ber-RAK. Gudang
     // yang stoknya 0 tapi punya rak TETAP ditampilkan: justru saat barang habis
@@ -717,20 +1094,49 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     final labels = <String>[];
     final qty = <String, int>{};
     final display = <String, String>{};
-    for (final g in acc?.perGudang ?? const <GudangQty>[]) {
-      // ⚠️ Kunci rak WAJIB label PENUH Accurate (`gudang`); `deskripsi` hanya
-      // untuk dibaca manusia dan tak pernah cocok dengan baris rak.
-      final key = g.gudang;
-      if (key.isEmpty) continue;
-      if (!labels.contains(key)) labels.add(key);
-      qty[key] = g.qty;
-      display[key] = g.deskripsi.isNotEmpty ? g.deskripsi : g.gudang;
+    // Mode gabungan: gudang → rincian per varian, dipakai sebagai sub-chip.
+    final rincian = <String, List<(String, int)>>{};
+
+    if (varian == null) {
+      for (final g in acc?.perGudang ?? const <GudangQty>[]) {
+        // ⚠️ Kunci rak WAJIB label PENUH Accurate (`gudang`); `deskripsi` hanya
+        // untuk dibaca manusia dan tak pernah cocok dengan baris rak.
+        final key = g.gudang;
+        if (key.isEmpty) continue;
+        if (!labels.contains(key)) labels.add(key);
+        qty[key] = g.qty;
+        display[key] = g.deskripsi.isNotEmpty ? g.deskripsi : g.gudang;
+      }
+    } else {
+      // Satu varian terpilih → sebaran kartu itu saja; tab "Semua" → jumlah
+      // seluruh varian per gudang + rincian siapa menyumbang berapa.
+      for (final v in aktif != null ? [aktif] : varian) {
+        for (final g in v.perGudang) {
+          final key = g.gudang;
+          if (key.isEmpty) continue;
+          if (!labels.contains(key)) labels.add(key);
+          qty[key] = (qty[key] ?? 0) + g.qty;
+          if (aktif == null) {
+            (rincian[key] ??= <(String, int)>[]).add((_labelVarian(v.kode), g.qty));
+          }
+        }
+      }
     }
     for (final key in _rak.keys) {
       if (!labels.contains(key)) labels.add(key);
     }
+    if (varian != null) {
+      // Endpoint varian tak menjanjikan urutan gudang — urutkan terbanyak dulu
+      // (persis web) supaya gudang yang paling berisi ada di atas.
+      labels.sort((a, b) {
+        final c = (qty[b] ?? 0).compareTo(qty[a] ?? 0);
+        return c != 0 ? c : a.compareTo(b);
+      });
+    }
 
-    if (_stokGagal) {
+    // Peringatan stok live hanya relevan bila angka yang dipajang memang
+    // berasal dari `accurate-stock`; di mode varian sumbernya lain.
+    if (_stokGagal && varian == null) {
       children.add(Padding(
         padding: const EdgeInsets.all(14),
         child: _alertBox(m, _stokGagalPesan),
@@ -746,9 +1152,27 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
           display: display[key] ?? key,
           qty: qty[key],
           stokTerbaca: stokTerbaca,
-          divider: i < labels.length - 1,
+          rincian: rincian[key],
+          divider: varian != null || i < labels.length - 1,
         ));
       }
+      if (varian != null) {
+        // Total = jumlah baris yang BENAR-BENAR dipajang (bukan
+        // `total_available`), supaya kaki tabel selalu konsisten dengan isinya.
+        children.add(MasKeyValue(
+          label: 'Total',
+          value: thousands(labels.fold<int>(0, (n, k) => n + (qty[k] ?? 0))),
+          mono: true,
+          divider: false,
+        ));
+        children.add(_infoText(m,
+            'Rak dicatat per gudang untuk part ini (berlaku untuk semua varian).'));
+      }
+    } else if (varian != null) {
+      children.add(_infoText(m,
+          aktif != null
+              ? 'Accurate tidak memberi rincian per gudang untuk varian ini.'
+              : 'Accurate tidak memberi rincian per gudang untuk varian part ini.'));
     } else if (!_stokGagal) {
       children.add(_infoText(
         m,
@@ -760,7 +1184,9 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     }
 
     // Data katalog masih berguna sebagai perkiraan — tapi harus jelas labelnya.
-    if ((_stokGagal || acc == null) && lokal.isNotEmpty) {
+    // Di mode varian tak dipakai: angka katalog tak bisa dipilah per pemasok,
+    // menempelkannya di bawah rincian varian justru menyesatkan.
+    if (varian == null && (_stokGagal || acc == null) && lokal.isNotEmpty) {
       children.add(_subHeader(
         m,
         _stokGagal
@@ -779,8 +1205,17 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
 
     return MasSectionCard(
       title: 'Stok per Gudang',
-      trailing: acc != null
-          ? const MasPill(label: 'Accurate', tone: MasPillTone.brand, height: 20)
+      trailing: (acc != null || varian != null)
+          ? Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              const MasPill(label: 'Accurate', tone: MasPillTone.brand, height: 20),
+              // Tegaskan angka di bawah ini milik siapa: satu kartu pemasok,
+              // atau gabungan seluruh keluarga.
+              if (varian != null)
+                MasPill(
+                    label: aktif != null ? aktif.kode : 'gabungan varian',
+                    tone: MasPillTone.neutral,
+                    height: 20),
+            ])
           : null,
       children: children,
     );
@@ -788,6 +1223,7 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
 
   /// Satu baris gudang — bentuknya meniru MasKeyValue, tapi BISA DIBUKA (ketuk)
   /// untuk menampilkan lokasi rak, catatan & foto kartu stok gudang itu.
+  /// [rincian] hanya terisi di mode gabungan varian: (label pendek varian, qty).
   Widget _gudangRow(
     MasColors m, {
     required String label,
@@ -795,6 +1231,7 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     required int? qty,
     required bool stokTerbaca,
     required bool divider,
+    List<(String, int)>? rincian,
   }) {
     final info = _rak[label];
     final terbuka = _bukaGudang == label;
@@ -826,6 +1263,18 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
                       const SizedBox(height: 3),
                       Text('rak ${info.rak}',
                           style: masMono(size: 11.5, color: m.brand700)),
+                    ],
+                    // Sub-chip per varian: di lebar HP jauh lebih terbaca
+                    // daripada tabel satu kolom per varian seperti di web.
+                    if (rincian != null && rincian.isNotEmpty) ...[
+                      const SizedBox(height: 5),
+                      Wrap(spacing: 5, runSpacing: 4, children: [
+                        for (final r in rincian)
+                          MasPill(
+                              label: '${r.$1} ${thousands(r.$2)}',
+                              tone: MasPillTone.neutral,
+                              height: 19),
+                      ]),
                     ],
                   ],
                 ),
