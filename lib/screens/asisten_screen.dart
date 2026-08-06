@@ -692,26 +692,75 @@ class _AsistenScreenState extends State<AsistenScreen> {
         ? 'Saya lampirkan ${file.filename}. Isinya apa saja?'
         : caption;
     setState(() {
+      _resetKartu();          // kartu lama tak boleh ikut ke giliran baru
       _msgs.add(_Msg('user', userText, _now(), sheetName: file.filename));
       _ctrl.clear();
       _pendingSheet = null;
       _busy = true;
       _error = null;
+      _steps.clear();         // STATUS langkah: giliran ber-lampiran pun hidup
+      _drafBersih();
     });
-    _scrollToBottom();
+    _ikutiBawah = true;
+    _dibatalkan = false;
+    _scrollToBottom(paksa: true);
     try {
-      final r = await ApiService.aiChatSheet(_payload(),
+      final cid = await _convId();
+      AIChatResult r;
+      final c = http.Client();
+      _streamClient = c;
+      try {
+        // Utamakan streaming — tanpa ini giliran ber-lampiran tak menampilkan
+        // status apa pun padahal ia yang paling lama (baca file + isi kolom +
+        // foto + gambar teknis). Keluhan pemilik 2026-08-06.
+        r = await ApiService.aiChatSheetStream(
+          _payload(),
           bytes: file.bytes,
           filename: file.filename,
-          conversationId: await _convId());
+          conversationId: cid,
+          client: c,
+          onProgress: (label) {
+            if (!mounted) return;
+            setState(() {
+              if (_steps.isEmpty || _steps.last != label) _steps.add(label);
+            });
+            _scrollToBottom();
+          },
+          onDelta: (potongan) {
+            if (!mounted) return;
+            if (potongan == null) {
+              _resetDraf();
+            } else {
+              _tambahDraf(potongan);
+            }
+          },
+        );
+      } on ApiException catch (e) {
+        // Galat FILE (400/413) bukan galat streaming — mengulang lewat jalur
+        // lama hanya membuat user menunggu dua kali untuk pesan yang sama.
+        if (_dibatalkan || e.statusCode < 500) rethrow;
+        if (mounted && _draf.isNotEmpty) _resetDraf();
+        r = await ApiService.aiChatSheet(_payload(),
+            bytes: file.bytes, filename: file.filename, conversationId: cid);
+      } catch (_) {
+        if (_dibatalkan) rethrow;
+        if (mounted && _draf.isNotEmpty) _resetDraf();
+        r = await ApiService.aiChatSheet(_payload(),
+            bytes: file.bytes, filename: file.filename, conversationId: cid);
+      } finally {
+        c.close();
+        if (identical(_streamClient, c)) _streamClient = null;
+      }
       if (!mounted) return;
       setState(() {
+        _drafBersih();
         if (r.sheetId != null && r.sheetId!.isNotEmpty) {
           _sheetId = r.sheetId!;
           _sheetName = file.filename;
         }
         _msgs.add(_Msg.assistant(r, _now()));
         _busy = false;
+        _steps.clear();
       });
       _scrollToBottom();
       _simpanChat();
@@ -719,10 +768,13 @@ class _AsistenScreenState extends State<AsistenScreen> {
       if (!mounted) return;
       setState(() {
         _busy = false;
+        _steps.clear();
+        _drafBersih();
         _msgs.removeLast();
         _pendingSheet = file; // kembalikan lampiran supaya bisa kirim ulang
         _ctrl.text = caption;
       });
+      if (_dibatalkan) return;   // dibatalkan user = bukan kegagalan
       _fail(e, 'Gagal mengunggah Excel.');
     }
   }

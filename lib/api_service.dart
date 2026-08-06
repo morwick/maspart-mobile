@@ -1819,59 +1819,71 @@ class ApiService {
     final c = client ?? http.Client();
     try {
       final streamed = await c.send(req).timeout(_Api._timeoutLong);
-      if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
-        await _Api._throw(await http.Response.fromStream(streamed));
-      }
-      AIChatResult? result;
-      String? errMsg;
-      var buf = '';
-      await for (final chunk in streamed.stream.transform(utf8.decoder)) {
-        buf += chunk;
-        final parts = buf.split('\n\n');
-        buf = parts.removeLast(); // sisa tak lengkap → tunggu chunk berikutnya
-        for (final part in parts) {
-          final line = part
-              .split('\n')
-              .firstWhere((l) => l.startsWith('data:'), orElse: () => '');
-          if (line.isEmpty) continue;
-          Map<String, dynamic> ev;
-          try {
-            ev = (jsonDecode(line.substring(5).trim()) as Map)
-                .cast<String, dynamic>();
-          } catch (_) {
-            continue;
-          }
-          switch (ev['type']) {
-            case 'progress':
-              if (ev['label'] != null) onProgress('${ev['label']}');
-            case 'delta':
-              final teks = ev['text'];
-              // Potongan kosong tak berarti apa-apa; delta setelah `done`
-              // diabaikan (jawaban final tak boleh dikotori draf yang telat).
-              if (result == null && teks is String && teks.isNotEmpty) {
-                onDelta?.call(teks);
-              }
-            case 'reset':
-              if (result == null) onDelta?.call(null);
-            case 'done':
-              if (ev['result'] != null) {
-                result = AIChatResult.fromJson(
-                    (ev['result'] as Map).cast<String, dynamic>());
-              }
-            case 'error':
-              errMsg = ev['message']?.toString() ?? 'Asisten AI gagal merespons.';
-          }
-          // Frame lain (tipe baru dari server yang lebih baru) sengaja diabaikan.
-        }
-      }
-      if (errMsg != null) throw ApiException(500, errMsg);
-      if (result == null) {
-        throw ApiException(500, 'Aliran jawaban berakhir tanpa hasil.');
-      }
-      return result;
+      return await _bacaAliranChat(streamed,
+          onProgress: onProgress, onDelta: onDelta);
     } finally {
       if (milikSendiri) c.close();
     }
+  }
+
+  /// Baca aliran SSE asisten (`progress`/`delta`/`reset`/`done`/`error`) → hasil
+  /// AKHIR. Dipakai [aiChatStream] DAN [aiChatSheetStream] supaya protokolnya tak
+  /// pernah bercabang antar-endpoint.
+  static Future<AIChatResult> _bacaAliranChat(
+    http.StreamedResponse streamed, {
+    required void Function(String label) onProgress,
+    void Function(String? potongan)? onDelta,
+  }) async {
+    if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+      await _Api._throw(await http.Response.fromStream(streamed));
+    }
+    AIChatResult? result;
+    String? errMsg;
+    var buf = '';
+    await for (final chunk in streamed.stream.transform(utf8.decoder)) {
+      buf += chunk;
+      final parts = buf.split('\n\n');
+      buf = parts.removeLast(); // sisa tak lengkap → tunggu chunk berikutnya
+      for (final part in parts) {
+        final line = part
+            .split('\n')
+            .firstWhere((l) => l.startsWith('data:'), orElse: () => '');
+        if (line.isEmpty) continue;
+        Map<String, dynamic> ev;
+        try {
+          ev = (jsonDecode(line.substring(5).trim()) as Map)
+              .cast<String, dynamic>();
+        } catch (_) {
+          continue;
+        }
+        switch (ev['type']) {
+          case 'progress':
+            if (ev['label'] != null) onProgress('${ev['label']}');
+          case 'delta':
+            final teks = ev['text'];
+            // Potongan kosong tak berarti apa-apa; delta setelah `done`
+            // diabaikan (jawaban final tak boleh dikotori draf yang telat).
+            if (result == null && teks is String && teks.isNotEmpty) {
+              onDelta?.call(teks);
+            }
+          case 'reset':
+            if (result == null) onDelta?.call(null);
+          case 'done':
+            if (ev['result'] != null) {
+              result = AIChatResult.fromJson(
+                  (ev['result'] as Map).cast<String, dynamic>());
+            }
+          case 'error':
+            errMsg = ev['message']?.toString() ?? 'Asisten AI gagal merespons.';
+        }
+        // Frame lain (tipe baru dari server yang lebih baru) sengaja diabaikan.
+      }
+    }
+    if (errMsg != null) throw ApiException(500, errMsg);
+    if (result == null) {
+      throw ApiException(500, 'Aliran jawaban berakhir tanpa hasil.');
+    }
+    return result;
   }
 
   // Catatan: aiChatImage (`/api/ai/chat-image`) dihapus 2026-07-21 mengikuti
@@ -1897,6 +1909,43 @@ class ApiService {
       },
     );
     return AIChatResult.fromJson(_Api._obj(data));
+  }
+
+  /// Versi STREAMING dari [aiChatSheet]: giliran ber-LAMPIRAN pun mengalirkan
+  /// status langkah ("Membaca lampiran…", "Mengisi Excel lampiran…", "Menyusun
+  /// jawaban…"). Tanpa ini user yang mengunggah Excel menatap layar diam
+  /// berpuluh detik sampai menit — keluhan pemilik 2026-08-06. Frame & [onDelta]
+  /// identik dengan [aiChatStream]; pemanggil sebaiknya fallback ke [aiChatSheet]
+  /// bila ini melempar (mis. proxy mem-buffer SSE).
+  ///
+  /// [client] opsional: bila diberikan, PEMANGGIL yang memiliki & menutupnya
+  /// (menutup di tengah aliran = membatalkan giliran).
+  static Future<AIChatResult> aiChatSheetStream(
+    List<Map<String, String>> messages, {
+    required Uint8List bytes,
+    required String filename,
+    String? conversationId,
+    http.Client? client,
+    required void Function(String label) onProgress,
+    void Function(String? potongan)? onDelta,
+  }) async {
+    final token = await _Api._token();
+    final req = http.MultipartRequest('POST', _Api._uri('/api/ai/chat-sheet'))
+      ..headers['Authorization'] = 'Bearer $token'
+      ..fields['messages'] = jsonEncode(messages)
+      ..fields['conversation_id'] = conversationId ?? ''
+      ..fields['stream'] = 'true'
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    if (onDelta != null) req.fields['stream_tokens'] = 'true';
+    final milikSendiri = client == null;
+    final c = client ?? http.Client();
+    try {
+      final streamed = await c.send(req).timeout(_Api._timeoutLong);
+      return await _bacaAliranChat(streamed,
+          onProgress: onProgress, onDelta: onDelta);
+    } finally {
+      if (milikSendiri) c.close();
+    }
   }
 
   /// Gambar exploded view / Excel yang disusun asisten, per id.
