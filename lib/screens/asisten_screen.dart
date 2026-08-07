@@ -7,13 +7,12 @@ import 'dart:math';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Clipboard (tombol Salin)
-import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:http/http.dart' as http;
-import 'package:markdown/markdown.dart' as md;
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/mas_theme.dart';
+import '../widgets/md_table.dart';
 import '../api_service.dart';
 import '../app/nav.dart';
 import 'login_screen.dart';
@@ -1224,12 +1223,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
                 border: Border.all(color: m.ink150),
                 boxShadow: m.shadow1,
               ),
-              child: MarkdownBody(
-                data: msg.content,
-                selectable: true,
-                styleSheet: _mdStyle(m),
-                extensionSet: md.ExtensionSet.gitHubFlavored,
-              ),
+              child: MasMarkdown(data: msg.content, selectable: true),
             ),
             if (msg.sheet != null) ...[
               const SizedBox(height: 8),
@@ -1292,36 +1286,9 @@ class _AsistenScreenState extends State<AsistenScreen> {
         ),
       );
 
-  MarkdownStyleSheet _mdStyle(MasColors m) => MarkdownStyleSheet(
-        p: TextStyle(fontSize: 14, height: 1.5, color: m.ink800),
-        strong: TextStyle(fontWeight: FontWeight.w700, color: m.ink900),
-        em: TextStyle(fontStyle: FontStyle.italic, color: m.ink700),
-        h1: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: m.ink900, height: 1.3),
-        h2: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: m.ink900, height: 1.3),
-        h3: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: m.ink900, height: 1.3),
-        listBullet: TextStyle(fontSize: 14, color: m.ink800),
-        a: TextStyle(color: m.brand700, decoration: TextDecoration.underline),
-        code: masMono(size: 12.5, color: m.brand700),
-        codeblockPadding: const EdgeInsets.all(10),
-        codeblockDecoration: BoxDecoration(
-          color: m.ink50,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: m.ink150),
-        ),
-        blockquote: TextStyle(fontSize: 14, color: m.ink600),
-        blockquoteDecoration: BoxDecoration(
-          color: m.ink50,
-          borderRadius: BorderRadius.circular(8),
-          border: Border(left: BorderSide(color: m.brand600, width: 3)),
-        ),
-        tableHead: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: m.ink900),
-        tableBody: TextStyle(fontSize: 12.5, color: m.ink700),
-        tableBorder: TableBorder.all(color: m.ink150),
-        tableCellsPadding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-        horizontalRuleDecoration: BoxDecoration(border: Border(top: BorderSide(color: m.ink150))),
-        blockSpacing: 9,
-        listIndent: 20,
-      );
+  // _mdStyle DIPINDAH ke widgets/md_table.dart sbg `masMdStyle(m, dense:)` —
+  // dipakai bersama layar riwayat Q&A admin (yang dulu tak punya properti tabel
+  // sama sekali). Semua render jawaban asisten kini lewat `MasMarkdown`.
 
   Widget _typing(MasColors m) {
     // Draf token sudah mengalir → tampilkan ISI jawabannya, bukan lagi daftar
@@ -1436,12 +1403,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
                       border: Border.all(color: m.ink150),
                       boxShadow: m.shadow1,
                     ),
-                    child: MarkdownBody(
-                      data: _draf,
-                      selectable: false,
-                      styleSheet: _mdStyle(m),
-                      extensionSet: md.ExtensionSet.gitHubFlavored,
-                    ),
+                    child: MasMarkdown(data: _draf),
                   ),
                 ),
                 const SizedBox(height: 5),

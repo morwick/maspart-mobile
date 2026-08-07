@@ -51,12 +51,16 @@ class MasSectionCard extends StatelessWidget {
   final Widget? trailing;
   final List<Widget> children;
   final EdgeInsetsGeometry margin;
+  /// Timpa gaya judul — dipakai kartu tabel markdown agar judul Part Number
+  /// tampil mono. Null = gaya baku (tak ada perubahan bagi pemakai lama).
+  final TextStyle? titleStyle;
   const MasSectionCard({
     super.key,
     required this.title,
     required this.children,
     this.trailing,
     this.margin = EdgeInsets.zero,
+    this.titleStyle,
   });
 
   @override
@@ -82,7 +86,8 @@ class MasSectionCard extends StatelessWidget {
             child: Row(children: [
               Expanded(
                 child: Text(title,
-                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: m.ink900)),
+                    style: titleStyle?.copyWith(color: titleStyle?.color ?? m.ink900) ??
+                        TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: m.ink900)),
               ),
               ?trailing,
             ]),
@@ -120,11 +125,19 @@ class MasKeyValue extends StatelessWidget {
       ),
       child: Row(children: [
         Expanded(child: Text(label, style: TextStyle(fontSize: 13, color: m.ink600))),
-        mono
-            ? Text(value,
-                style: masMono(size: 13, weight: FontWeight.w600, color: valueColor ?? m.ink900))
-            : Text(value,
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: valueColor ?? m.ink900)),
+        const SizedBox(width: 12),
+        // Flexible: nilai panjang (mis. nama varian unit lengkap) MEMBUNGKUS,
+        // bukan meluber jadi garis overflow kuning-hitam.
+        Flexible(
+          child: mono
+              ? Text(value,
+                  textAlign: TextAlign.right,
+                  style: masMono(size: 13, weight: FontWeight.w600, color: valueColor ?? m.ink900))
+              : Text(value,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w500, color: valueColor ?? m.ink900)),
+        ),
       ]),
     );
   }

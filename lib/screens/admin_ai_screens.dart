@@ -14,13 +14,13 @@
 // disentuh kamus: bukan KATA yang dicari, melainkan ALAT yang dipakai.
 
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../api_service.dart';
 import '../app/nav.dart';
 import '../theme/mas_theme.dart';
 import '../utils.dart';
 import '../widgets/mas_ui.dart';
+import '../widgets/md_table.dart';
 
 // ══════════════════════════════════════════════════════════════════════
 // Potongan UI bersama keempat layar
@@ -480,18 +480,15 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
                         borderRadius: BorderRadius.circular(MasRadii.input),
                         border: Border.all(color: m.ink150),
                       ),
+                      // Jawaban di sini = jawaban asisten yang SAMA dgn di chat,
+                      // jadi ia memakai renderer yang sama (dulu stylesheet
+                      // ad-hoc TANPA properti tabel sama sekali).
                       child: SingleChildScrollView(
-                        child: MarkdownBody(
+                        child: MasMarkdown(
                           data: row.answer?.isNotEmpty == true
                               ? row.answer!
                               : '(jawaban tidak tercatat)',
-                          styleSheet: MarkdownStyleSheet(
-                            p: TextStyle(
-                                fontSize: 12.5, color: m.ink800, height: 1.5),
-                            code: masMono(size: 11.5, color: m.ink800),
-                            listBullet:
-                                TextStyle(fontSize: 12.5, color: m.ink800),
-                          ),
+                          dense: true,
                         ),
                       ),
                     ),
