@@ -1973,6 +1973,50 @@ class AISheetSummary {
       );
 }
 
+/// Hasil baca FOTO nomor rangka (`POST /api/ai/ocr-rangka`).
+///
+/// Server yang membaca fotonya (OCR + cocokkan ke populasi); asisten sendiri
+/// tetap tak pernah melihat gambar — yang dikirim ke chat cuma teks nomornya.
+/// ⚠️ [keyakinan] 'rendah' WAJIB ditawarkan ke user untuk dikoreksi dulu: satu
+/// huruf salah = unit yang salah, dan itu menjalar ke seluruh jawaban.
+class AiOcrRangka {
+  final bool ok;
+  final String rangka;      // VIN 17 char (atau frame 8 char bila itu saja yg terbaca)
+  final String frame;       // 8 char terakhir — kunci EPC
+  final String keyakinan;   // pasti | tinggi | rendah | gagal
+  final String? unitJenis;  // mis. "HOWO-NX 6X4" (hanya bila cocok di populasi)
+  final String? unitModel;
+  final String? unitTahun;
+  final String pesan;       // kalimat siap tampil (sama persis dengan web)
+
+  const AiOcrRangka({
+    this.ok = false,
+    this.rangka = '',
+    this.frame = '',
+    this.keyakinan = 'gagal',
+    this.unitJenis,
+    this.unitModel,
+    this.unitTahun,
+    this.pesan = '',
+  });
+
+  bool get bolehLangsungKirim => keyakinan == 'pasti' || keyakinan == 'tinggi';
+
+  factory AiOcrRangka.fromJson(Map<String, dynamic> j) {
+    final unit = j['unit'] is Map ? (j['unit'] as Map) : const {};
+    return AiOcrRangka(
+      ok: _b(j['ok']),
+      rangka: _s(j['rangka']),
+      frame: _s(j['frame']),
+      keyakinan: _s(j['keyakinan']),
+      unitJenis: _sOrNull(unit['jenis']),
+      unitModel: _sOrNull(unit['model']),
+      unitTahun: _sOrNull(unit['tahun']),
+      pesan: _s(j['pesan']),
+    );
+  }
+}
+
 class AIChatResult {
   final String reply;
   final List<String> toolsUsed;

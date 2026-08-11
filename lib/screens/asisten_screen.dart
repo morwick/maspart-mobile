@@ -8,6 +8,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Clipboard (tombol Salin)
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart'; // foto nomor rangka
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -273,6 +274,15 @@ class _AsistenScreenState extends State<AsistenScreen> {
   // lepas dari percakapan dan asisten "lupa" file yang barusan diunggah.
   String _sheetId = '';
   String _sheetName = '';
+
+  // FOTO nomor rangka. Fotonya TIDAK ikut ke asisten: server membacanya (OCR +
+  // cocokkan ke populasi) dan hanya NOMOR-nya yang dikirim sebagai pesan biasa.
+  // `_ocrNote` = baris catatan di atas kotak ketik; bacaan yang belum yakin
+  // sengaja tidak dikirim otomatis, melainkan dituliskan ke kotak ketik supaya
+  // user mengoreksi — satu huruf salah = unit yang salah.
+  final _picker = ImagePicker();
+  bool _ocrBusy = false;
+  ({String teks, bool ragu})? _ocrNote;
 
   /// Id percakapan aktif (memori sesi server). Dimuat/dibuat sekali di
   /// [_convId]; kosong hanya bila SharedPreferences gagal → asisten tetap
@@ -775,6 +785,104 @@ class _AsistenScreenState extends State<AsistenScreen> {
       });
       if (_dibatalkan) return;   // dibatalkan user = bukan kegagalan
       _fail(e, 'Gagal mengunggah Excel.');
+    }
+  }
+
+  // ── Foto nomor rangka ───────────────────────────────────────────────
+  /// Pilih sumber foto (kamera di lapangan / galeri), lalu baca nomornya.
+  void _pilihFotoRangka() {
+    final m = context.mas;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: m.paper,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 12),
+          Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                  color: m.ink200, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
+            child: Text('Foto nomor rangka',
+                style: TextStyle(
+                    fontSize: 13.5, fontWeight: FontWeight.w700, color: m.ink900)),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+                'Ambil dekat & tegak lurus, seluruh 17 karakter masuk bingkai.',
+                style: TextStyle(fontSize: 11.5, color: m.ink500)),
+          ),
+          ListTile(
+            leading: Icon(Icons.photo_camera_outlined, color: m.brand600),
+            title: const Text('Ambil dari kamera'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _bacaFotoRangka(ImageSource.camera);
+            },
+          ),
+          ListTile(
+            leading: Icon(Icons.photo_library_outlined, color: m.brand600),
+            title: const Text('Pilih dari galeri'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _bacaFotoRangka(ImageSource.gallery);
+            },
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _bacaFotoRangka(ImageSource source) async {
+    final nav = AppNav.of(context);
+    XFile? picked;
+    try {
+      // 1600 px cukup: server memperkecil ke ukuran itu juga sebelum OCR, jadi
+      // mengirim foto 12 MP hanya memperlambat unggahan di sinyal lapangan.
+      picked = await _picker.pickImage(
+          source: source, imageQuality: 88, maxWidth: 1600);
+    } catch (_) {
+      nav.toast('Tidak dapat mengakses kamera/galeri.');
+      return;
+    }
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    if (!mounted) return;
+    setState(() {
+      _error = null;
+      _ocrBusy = true;
+      _ocrNote = (teks: 'Membaca nomor rangka dari foto…', ragu: false);
+    });
+    try {
+      final r = await ApiService.aiOcrRangka(
+          bytes: bytes, filename: picked.name);
+      if (!mounted) return;
+      setState(() {
+        _ocrBusy = false;
+        _ocrNote = (teks: r.pesan, ragu: r.keyakinan != 'pasti');
+      });
+      if (r.bolehLangsungKirim) {
+        await _send('Nomor rangka: ${r.rangka}');
+      } else if (r.rangka.isNotEmpty) {
+        // Bacaan ragu → taruh di kotak ketik, user yang memutuskan.
+        _ctrl.text = r.rangka;
+        _ctrl.selection =
+            TextSelection.collapsed(offset: _ctrl.text.length);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _ocrBusy = false;
+        _ocrNote = null;
+      });
+      _fail(e, 'Gagal membaca foto nomor rangka.');
     }
   }
 
@@ -1585,7 +1693,26 @@ class _AsistenScreenState extends State<AsistenScreen> {
           ),
           const SizedBox(height: 8),
         ],
+        // Hasil baca foto nomor rangka — bukan bubble chat: yang belum yakin
+        // masih boleh dikoreksi user sebelum dikirim.
+        if (_ocrNote != null) ...[
+          _OcrNoteBar(
+            teks: _ocrNote!.teks,
+            ragu: _ocrNote!.ragu,
+            onTutup: () => setState(() => _ocrNote = null),
+          ),
+          const SizedBox(height: 8),
+        ],
         Row(children: [
+          // Kamera = jawab permintaan nomor rangka dengan FOTO. Nomornya dibaca
+          // server lalu dikirim sendiri sebagai pesan — tak ada yang menunggu
+          // tombol Kirim (beda dengan lampiran Excel di sebelahnya).
+          Tooltip(
+            message: 'Foto nomor rangka — nomornya dibaca otomatis lalu dikirim',
+            child: _sqBtn(m, Icons.photo_camera_outlined,
+                _busy || _locked || _ocrBusy ? null : _pilihFotoRangka, false),
+          ),
+          const SizedBox(width: 8),
           // Klip = lampirkan Excel, persis tombol paperclip web. Memilih file
           // hanya MELAMPIRKAN; pengiriman menunggu user menekan Kirim.
           Tooltip(
@@ -2232,6 +2359,48 @@ class _FileChip extends StatelessWidget {
 }
 
 /// Baris lampiran di atas komposer (menunggu dikirim / aktif di server).
+/// Catatan hasil baca FOTO nomor rangka (di atas kotak ketik).
+///
+/// [ragu] = bacaan belum pasti / gagal → warna peringatan, dan nomornya TIDAK
+/// dikirim otomatis (sudah dituliskan ke kotak ketik untuk dikoreksi user).
+class _OcrNoteBar extends StatelessWidget {
+  final String teks;
+  final bool ragu;
+  final VoidCallback onTutup;
+  const _OcrNoteBar({required this.teks, required this.ragu, required this.onTutup});
+
+  @override
+  Widget build(BuildContext context) {
+    final m = context.mas;
+    final fg = ragu ? const Color(0xFF92400E) : m.brand700;
+    final bg = ragu ? const Color(0xFFFFFBEB) : m.brand50;
+    final br = ragu ? const Color(0xFFFDE68A) : m.brand100;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 7, 6, 7),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: br),
+      ),
+      child: Row(children: [
+        Icon(Icons.photo_camera_outlined, size: 15, color: fg),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(teks,
+              style: TextStyle(fontSize: 12, color: fg, height: 1.35)),
+        ),
+        IconButton(
+          icon: Icon(Icons.close_rounded, size: 15, color: fg),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          tooltip: 'Tutup',
+          onPressed: onTutup,
+        ),
+      ]),
+    );
+  }
+}
+
 class _AttachmentBar extends StatelessWidget {
   final IconData icon;
   final String label;

@@ -1891,6 +1891,23 @@ class ApiService {
   // hidup di backend, tapi tak ada lagi klien yang memakainya. Menu "Cari by
   // Foto" (`/api/parts/search-image`) TIDAK terpengaruh.
 
+  /// FOTO nomor rangka → TEKS nomor rangka (OCR di server, tanpa model bahasa).
+  ///
+  /// Dipakai saat asisten meminta nomor rangka: mekanik di lapangan cukup
+  /// memotret nomor yang dipahat di chassis. Hasilnya BUKAN jawaban — pemanggil
+  /// yang memutuskan: 'pasti'/'tinggi' boleh langsung dikirim sebagai pesan,
+  /// 'rendah' harus ditawarkan ke user untuk dikoreksi lebih dulu.
+  static Future<AiOcrRangka> aiOcrRangka({
+    required Uint8List bytes,
+    required String filename,
+  }) async {
+    final data = await _Api.multipart(
+      '/api/ai/ocr-rangka',
+      files: [(field: 'file', bytes: bytes, filename: filename)],
+    );
+    return AiOcrRangka.fromJson(_Api._obj(data));
+  }
+
   /// Chat dengan LAMPIRAN EXCEL: server membaca kolomnya, asisten bisa mengisi
   /// stok/nama/harga lalu mengeluarkan Excel baru. Balasan memuat `sheetId`
   /// yang harus dikirim ulang di giliran berikutnya.
