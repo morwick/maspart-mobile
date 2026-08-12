@@ -275,7 +275,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
   String _sheetId = '';
   String _sheetName = '';
 
-  // FOTO nomor rangka. Fotonya TIDAK ikut ke asisten: server membacanya (OCR +
+  // FOTO lapangan. Fotonya TIDAK ikut ke asisten: server membacanya (OCR +
   // cocokkan ke populasi) dan hanya NOMOR-nya yang dikirim sebagai pesan biasa.
   // `_ocrNote` = baris catatan di atas kotak ketik; bacaan yang belum yakin
   // sengaja tidak dikirim otomatis, melainkan dituliskan ke kotak ketik supaya
@@ -788,9 +788,9 @@ class _AsistenScreenState extends State<AsistenScreen> {
     }
   }
 
-  // ── Foto nomor rangka ───────────────────────────────────────────────
-  /// Pilih sumber foto (kamera di lapangan / galeri), lalu baca nomornya.
-  void _pilihFotoRangka() {
+  // ── Foto lapangan (nomor rangka / layar kode kesalahan) ─────────────
+  /// Pilih sumber foto (kamera di lapangan / galeri), lalu baca isinya.
+  void _pilihFoto() {
     final m = context.mas;
     showModalBottomSheet(
       context: context,
@@ -808,14 +808,15 @@ class _AsistenScreenState extends State<AsistenScreen> {
           const SizedBox(height: 6),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
-            child: Text('Foto nomor rangka',
+            child: Text('Kirim foto',
                 style: TextStyle(
                     fontSize: 13.5, fontWeight: FontWeight.w700, color: m.ink900)),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text(
-                'Ambil dekat & tegak lurus, seluruh 17 karakter masuk bingkai.',
+                'Nomor rangka (17 karakter) atau layar panel yang menampilkan '
+                'kode kesalahan. Ambil dekat, tegak lurus, tanpa pantulan.',
                 style: TextStyle(fontSize: 11.5, color: m.ink500)),
           ),
           ListTile(
@@ -823,7 +824,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
             title: const Text('Ambil dari kamera'),
             onTap: () {
               Navigator.pop(ctx);
-              _bacaFotoRangka(ImageSource.camera);
+              _bacaFoto(ImageSource.camera);
             },
           ),
           ListTile(
@@ -831,7 +832,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
             title: const Text('Pilih dari galeri'),
             onTap: () {
               Navigator.pop(ctx);
-              _bacaFotoRangka(ImageSource.gallery);
+              _bacaFoto(ImageSource.gallery);
             },
           ),
           const SizedBox(height: 8),
@@ -840,7 +841,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
     );
   }
 
-  Future<void> _bacaFotoRangka(ImageSource source) async {
+  Future<void> _bacaFoto(ImageSource source) async {
     final nav = AppNav.of(context);
     XFile? picked;
     try {
@@ -858,10 +859,10 @@ class _AsistenScreenState extends State<AsistenScreen> {
     setState(() {
       _error = null;
       _ocrBusy = true;
-      _ocrNote = (teks: 'Membaca nomor rangka dari foto…', ragu: false);
+      _ocrNote = (teks: 'Membaca foto…', ragu: false);
     });
     try {
-      final r = await ApiService.aiOcrRangka(
+      final r = await ApiService.aiOcrFoto(
           bytes: bytes, filename: picked.name);
       if (!mounted) return;
       setState(() {
@@ -869,10 +870,12 @@ class _AsistenScreenState extends State<AsistenScreen> {
         _ocrNote = (teks: r.pesan, ragu: r.keyakinan != 'pasti');
       });
       if (r.bolehLangsungKirim) {
-        await _send('Nomor rangka: ${r.rangka}');
-      } else if (r.rangka.isNotEmpty) {
+        await _send(r.jenis == 'rangka'
+            ? 'Nomor rangka: ${r.rangka?.rangka ?? ''}'
+            : r.pesan);
+      } else if (r.draf.isNotEmpty) {
         // Bacaan ragu → taruh di kotak ketik, user yang memutuskan.
-        _ctrl.text = r.rangka;
+        _ctrl.text = r.draf;
         _ctrl.selection =
             TextSelection.collapsed(offset: _ctrl.text.length);
       }
@@ -882,7 +885,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
         _ocrBusy = false;
         _ocrNote = null;
       });
-      _fail(e, 'Gagal membaca foto nomor rangka.');
+      _fail(e, 'Gagal membaca foto.');
     }
   }
 
@@ -1693,7 +1696,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
           ),
           const SizedBox(height: 8),
         ],
-        // Hasil baca foto nomor rangka — bukan bubble chat: yang belum yakin
+        // Hasil baca foto — bukan bubble chat: yang belum yakin
         // masih boleh dikoreksi user sebelum dikirim.
         if (_ocrNote != null) ...[
           _OcrNoteBar(
@@ -1708,9 +1711,10 @@ class _AsistenScreenState extends State<AsistenScreen> {
           // server lalu dikirim sendiri sebagai pesan — tak ada yang menunggu
           // tombol Kirim (beda dengan lampiran Excel di sebelahnya).
           Tooltip(
-            message: 'Foto nomor rangka — nomornya dibaca otomatis lalu dikirim',
+            message: 'Foto nomor rangka atau layar kode kesalahan — dibaca '
+                'otomatis lalu dikirim',
             child: _sqBtn(m, Icons.photo_camera_outlined,
-                _busy || _locked || _ocrBusy ? null : _pilihFotoRangka, false),
+                _busy || _locked || _ocrBusy ? null : _pilihFoto, false),
           ),
           const SizedBox(width: 8),
           // Klip = lampirkan Excel, persis tombol paperclip web. Memilih file
@@ -2359,7 +2363,7 @@ class _FileChip extends StatelessWidget {
 }
 
 /// Baris lampiran di atas komposer (menunggu dikirim / aktif di server).
-/// Catatan hasil baca FOTO nomor rangka (di atas kotak ketik).
+/// Catatan hasil baca FOTO lapangan (di atas kotak ketik).
 ///
 /// [ragu] = bacaan belum pasti / gagal → warna peringatan, dan nomornya TIDAK
 /// dikirim otomatis (sudah dituliskan ke kotak ketik untuk dikoreksi user).

@@ -2017,6 +2017,98 @@ class AiOcrRangka {
   }
 }
 
+/// Satu kode kesalahan hasil baca FOTO LAYAR PANEL (bagian dari [AiOcrFoto]).
+class AiOcrKode {
+  final int spn;
+  final int fmi;
+  final bool dikenal;        // pasangan SPN+FMI ini terdaftar di database kode
+  final String kode;         // kode pabrik bila ada (mis. "P0335")
+  final String arti;
+  final String unit;         // ECU sumber menurut database (mis. "EMS")
+  final List<int> fmiTerdaftar;
+  final List<String> alternatif;
+
+  const AiOcrKode({
+    this.spn = 0,
+    this.fmi = 0,
+    this.dikenal = false,
+    this.kode = '',
+    this.arti = '',
+    this.unit = '',
+    this.fmiTerdaftar = const [],
+    this.alternatif = const [],
+  });
+
+  factory AiOcrKode.fromJson(Map<String, dynamic> j) => AiOcrKode(
+        spn: _i(j['spn']),
+        fmi: _i(j['fmi']),
+        dikenal: _b(j['dikenal']),
+        kode: _s(j['kode']),
+        arti: _s(j['arti']),
+        unit: _s(j['unit']),
+        fmiTerdaftar:
+            (j['fmi_terdaftar'] as List?)?.map((e) => _i(e)).toList() ?? const [],
+        alternatif:
+            (j['alternatif'] as List?)?.map((e) => _s(e)).toList() ?? const [],
+      );
+}
+
+/// Hasil baca FOTO lapangan (`POST /api/ai/ocr-foto`) — SATU tombol kamera,
+/// dua macam foto: layar panel berisi kode kesalahan ATAU nomor rangka.
+///
+/// User tak perlu memilih lebih dulu; server mengenali isi fotonya dan
+/// mengembalikan [jenis] ('dtc' / 'rangka'). Asisten sendiri tetap tak pernah
+/// melihat gambar — yang dikirim ke chat cuma [pesan].
+/// ⚠️ [keyakinan] 'rendah' WAJIB ditawarkan ke user untuk dikoreksi dulu: satu
+/// angka salah = kode kesalahan LAIN (mekanik membongkar komponen yang salah),
+/// dan satu huruf salah = unit yang salah.
+class AiOcrFoto {
+  final String jenis;            // 'dtc' | 'rangka'
+  final bool ok;
+  final String keyakinan;        // pasti | tinggi | rendah | gagal
+  final String pesan;            // kalimat siap tampil & siap kirim (sama dgn web)
+  final AiOcrRangka? rangka;     // terisi bila jenis == 'rangka'
+  final List<AiOcrKode> kode;    // terisi bila jenis == 'dtc'
+  final String jenisPesan;       // "DM1" (aktif) / "DM2" (tersimpan)
+  final String ecu;              // label sumber di layar, mis. "Engine"
+
+  const AiOcrFoto({
+    this.jenis = 'rangka',
+    this.ok = false,
+    this.keyakinan = 'gagal',
+    this.pesan = '',
+    this.rangka,
+    this.kode = const [],
+    this.jenisPesan = '',
+    this.ecu = '',
+  });
+
+  bool get bolehLangsungKirim => keyakinan == 'pasti' || keyakinan == 'tinggi';
+
+  /// Teks yang ditaruh di kotak ketik saat bacaan BELUM yakin: untuk nomor
+  /// rangka cukup nomornya (user membetulkan satu huruf), untuk kode kesalahan
+  /// kalimat utuhnya (angkanya ada di dalam kalimat itu).
+  String get draf => jenis == 'rangka' ? (rangka?.rangka ?? '') : (ok ? pesan : '');
+
+  factory AiOcrFoto.fromJson(Map<String, dynamic> j) {
+    final jenis = _s(j['jenis']).isEmpty ? 'rangka' : _s(j['jenis']);
+    return AiOcrFoto(
+      jenis: jenis,
+      ok: _b(j['ok']),
+      keyakinan: _s(j['keyakinan']),
+      pesan: _s(j['pesan']),
+      rangka: jenis == 'rangka' ? AiOcrRangka.fromJson(j) : null,
+      kode: (j['kode'] as List?)
+              ?.whereType<Map>()
+              .map((e) => AiOcrKode.fromJson(Map<String, dynamic>.from(e)))
+              .toList() ??
+          const [],
+      jenisPesan: _s(j['jenis_pesan']),
+      ecu: _s(j['ecu']),
+    );
+  }
+}
+
 class AIChatResult {
   final String reply;
   final List<String> toolsUsed;

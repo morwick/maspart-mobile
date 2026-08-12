@@ -1908,6 +1908,25 @@ class ApiService {
     return AiOcrRangka.fromJson(_Api._obj(data));
   }
 
+  /// FOTO lapangan → TEKS (OCR di server, tanpa model bahasa). SATU tombol
+  /// kamera untuk dua macam foto: layar panel berisi KODE KESALAHAN (SPN/FMI)
+  /// atau NOMOR RANGKA — server yang mengenali isinya lewat `jenis`.
+  ///
+  /// User di kabin tak perlu memilih "ini foto apa" lebih dulu; di lapangan
+  /// pilihan seperti itu cuma penghalang. Hasilnya BUKAN jawaban: pemanggil
+  /// yang memutuskan — 'pasti'/'tinggi' boleh langsung dikirim sebagai pesan,
+  /// 'rendah' harus ditawarkan ke user untuk dikoreksi lebih dulu.
+  static Future<AiOcrFoto> aiOcrFoto({
+    required Uint8List bytes,
+    required String filename,
+  }) async {
+    final data = await _Api.multipart(
+      '/api/ai/ocr-foto',
+      files: [(field: 'file', bytes: bytes, filename: filename)],
+    );
+    return AiOcrFoto.fromJson(_Api._obj(data));
+  }
+
   /// Chat dengan LAMPIRAN EXCEL: server membaca kolomnya, asisten bisa mengisi
   /// stok/nama/harga lalu mengeluarkan Excel baru. Balasan memuat `sheetId`
   /// yang harus dikirim ulang di giliran berikutnya.
