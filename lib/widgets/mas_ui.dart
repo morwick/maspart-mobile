@@ -203,11 +203,19 @@ class MasInput extends StatelessWidget {
   final bool obscure;
   final double height;
   final Widget? prefix;
+
+  /// Widget di ujung kanan DALAM field (mis. tombol "Lihat" di password).
+  final Widget? suffix;
   final ValueChanged<String>? onChanged;
   final ValueChanged<String>? onSubmitted;
   final TextInputAction? action;
   final int? maxLines;
   final FocusNode? focusNode;
+
+  /// Timpa radius/ukuran teks baku — dipakai halaman login yang fieldnya
+  /// sengaja lebih besar. Null = ikut sistem (radius 6, teks 14).
+  final double? radius;
+  final double fontSize;
   const MasInput({
     super.key,
     this.controller,
@@ -216,23 +224,33 @@ class MasInput extends StatelessWidget {
     this.obscure = false,
     this.height = 44,
     this.prefix,
+    this.suffix,
     this.onChanged,
     this.onSubmitted,
     this.action,
     this.maxLines = 1,
     this.focusNode,
+    this.radius,
+    this.fontSize = 14,
   });
 
   @override
   Widget build(BuildContext context) {
     final m = context.mas;
     final multiline = (maxLines ?? 1) > 1;
+    final r = radius ?? MasRadii.input;
     return Container(
       height: multiline ? null : height,
-      padding: EdgeInsets.symmetric(horizontal: 12, vertical: multiline ? 10 : 0),
+      padding: EdgeInsets.only(
+        left: 12,
+        // Suffix punya padding sendiri agar area sentuhnya sampai tepi field.
+        right: suffix == null ? 12 : 4,
+        top: multiline ? 10 : 0,
+        bottom: multiline ? 10 : 0,
+      ),
       decoration: BoxDecoration(
         color: m.paper,
-        borderRadius: BorderRadius.circular(MasRadii.input),
+        borderRadius: BorderRadius.circular(r),
         border: Border.all(color: m.ink200),
       ),
       alignment: multiline ? null : Alignment.center,
@@ -249,8 +267,8 @@ class MasInput extends StatelessWidget {
             maxLines: maxLines,
             minLines: multiline ? maxLines : 1,
             style: mono
-                ? masMono(size: 14, color: m.ink900)
-                : TextStyle(fontSize: 14, color: m.ink900),
+                ? masMono(size: fontSize, color: m.ink900)
+                : TextStyle(fontSize: fontSize, color: m.ink900),
             cursorColor: m.brand600,
             decoration: InputDecoration(
               isCollapsed: true,
@@ -263,6 +281,7 @@ class MasInput extends StatelessWidget {
             ),
           ),
         ),
+        ?suffix,
       ]),
     );
   }
