@@ -824,10 +824,12 @@ class _ChatLogScreenState extends State<ChatLogScreen> {
                     MasKeyValue(
                       label: t.tool,
                       // ✕ = lookup jujur nihil (data memang tak ada), ⚠ =
-                      // error/infra. Membedakannya penting: yang pertama wajar,
-                      // yang kedua perlu ditindak.
+                      // error/infra, ⛔ = ditolak rem anti-loop (belum dicek).
+                      // Membedakannya penting: yang pertama wajar, yang kedua
+                      // perlu ditindak, yang ketiga adalah plafon KITA sendiri.
                       value: '${thousands(t.count)} (${t.pct}%'
-                          '${t.nf > 0 || t.err > 0 ? " · ${t.nf}✕/${t.err}⚠" : ""})',
+                          '${t.nf > 0 || t.err > 0 || t.brake > 0 ? " · ${t.nf}✕/${t.err}⚠"
+                              "${t.brake > 0 ? "/${t.brake}⛔" : ""}" : ""})',
                       mono: true,
                     ),
                   if (s.toolGagalRincian case final r?)
@@ -835,6 +837,7 @@ class _ChatLogScreenState extends State<ChatLogScreen> {
                       padding: const EdgeInsets.only(top: 6),
                       child: Text(
                         '✕ tak ketemu: ${thousands(r.nf)} · ⚠ error: ${thousands(r.err)}'
+                        '${r.brake > 0 ? " · ⛔ ditolak rem: ${thousands(r.brake)}" : ""}'
                         '${r.legacy > 0 ? " · lama: ${thousands(r.legacy)}" : ""}',
                         style: TextStyle(fontSize: 11, color: m.ink500),
                       ),
@@ -860,7 +863,9 @@ class _ChatLogScreenState extends State<ChatLogScreen> {
                     padding: const EdgeInsets.only(top: 6),
                     child: Text(
                       'pn/angka = dugaan karangan · subst = PN per-model '
-                      'menyalip EPC · dtc/epc/excel = jawaban tanpa tool wajib',
+                      'menyalip EPC · dtc/epc/excel/ajar = jawaban tanpa tool '
+                      'wajib · rem = plafon panggilan tool tercapai (ada item '
+                      'yang belum dicek)',
                       style: TextStyle(fontSize: 11, color: m.ink500, height: 1.4),
                     ),
                   ),

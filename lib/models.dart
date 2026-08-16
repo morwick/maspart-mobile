@@ -2898,13 +2898,18 @@ class ChatLogSummary {
   final List<({String tool, int count})> toolTersering;
 
   /// Tool paling sering gagal: (nama, jumlah gagal, % dari pemakaian, jumlah
-  /// `nf` = lookup jujur nihil, jumlah `err` = error/infra). Ringkasan lama
-  /// (sebelum migrasi 2026-07-20) tak punya dua angka terakhir → 0.
-  final List<({String tool, int count, double pct, int nf, int err})>
+  /// `nf` = lookup jujur nihil, jumlah `err` = error/infra, jumlah `brake` =
+  /// DITOLAK rem anti-loop — belum sempat dicek sama sekali). Ringkasan lama
+  /// (sebelum migrasi 2026-07-20) tak punya angka-angka terakhir → 0.
+  final List<({String tool, int count, double pct, int nf, int err, int brake})>
       toolGagalTersering;
 
-  /// Rincian total kegagalan per jenis; `legacy` = baris lama tanpa suffix.
-  final ({int nf, int err, int legacy})? toolGagalRincian;
+  /// Rincian total kegagalan per jenis. `brake` = plafon panggilan tool KITA
+  /// yang menolak (bukan data hilang, bukan infra rusak) — sebelum 2026-08-16
+  /// ia ikut terhitung `legacy`, sehingga kelas kegagalan yang paling bisa
+  /// diperbaiki justru tampil sebagai "sisa baris lama". `legacy` = baris lama
+  /// tanpa suffix jenis.
+  final ({int nf, int err, int brake, int legacy})? toolGagalRincian;
   final Map<String, int> outcome;
 
   /// Sebab guard menyala → jumlah (migrasi 026): pn/angka = dugaan karangan,
@@ -2958,8 +2963,9 @@ class ChatLogSummary {
               .map((p) => (tool: '${p[0]}', count: _i(p[1])))
               .toList() ??
           const [],
-      // Backend mengirim [nama, jumlah_gagal, persen, jumlah_nf, jumlah_err].
-      // Dua elemen terakhir OPSIONAL — ringkasan lama berhenti di persen.
+      // Backend mengirim [nama, jumlah_gagal, persen, jumlah_nf, jumlah_err,
+      // jumlah_brake]. Elemen setelah persen OPSIONAL — ringkasan lama berhenti
+      // di persen, dan `brake` baru ada sejak 2026-08-16.
       toolGagalTersering: (j['tool_gagal_tersering'] as List?)
               ?.whereType<List>()
               .where((p) => p.length >= 3)
@@ -2969,11 +2975,17 @@ class ChatLogSummary {
                     pct: _d(p[2]),
                     nf: p.length >= 4 ? _i(p[3]) : 0,
                     err: p.length >= 5 ? _i(p[4]) : 0,
+                    brake: p.length >= 6 ? _i(p[5]) : 0,
                   ))
               .toList() ??
           const [],
       toolGagalRincian: switch (j['tool_gagal_rincian']) {
-        final Map r => (nf: _i(r['nf']), err: _i(r['err']), legacy: _i(r['legacy'])),
+        final Map r => (
+            nf: _i(r['nf']),
+            err: _i(r['err']),
+            brake: _i(r['brake']),
+            legacy: _i(r['legacy']),
+          ),
         _ => null,
       },
       outcome: (j['outcome'] as Map?)?.map((k, v) => MapEntry('$k', _i(v))) ??
