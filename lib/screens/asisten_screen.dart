@@ -260,6 +260,8 @@ class _AsistenScreenState extends State<AsistenScreen> {
   /// yang berulang gagal dijawab + contoh pertamanya. Lingkaran
   /// gagal→terdeteksi→diajarkan menutup lewat chip di layar kosong.
   int _gapAjar = 0;
+  /// Saran pembuka dari server (/api/ai/status → `saran`), diputar per hari.
+  List<String> _saranServer = const [];
   List<String> _gapTopik = const [];
   // Mode perbaikan global (Menu Control → Asisten AI). Server yang memutuskan;
   // admin dikecualikan di sana. true → popup + input terkunci.
@@ -403,6 +405,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
         _perbaikan = s.perbaikan;
         _gapAjar = s.gapAjar;
         _gapTopik = s.gapTopik;
+        _saranServer = s.saran;
         _statusLoading = false;
       });
       // Popup mode perbaikan — sekali saat layar dibuka; input tetap terkunci
@@ -1176,9 +1179,11 @@ class _AsistenScreenState extends State<AsistenScreen> {
       );
 
   Widget _empty(MasColors m) {
-    // Saran bisa diatur dari server (config `asisten_suggestions`); fallback ke
-    // daftar bawaan bila belum dikonfigurasi.
-    final suggestions = AppNav.of(context).asistenSuggestions(_suggestions);
+    // Urutan sumber saran: /api/ai/status (diputar per hari, menyorot fitur yang
+    // jarang/tak pernah dipakai) → config `asisten_suggestions` → daftar bawaan.
+    final suggestions = _saranServer.isNotEmpty
+        ? _saranServer
+        : AppNav.of(context).asistenSuggestions(_suggestions);
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 36, 16, 16),
       children: [
@@ -1914,21 +1919,38 @@ class _FeedbackRow extends StatelessWidget {
             style: TextStyle(fontSize: 10.5, color: up ? m.brand700 : m.warn600)),
       ]);
     }
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      _fbBtn(m, Icons.thumb_up_off_alt_rounded, 'Jawaban ini membantu', onUp),
-      const SizedBox(width: 2),
-      _fbBtn(m, Icons.thumb_down_off_alt_rounded, 'Jawaban ini kurang tepat', onDown),
+    // ⚠️ Dulu dua ikon 14px abu-abu tanpa label: dalam 30 hari produksi tabel
+    // ai_feedback menerima NOL baris — kanalnya ada tapi praktis tak terlihat.
+    // Kini berlabel & berbingkai, dengan ajakan singkat. Paritas dengan web
+    // (frontend/src/app/asisten/page.tsx — FeedbackButtons).
+    return Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+      Text('Jawaban ini membantu?', style: TextStyle(fontSize: 11, color: m.ink500)),
+      _fbBtn(m, Icons.thumb_up_off_alt_rounded, 'Ya', 'Ya, jawaban ini membantu', onUp),
+      _fbBtn(m, Icons.thumb_down_off_alt_rounded, 'Kurang tepat',
+          'Kurang tepat — beri tahu kenapa', onDown),
     ]);
   }
 
-  Widget _fbBtn(MasColors m, IconData icon, String tooltip, VoidCallback onTap) => Tooltip(
+  Widget _fbBtn(MasColors m, IconData icon, String label, String tooltip,
+          VoidCallback onTap) =>
+      Tooltip(
         message: tooltip,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(6),
-          child: Padding(
-            padding: const EdgeInsets.all(4),
-            child: Icon(icon, size: 14, color: m.ink400),
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+            decoration: BoxDecoration(
+              border: Border.all(color: m.ink200),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(icon, size: 13, color: m.ink500),
+              const SizedBox(width: 5),
+              Text(label,
+                  style: TextStyle(
+                      fontSize: 11, fontWeight: FontWeight.w500, color: m.ink500)),
+            ]),
           ),
         ),
       );

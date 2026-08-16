@@ -1724,9 +1724,19 @@ class ApiService {
   ///
   /// [gapAjar]/[gapTopik] = tawaran belajar (hanya terisi utk akun yang boleh
   /// MENGAJAR): jumlah & contoh topik yang berulang gagal dijawab asisten.
+  ///
+  /// [saran] = contoh pertanyaan layar pembuka, diputar per hari oleh server.
+  /// Ada karena audit 30 hari menemukan 20 dari 98 tool TIDAK dipanggil sekali
+  /// pun — chip statis lama hanya memakai tool yang sudah populer.
   static Future<
-      ({bool available, bool allowed, bool perbaikan, int gapAjar, List<String> gapTopik})>
-      aiStatusFull() async {
+      ({
+        bool available,
+        bool allowed,
+        bool perbaikan,
+        int gapAjar,
+        List<String> gapTopik,
+        List<String> saran
+      })> aiStatusFull() async {
     final data = _Api._obj(await _Api.get('/api/ai/status'));
     final gap = data['gap_ajar'];
     return (
@@ -1737,6 +1747,7 @@ class ApiService {
       gapTopik: gap is Map
           ? [for (final t in (gap['topik'] as List? ?? const [])) '$t']
           : const <String>[],
+      saran: [for (final s in (data['saran'] as List? ?? const [])) '$s'],
     );
   }
 
