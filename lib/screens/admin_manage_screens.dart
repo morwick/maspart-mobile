@@ -3083,10 +3083,14 @@ class _ImageIndexScreenState extends State<ImageIndexScreen> {
                   value: s.torch ? 'tersedia' : 'tidak tersedia',
                   valueColor: s.torch ? m.brand700 : m.danger600,
                 ),
+                // Sejak 2026-08-17 model DINOv2 dimuat SAAT DIPAKAI lalu dilepas
+                // lagi setelah menganggur 30 menit (backend kehabisan RAM & kena
+                // cgroup OOM 2×). Jadi 'belum dimuat' adalah keadaan NORMAL —
+                // mewarnainya kuning peringatan membuat admin mengira rusak.
                 MasKeyValue(
                   label: 'Model',
-                  value: s.modelReady ? 'siap' : 'belum dimuat',
-                  valueColor: s.modelReady ? m.brand700 : m.warn600,
+                  value: s.modelReady ? 'termuat' : 'dimuat saat dipakai',
+                  valueColor: s.modelReady ? m.brand700 : null,
                 ),
                 MasKeyValue(
                   label: 'Sumber galeri',
