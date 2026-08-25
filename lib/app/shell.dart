@@ -63,6 +63,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   String _role = 'user';
   Set<String>? _allowedMenus; // null = izin belum dimuat
   Set<String>? _columns; // izin kolom (col_stok/col_harga); null = belum dimuat
+  // Fitur halaman elevated (Menu Control tab "Fitur"), mis. 'stok_weichai'.
+  // Default TERTUTUP → kosong (bukan null): sebelum izin dimuat, fiturnya tak
+  // ditampilkan. Admin ditangani di getter nav.
+  Set<String> _fitur = const {};
   String? _branch;
 
   /// Gudang yang boleh DITULIS pada Rak & Kartu Stok (label penuh). Kosong =
@@ -111,6 +115,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         _role = p.role.isNotEmpty ? p.role : _role;
         _allowedMenus = p.menus.toSet();
         _columns = p.columns.toSet();
+        _fitur = p.fitur.toSet();
         _branch = p.branch?.trim();
         _gudangKelola = p.gudangKelola;
       });
@@ -213,6 +218,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         _role = p.role.isNotEmpty ? p.role : _role;
         _allowedMenus = p.menus.toSet();
         _columns = p.columns.toSet();
+        _fitur = p.fitur.toSet();
         _branch = p.branch?.trim();
         _gudangKelola = p.gudangKelola;
       });
@@ -434,6 +440,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         username: _username,
         role: _role,
         columns: _columns,
+        fitur: _fitur,
         gudangKelola: _gudangKelola,
         config: _appConfig,
         accessible: accessibleScreens(_sections),

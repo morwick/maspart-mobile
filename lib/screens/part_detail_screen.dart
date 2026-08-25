@@ -606,8 +606,12 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
           _stokCard(m),
           // Stok PEMASOK Weichai — diambil LIVE saat diminta (tombol). Terpisah
           // dari stok Accurate: beda makna (stok KITA vs ketersediaan PEMASOK).
-          const SizedBox(height: 14),
-          _weichaiCard(m),
+          // Fitur elevated: DEFAULT hanya admin & akun 'mas', selebihnya harus
+          // dicentang admin di Menu Control tab "Fitur" (aturan pemilik 2026-08-25).
+          if (nav.showWeichaiStock) ...[
+            const SizedBox(height: 14),
+            _weichaiCard(m),
+          ],
         ],
         const SizedBox(height: 14),
         _specCard(m),

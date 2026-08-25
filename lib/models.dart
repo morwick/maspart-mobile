@@ -128,6 +128,12 @@ class MyPermissions {
   /// jadi fiturnya dorman, bukan error.
   final List<String> gudangKelola;
 
+  /// Fitur HALAMAN elevated yang menyala untuk akun ini (Menu Control tab
+  /// "Fitur"), mis. `stok_weichai` = kartu Stok Pemasok Weichai di Detail Part.
+  /// Default server: hanya admin & akun 'mas'. Server lama tak mengirim field
+  /// ini → kosong, jadi kartunya sekadar tak muncul (bukan error).
+  final List<String> fitur;
+
   const MyPermissions({
     this.menus = const [],
     this.columns = const [],
@@ -136,6 +142,7 @@ class MyPermissions {
     this.branch,
     this.canPrice = false,
     this.gudangKelola = const [],
+    this.fitur = const [],
   });
 
   factory MyPermissions.fromJson(Map<String, dynamic> j) => MyPermissions(
@@ -146,14 +153,17 @@ class MyPermissions {
         branch: _sOrNull(j['branch']),
         canPrice: _b(j['can_price']),
         gudangKelola: _strList(j['gudang_kelola']),
+        fitur: _strList(j['fitur']),
       );
 }
 
 /// Jenis izin yang bisa diatur admin. `sesi` bukan izin melainkan PEMBATASAN
 /// (mis. akun hanya boleh dipakai di 1 perangkat).
 /// `sesi` bukan izin melainkan PEMBATASAN (mis. hanya 1 perangkat);
-/// `asisten` = kemampuan Asisten AI elevated (default kosong, centang MEMBERI).
-enum PermKind { menu, column, harga, sesi, asisten }
+/// `asisten` = kemampuan Asisten AI elevated (default kosong, centang MEMBERI);
+/// `fitur` = fitur HALAMAN elevated (mis. Stok Pemasok Weichai) — sama-sama
+/// default kosong, tapi admin & akun 'mas' selalu dapat.
+enum PermKind { menu, column, harga, sesi, asisten, fitur }
 
 extension PermKindPath on PermKind {
   String get path => switch (this) {
@@ -162,6 +172,7 @@ extension PermKindPath on PermKind {
         PermKind.harga => 'harga',
         PermKind.sesi => 'sesi',
         PermKind.asisten => 'asisten',
+        PermKind.fitur => 'fitur',
       };
 }
 

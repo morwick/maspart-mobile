@@ -831,6 +831,7 @@ const _permKinds = <(PermKind, String)>[
   (PermKind.harga, 'Harga'),
   (PermKind.sesi, 'Sesi'),
   (PermKind.asisten, 'Asisten AI'),
+  (PermKind.fitur, 'Fitur'),
 ];
 
 /// Username semu untuk baris "Default (user baru)" — nilai yang sama dipakai
@@ -1044,6 +1045,15 @@ class _MenuControlScreenState extends State<MenuControlScreen> {
             'tidak pernah mencabut dari mereka. Akun pembeli tidak bisa diberi '
             'kemampuan ini. Stok Tertahan & Alternatif juga butuh centang '
             '"Kolom Stok"; hasil berharga butuh "Kolom Harga" (blok pertama).',
+          )
+        // Sama seperti Asisten AI: tanpa baris izin = KOSONG. Bedanya ini fitur
+        // HALAMAN (kartu di layar), bukan kemampuan asisten.
+        else if (_kind == PermKind.fitur)
+          const _NoticeBox(
+            'Centang = MENYALAKAN fitur halaman yang defaultnya tertutup. '
+            'Admin & akun "mas" selalu punya semuanya — centang tidak pernah '
+            'mencabut dari mereka. Akun pembeli tidak bisa diberi fitur ini. '
+            '"Stok Pemasok Weichai" juga butuh centang "Kolom Stok" (tab Kolom).',
           )
         else
           Text(

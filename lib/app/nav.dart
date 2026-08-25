@@ -252,6 +252,11 @@ class AppNav extends InheritedWidget {
   /// null = izin belum dimuat → default tampilkan (persis web sebelum ensurePerms).
   final Set<String>? columns;
 
+  /// Fitur halaman elevated yang menyala (Menu Control tab "Fitur"), mis.
+  /// `stok_weichai`. ⚠️ Beda dari [columns]: default-nya TERTUTUP, jadi
+  /// "belum dimuat" = jangan tampilkan dulu (kosong, bukan null).
+  final Set<String> fitur;
+
   /// Gudang yang boleh DITULIS user pada fitur Rak & Kartu Stok — label PENUH
   /// ("01.Jakarta"). Kosong = user hanya boleh MELIHAT rak.
   final List<String> gudangKelola;
@@ -275,6 +280,7 @@ class AppNav extends InheritedWidget {
     required this.username,
     required this.role,
     this.columns,
+    this.fitur = const {},
     this.gudangKelola = const [],
     this.config = const {},
     required this.accessible,
@@ -301,6 +307,14 @@ class AppNav extends InheritedWidget {
   /// khusus di layar itu karena pembeli perlu harga untuk belanja.)
   bool get showHarga =>
       isAdmin || columns == null || columns!.contains('col_harga');
+
+  /// Kartu "Stok Pemasok Weichai" di Detail Part — fitur elevated, DEFAULT
+  /// hanya admin & akun 'mas' (aturan pemilik 2026-08-25). Beda dari showStok:
+  /// sebelum izin dimuat kartunya TIDAK ditampilkan (fail-closed), supaya tak
+  /// berkedip untuk akun yang tak berhak. Pagar tampilan saja — server tetap
+  /// membalas `blocked` untuk yang tak berizin.
+  bool get showWeichaiStock =>
+      !isBuyer && (isAdmin || fitur.contains('stok_weichai'));
 
   /// Boleh mengubah rak gudang ini? [gudangPenuh] WAJIB label penuh Accurate
   /// ("01.Jakarta") — nama lokasi versi pembeli tak akan pernah cocok.
@@ -368,6 +382,7 @@ class AppNav extends InheritedWidget {
       old.username != username ||
       old.role != role ||
       old.columns != columns ||
+      old.fitur != fitur ||
       old.gudangKelola != gudangKelola ||
       old.config != config;
 }
