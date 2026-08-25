@@ -256,6 +256,34 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
   bool _explodedBusy = false;
   String? _explodedErr;
 
+  // Stok PEMASOK Weichai — diambil LIVE saat staf menekan tombol (bukan tiap
+  // buka layar: portal lambat & di balik Cloudflare). Non-fatal, internal-only.
+  WeichaiStock? _weichai;
+  bool _weichaiBusy = false;
+  String? _weichaiErr;
+
+  Future<void> _cekWeichai() async {
+    if (_weichaiBusy || _pn.isEmpty) return;
+    setState(() {
+      _weichaiBusy = true;
+      _weichaiErr = null;
+    });
+    try {
+      final d = await ApiService.weichaiStock(_pn);
+      if (!mounted) return;
+      setState(() {
+        _weichai = d;
+        _weichaiBusy = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _weichaiBusy = false;
+        _weichaiErr = e is ApiException ? e.message : 'Gagal menghubungi portal Weichai.';
+      });
+    }
+  }
+
   Future<void> _loadExploded() async {
     if (_explodedBusy || _exploded != null || _pn.isEmpty) return;
     setState(() {
@@ -576,6 +604,10 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
         if (!isBuyer && showStok) ...[
           const SizedBox(height: 14),
           _stokCard(m),
+          // Stok PEMASOK Weichai — diambil LIVE saat diminta (tombol). Terpisah
+          // dari stok Accurate: beda makna (stok KITA vs ketersediaan PEMASOK).
+          const SizedBox(height: 14),
+          _weichaiCard(m),
         ],
         const SizedBox(height: 14),
         _specCard(m),
@@ -1471,6 +1503,93 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
           TextButton(
             onPressed: _explodedBusy ? null : _loadExploded,
             child: Text(_explodedBusy ? 'memuat…' : 'Tampilkan',
+                style: const TextStyle(fontSize: 12)),
+          ),
+      ]),
+      children: anak,
+    );
+  }
+
+  // ── Stok PEMASOK Weichai (portal tci-pnp) ───────────────────────────
+  // Diambil LIVE saat staf menekan "Cek stok Weichai" — bukan tiap buka layar
+  // (portal lambat ~5-8 dtk & di balik Cloudflare). Beda makna dari stok
+  // Accurate: ketersediaan di PEMASOK untuk restok, bukan stok yang kita pegang.
+  // Portal tak memberi harga → STOK saja. Internal-only (server blokir pembeli).
+  Widget _weichaiCard(MasColors m) {
+    final d = _weichai;
+    final stock = (d != null && d.found) ? d.stock : null;
+
+    final anak = <Widget>[];
+    if (d == null && !_weichaiBusy && _weichaiErr == null) {
+      anak.add(Padding(
+        padding: const EdgeInsets.all(14),
+        child: Text(
+          'Ketersediaan di pemasok Weichai untuk restok — diambil langsung dari '
+          'portal saat diminta (±5–8 dtk). Tanpa harga.',
+          style: TextStyle(fontSize: 12.5, height: 1.5, color: m.ink500),
+        ),
+      ));
+    } else if (_weichaiBusy) {
+      anak.add(Padding(
+        padding: const EdgeInsets.all(14),
+        child: Text('Mengecek ke portal Weichai…',
+            style: TextStyle(fontSize: 12.5, color: m.ink500)),
+      ));
+    } else if (_weichaiErr != null) {
+      anak.add(Padding(padding: const EdgeInsets.all(14), child: _alertBox(m, _weichaiErr!)));
+    } else if (d != null && !d.configured) {
+      anak.add(Padding(
+        padding: const EdgeInsets.all(14),
+        child: Text('Portal Weichai belum dikonfigurasi di server.',
+            style: TextStyle(fontSize: 12.5, color: m.ink500)),
+      ));
+    } else if (d != null && d.error) {
+      anak.add(Padding(
+        padding: const EdgeInsets.all(14),
+        child: _alertBox(m, 'Gagal login/koneksi ke portal Weichai. Coba lagi.'),
+      ));
+    } else if (stock == null) {
+      anak.add(Padding(
+        padding: const EdgeInsets.all(14),
+        child: Text('Part ini tidak tersedia di Weichai.',
+            style: TextStyle(fontSize: 12.5, color: m.ink500)),
+      ));
+    } else {
+      anak.add(Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic, children: [
+          Text('${thousands(stock.total)} ${stock.satuan}'.trim(),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: m.ink900)),
+          const SizedBox(width: 8),
+          Text('tersedia di pemasok', style: TextStyle(fontSize: 12, color: m.ink500)),
+        ]),
+      ));
+      if (stock.perCabang.isNotEmpty) {
+        for (int i = 0; i < stock.perCabang.length; i++) {
+          final b = stock.perCabang[i];
+          anak.add(MasKeyValue(
+            label: b.cabang,
+            value: '${thousands(b.qty)} ${b.satuan}'.trim(),
+            divider: true,
+          ));
+        }
+      }
+      anak.add(Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        child: Text('Sumber: portal Weichai (tci-pnp) · stok pemasok, bukan stok kita.',
+            style: TextStyle(fontSize: 11.5, color: m.ink400)),
+      ));
+    }
+
+    return MasSectionCard(
+      title: 'Stok Pemasok',
+      trailing: Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        const MasPill(label: 'Weichai', tone: MasPillTone.info, height: 20),
+        if (!_weichaiBusy)
+          TextButton(
+            onPressed: _cekWeichai,
+            child: Text(d == null ? 'Cek stok Weichai' : '↻ Perbarui',
                 style: const TextStyle(fontSize: 12)),
           ),
       ]),

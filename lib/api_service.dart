@@ -515,6 +515,15 @@ class ApiService {
     return AccurateStock.fromJson(_Api._obj(data));
   }
 
+  /// Stok PEMASOK Weichai (portal tci-pnp) — diambil LIVE saat staf minta.
+  /// Beda dari [accurateStock] (stok KITA): ketersediaan di PEMASOK untuk restok.
+  /// Lambat (~5-8 dtk) → pakai timeout panjang. Internal-only (server blokir pembeli).
+  static Future<WeichaiStock> weichaiStock(String pn) async {
+    final data = await _Api.get('/api/parts/weichai-stock',
+        query: {'pn': pn}, timeout: _Api._timeoutLong);
+    return WeichaiStock.fromJson(_Api._obj(data));
+  }
+
   /// Keluarga varian pemasok satu PN — kartu Accurate ganda untuk part fisik
   /// yang sama (PN dasar + '/SN' + '/SH' dst): stok DAN harga beda tiap kartu.
   ///

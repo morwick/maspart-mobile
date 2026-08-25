@@ -783,6 +783,75 @@ class AccurateStock {
       );
 }
 
+// ── Stok PEMASOK Weichai (portal tci-pnp) — diambil LIVE saat diminta ──
+// Beda makna dari [AccurateStock] (stok KITA): ini ketersediaan di PEMASOK
+// untuk restok. Portal tak memberi harga → STOK saja. Internal-only.
+class WeichaiCabang {
+  final String cabang;
+  final int qty;
+  final String satuan;
+
+  const WeichaiCabang({this.cabang = '', this.qty = 0, this.satuan = ''});
+
+  factory WeichaiCabang.fromJson(Map<String, dynamic> j) => WeichaiCabang(
+        cabang: _s(j['cabang']),
+        qty: _i(j['qty']),
+        satuan: _s(j['satuan']),
+      );
+}
+
+class WeichaiStockDetail {
+  final String barcode;
+  final String nama;
+  final int total;
+  final String satuan;
+  final List<WeichaiCabang> perCabang;
+
+  const WeichaiStockDetail({
+    this.barcode = '',
+    this.nama = '',
+    this.total = 0,
+    this.satuan = '',
+    this.perCabang = const [],
+  });
+
+  factory WeichaiStockDetail.fromJson(Map<String, dynamic> j) =>
+      WeichaiStockDetail(
+        barcode: _s(j['barcode']),
+        nama: _s(j['nama']),
+        total: _i(j['total']),
+        satuan: _s(j['satuan']),
+        perCabang: _list(j['per_cabang'], WeichaiCabang.fromJson),
+      );
+}
+
+class WeichaiStock {
+  final bool configured;
+  final bool found;
+  final bool error;
+  final bool blocked;
+  final WeichaiStockDetail? stock;
+
+  const WeichaiStock({
+    this.configured = false,
+    this.found = false,
+    this.error = false,
+    this.blocked = false,
+    this.stock,
+  });
+
+  factory WeichaiStock.fromJson(Map<String, dynamic> j) => WeichaiStock(
+        configured: _b(j['configured']),
+        found: _b(j['found']),
+        error: _b(j['error']),
+        blocked: _b(j['blocked']),
+        stock: j['stock'] is Map
+            ? WeichaiStockDetail.fromJson(
+                (j['stock'] as Map).cast<String, dynamic>())
+            : null,
+      );
+}
+
 // ── Keluarga varian pemasok (kartu Accurate ganda utk 1 part fisik) ──
 //
 // Satu part fisik bisa dipecah per PEMASOK di Accurate dengan suffix huruf
