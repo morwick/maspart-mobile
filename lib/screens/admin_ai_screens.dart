@@ -796,6 +796,17 @@ class _ChatLogScreenState extends State<ChatLogScreen> {
               ),
             ]),
             const SizedBox(height: 8),
+            // Sinyal mutu implisit (migrasi 030): user mengetik ulang pertanyaan
+            // yang sama = jawaban pertama kemungkinan tak memuaskan.
+            _statRow([
+              _Stat(
+                label: 'Pertanyaan diulang',
+                value: '${s.pertanyaanDiulangPersen}%',
+                hint: '${thousands(s.pertanyaanDiulang)} giliran',
+                color: s.pertanyaanDiulang > 0 ? m.warn600 : null,
+              ),
+            ]),
+            const SizedBox(height: 8),
             // Biaya DeepSeek per pesan: rata-rata token masuk+keluar per giliran.
             _statRow([
               _Stat(
@@ -1046,6 +1057,7 @@ class _ChatLogScreenState extends State<ChatLogScreen> {
                   if (r.guardHit) const _Chip('guard', tone: MasPillTone.warn),
                   if (r.toolFailed)
                     const _Chip('tool gagal', tone: MasPillTone.danger),
+                  if (r.diulang) const _Chip('🔁 diulang', tone: MasPillTone.warn),
                 ],
               ),
             ],

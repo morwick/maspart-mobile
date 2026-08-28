@@ -2919,6 +2919,10 @@ class ChatLogRow {
   /// Nama tool yang GAGAL giliran ini (migrasi 023), dipisah koma.
   final String toolsFailed;
 
+  /// User mengetik ulang pertanyaan yang sama di sesi ini (migrasi 030) —
+  /// sinyal mutu implisit; false pada baris lama / sebelum migrasi.
+  final bool diulang;
+
   const ChatLogRow({
     required this.id,
     this.createdAt = '',
@@ -2939,6 +2943,7 @@ class ChatLogRow {
     this.apiCalls = 0,
     this.reply = '',
     this.toolsFailed = '',
+    this.diulang = false,
   });
 
   factory ChatLogRow.fromJson(Map<String, dynamic> j) => ChatLogRow(
@@ -2961,6 +2966,7 @@ class ChatLogRow {
         apiCalls: _i(j['api_calls']),
         reply: _s(j['reply']),
         toolsFailed: _s(j['tools_failed']),
+        diulang: _b(j['diulang']),
       );
 }
 
@@ -3004,6 +3010,11 @@ class ChatLogSummary {
   final double tokenCacheHitPersen;
   final int tokenGiliranTerukur;
 
+  /// Giliran yang pertanyaannya DIULANG user (migrasi 030) — layak diperiksa,
+  /// bukan vonis salah; 0 sebelum migrasi dijalankan.
+  final int pertanyaanDiulang;
+  final double pertanyaanDiulangPersen;
+
   const ChatLogSummary({
     this.total = 0,
     this.latensiP50 = 0,
@@ -3022,6 +3033,8 @@ class ChatLogSummary {
     this.tokenRata2Out = 0,
     this.tokenCacheHitPersen = 0,
     this.tokenGiliranTerukur = 0,
+    this.pertanyaanDiulang = 0,
+    this.pertanyaanDiulangPersen = 0,
   });
 
   factory ChatLogSummary.fromJson(Map<String, dynamic> j) {
@@ -3077,6 +3090,8 @@ class ChatLogSummary {
       tokenRata2Out: _i(tok['rata2_out']),
       tokenCacheHitPersen: _d(tok['cache_hit_persen']),
       tokenGiliranTerukur: _i(tok['giliran_terukur']),
+      pertanyaanDiulang: _i(j['pertanyaan_diulang']),
+      pertanyaanDiulangPersen: _d(j['pertanyaan_diulang_persen']),
     );
   }
 }
