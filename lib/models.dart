@@ -1963,11 +1963,16 @@ class AIExcelExport {
   final String judul;
   final int jumlahBaris;
 
+  /// Katalog masih disusun di latar (EPC ditelusuri ±1–3 mnt): unduhan
+  /// pertama menunggu sampai file selesai — paritas web.
+  final bool sedangDisusun;
+
   const AIExcelExport({
     required this.id,
     this.filename = '',
     this.judul = '',
     this.jumlahBaris = 0,
+    this.sedangDisusun = false,
   });
 
   factory AIExcelExport.fromJson(Map<String, dynamic> j) => AIExcelExport(
@@ -1975,6 +1980,7 @@ class AIExcelExport {
         filename: _s(j['filename']),
         judul: _s(j['judul']),
         jumlahBaris: _i(j['jumlah_baris']),
+        sedangDisusun: j['sedang_disusun'] == true,
       );
 }
 

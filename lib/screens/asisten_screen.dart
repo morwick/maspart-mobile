@@ -162,6 +162,7 @@ class _Msg {
               'filename': x.filename,
               'judul': x.judul,
               'jumlah_baris': x.jumlahBaris,
+              'sedang_disusun': x.sedangDisusun,
             },
         ],
         'sheet': sheet == null
@@ -2107,8 +2108,13 @@ class _AiExcelCardState extends State<_AiExcelCard> {
     // 'katalog bergambar' dan keliru untuk dua jenis lainnya.
     final isPdf = exp.filename.toLowerCase().endsWith('.pdf');
     final baris = exp.jumlahBaris > 0 ? ' · ${exp.jumlahBaris} baris' : '';
-    final sub =
-        isPdf ? 'PDF · ketuk untuk membuka' : 'Spreadsheet · XLSX$baris';
+    // Katalog dibangun di LATAR (walk EPC ±1–3 mnt): tanpa keterangan ini user
+    // mengira tombolnya macet — unduhan pertama memang menunggu file selesai.
+    final sub = exp.sedangDisusun
+        ? '⏳ Disusun di latar ±1–3 mnt — unduhan pertama menunggu'
+        : isPdf
+            ? 'PDF · ketuk untuk membuka'
+            : 'Spreadsheet · XLSX$baris';
     return _ExcelCardShell(
       judul: judul,
       sub: sub,
