@@ -62,6 +62,11 @@ class _Api {
   /// pencarian foto) yang di server memang bisa makan puluhan detik.
   static const _timeoutLong = Duration(seconds: 180);
 
+  /// Pagar DIAM aliran SSE asisten: jam di-reset tiap frame; 4 menit tanpa
+  /// satu byte pun = aliran memang mati (tool di server kini dibatasi
+  /// 90–180 dtk). Paritas `STREAM_IDLE_MS` di web.
+  static const _streamIdle = Duration(minutes: 4);
+
   /// Khusus Batch Download berkolom exploded: gambar diambil satu per satu dari
   /// EPC (±94 dtk per PN yang belum pernah dibuka, cap 25 PN, 3 pekerja) → bisa
   /// 15 menit. ⚠️ Di HP, request sepanjang itu tetap rawan diputus OS bila
@@ -1860,7 +1865,13 @@ class ApiService {
     AIChatResult? result;
     String? errMsg;
     var buf = '';
-    await for (final chunk in streamed.stream.transform(utf8.decoder)) {
+    await for (final chunk in streamed.stream
+        .transform(utf8.decoder)
+        .timeout(_Api._streamIdle, onTimeout: (sink) {
+      sink.addError(ApiException(
+          504, 'Aliran jawaban terhenti — tidak ada data dari server selama 4 menit.'));
+      sink.close();
+    })) {
       buf += chunk;
       final parts = buf.split('\n\n');
       buf = parts.removeLast(); // sisa tak lengkap → tunggu chunk berikutnya

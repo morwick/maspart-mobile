@@ -453,6 +453,9 @@ class _AsistenScreenState extends State<AsistenScreen> {
     }
   }
 
+  /// Pertanyaan yang gagal terkirim — dipakai tombol "Coba lagi" (paritas web).
+  String? _retry;
+
   void _toLogin() {
     Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()), (r) => false);
@@ -467,10 +470,24 @@ class _AsistenScreenState extends State<AsistenScreen> {
         _toLogin();
         return;
       }
-      setState(() => _error = e.message);
+      setState(() => _error = _pesanGalat(e.message));
       return;
     }
     setState(() => _error = fallback);
+  }
+
+  /// Saldo/kuota penyedia AI habis (HTTP 402 DeepSeek, diteruskan backend sbg
+  /// teks) dulu tampil sebagai galat teknis mentah — paritas `pesanGalatAsisten`
+  /// di web. Pesan server lain dipakai apa adanya.
+  static String _pesanGalat(String raw) {
+    final r = raw.toLowerCase();
+    if (RegExp(r'\b402\b').hasMatch(r) ||
+        r.contains('insufficient balance') ||
+        r.contains('saldo') ||
+        r.contains('kuota')) {
+      return 'Layanan AI sementara tidak tersedia (kuota penyedia AI habis) — hubungi admin.';
+    }
+    return raw;
   }
 
   String _now() {
@@ -586,6 +603,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
       _ctrl.clear();
       _busy = true;
       _error = null;
+      _retry = null;
       _steps.clear();
       _drafBersih();
     });
@@ -651,6 +669,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
         _drafBersih();   // batal / gagal → draf ikut hilang, tak menggantung
         _busy = false;
         _steps.clear();
+        _retry = body;   // "Coba lagi" mengirim ulang pertanyaan ini (paritas web)
       });
       // Dibatalkan user = bukan kesalahan. Pertanyaannya tetap di transkrip.
       if (_dibatalkan) {
@@ -1081,7 +1100,25 @@ class _AsistenScreenState extends State<AsistenScreen> {
           width: double.infinity,
           color: m.danger50,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-          child: Text(_error!, style: TextStyle(color: m.danger600, fontSize: 12.5)),
+          child: Row(children: [
+            Expanded(
+              child: Text(_error!,
+                  style: TextStyle(color: m.danger600, fontSize: 12.5)),
+            ),
+            // Paritas tombol "Coba lagi" web: kirim ulang pertanyaan yang gagal.
+            if (_retry != null && !_busy)
+              TextButton(
+                onPressed: () {
+                  final q = _retry!;
+                  setState(() {
+                    _retry = null;
+                    _error = null;
+                  });
+                  _send(q);
+                },
+                child: const Text('Coba lagi'),
+              ),
+          ]),
         ),
       _inputBar(m),
     ]);
