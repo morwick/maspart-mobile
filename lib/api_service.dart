@@ -514,7 +514,9 @@ class ApiService {
     return PartExplodedFigure.fromJson(_Api._obj(data));
   }
 
-  /// Stok live satu part dari Accurate, termasuk rincian per gudang.
+  /// Stok satu part dari INDEKS Accurate (agregat + rincian per gudang).
+  /// Server tak pernah menembak Accurate live per-PN — indeks ditarik 3×
+  /// sehari pada jam WIB tetap 07/12/19 lalu dipersist ke disk.
   static Future<AccurateStock> accurateStock(String pn) async {
     final data = await _Api.get('/api/parts/accurate-stock', query: {'pn': pn});
     return AccurateStock.fromJson(_Api._obj(data));

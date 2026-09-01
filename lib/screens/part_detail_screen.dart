@@ -230,8 +230,9 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     }
   }
 
-  /// Stok live per gudang dari Accurate (ERP). Kegagalan di sini TIDAK boleh
-  /// diterjemahkan jadi angka 0 — 0 berarti habis, gagal berarti tidak tahu.
+  /// Stok per gudang dari indeks Accurate (ERP) — BUKAN live per-PN: server
+  /// menariknya 3× sehari pada jam WIB tetap 07/12/19. Kegagalan di sini TIDAK
+  /// boleh diterjemahkan jadi angka 0 — 0 berarti habis, gagal berarti tidak tahu.
   Future<void> _loadStock() async {
     if (_pn.isEmpty) {
       setState(() => _loadingStock = false);

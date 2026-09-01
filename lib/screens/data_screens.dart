@@ -588,7 +588,8 @@ class _StokScreenState extends State<StokScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              Text('Ketuk baris untuk rincian stok per gudang (langsung dari Accurate).',
+              Text('Ketuk baris untuk rincian stok per gudang — sinkron 3× sehari '
+                  '(07.00, 12.00, 19.00 WIB).',
                   style: TextStyle(fontSize: 11.5, color: m.ink400)),
               const SizedBox(height: 16),
               _Pager(
