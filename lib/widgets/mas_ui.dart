@@ -3,6 +3,7 @@
 // Semua widget theme-aware lewat context.mas (light/dark).
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../theme/mas_theme.dart';
 
 /// Kartu dasar: paper, border ink150, radius 10, shadow-1.
@@ -216,6 +217,22 @@ class MasInput extends StatelessWidget {
   /// sengaja lebih besar. Null = ikut sistem (radius 6, teks 14).
   final double? radius;
   final double fontSize;
+
+  /// Jenis papan ketik (mis. angka untuk qty, email untuk alamat surel).
+  final TextInputType? keyboardType;
+
+  /// Kapitalisasi otomatis. Default `none`: kolom part number / username tak
+  /// boleh diawali huruf besar oleh papan ketik.
+  final TextCapitalization textCapitalization;
+
+  /// Petunjuk autofill Android (mis. `AutofillHints.username`) — tanpa ini
+  /// pengelola sandi HP tak menawarkan isian apa pun di layar login.
+  final Iterable<String>? autofillHints;
+
+  /// Matikan koreksi/saran kata untuk kolom teknis (PN, VIN, username).
+  final bool autocorrect;
+  final bool enabled;
+  final bool autofocus;
   const MasInput({
     super.key,
     this.controller,
@@ -232,6 +249,12 @@ class MasInput extends StatelessWidget {
     this.focusNode,
     this.radius,
     this.fontSize = 14,
+    this.keyboardType,
+    this.textCapitalization = TextCapitalization.none,
+    this.autofillHints,
+    this.autocorrect = true,
+    this.enabled = true,
+    this.autofocus = false,
   });
 
   @override
@@ -249,7 +272,7 @@ class MasInput extends StatelessWidget {
         bottom: multiline ? 10 : 0,
       ),
       decoration: BoxDecoration(
-        color: m.paper,
+        color: enabled ? m.paper : m.ink100,
         borderRadius: BorderRadius.circular(r),
         border: Border.all(color: m.ink200),
       ),
@@ -264,6 +287,13 @@ class MasInput extends StatelessWidget {
             onChanged: onChanged,
             onSubmitted: onSubmitted,
             textInputAction: action,
+            keyboardType: keyboardType,
+            textCapitalization: textCapitalization,
+            autofillHints: autofillHints,
+            autocorrect: autocorrect,
+            enableSuggestions: autocorrect,
+            enabled: enabled,
+            autofocus: autofocus,
             maxLines: maxLines,
             minLines: multiline ? maxLines : 1,
             style: mono
@@ -310,7 +340,12 @@ class MasButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final m = context.mas;
-    final fg = primary ? Colors.white : m.ink800;
+    // Tombol mati sebelumnya tetap hijau penuh & terlihat bisa ditekan —
+    // user menekan berkali-kali lalu mengira aplikasinya macet.
+    final disabled = onTap == null && !loading;
+    final fg = disabled
+        ? (primary ? Colors.white.withValues(alpha: 0.72) : m.ink400)
+        : (primary ? Colors.white : m.ink800);
     final child = Row(
       mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.center,
@@ -324,17 +359,24 @@ class MasButton extends StatelessWidget {
       ],
     );
     return Material(
-      color: primary ? m.brand600 : m.paper,
+      color: primary
+          ? (disabled ? m.brand600.withValues(alpha: 0.45) : m.brand600)
+          : (disabled ? m.ink100 : m.paper),
       borderRadius: BorderRadius.circular(MasRadii.input),
       child: InkWell(
-        onTap: loading ? null : onTap,
+        onTap: (loading || onTap == null)
+            ? null
+            : () {
+                HapticFeedback.selectionClick();
+                onTap!();
+              },
         borderRadius: BorderRadius.circular(MasRadii.input),
         child: Container(
           height: height,
           padding: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(MasRadii.input),
-            border: primary ? null : Border.all(color: m.ink200),
+            border: primary ? null : Border.all(color: disabled ? m.ink150 : m.ink200),
           ),
           alignment: Alignment.center,
           child: child,
@@ -601,6 +643,50 @@ class _MasSkeletonState extends State<MasSkeleton> with SingleTickerProviderStat
           ),
         );
       },
+    );
+  }
+}
+
+/// Keadaan GAGAL dengan jalan keluar. Beda dari [MasEmpty]: ini dipakai saat
+/// pemuatan benar-benar gagal (jaringan/server), bukan saat datanya memang
+/// kosong — membedakan keduanya mencegah user menyimpulkan "barangnya tidak
+/// ada" padahal yang terjadi adalah "tidak berhasil dicek".
+class MasErrorState extends StatelessWidget {
+  final String title;
+  final String message;
+  final VoidCallback? onRetry;
+  final IconData icon;
+  const MasErrorState({
+    super.key,
+    this.title = 'Gagal memuat',
+    required this.message,
+    this.onRetry,
+    this.icon = Icons.cloud_off_rounded,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final m = context.mas;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 34, horizontal: 24),
+      child: Column(children: [
+        Container(
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(color: m.danger50, borderRadius: BorderRadius.circular(18)),
+          child: Icon(icon, size: 28, color: m.danger600),
+        ),
+        const SizedBox(height: 13),
+        Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: m.ink900)),
+        const SizedBox(height: 5),
+        Text(message,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12.5, color: m.ink500, height: 1.5)),
+        if (onRetry != null) ...[
+          const SizedBox(height: 14),
+          MasButton(label: 'Coba lagi', icon: Icons.refresh_rounded, primary: false, onTap: onRetry),
+        ],
+      ]),
     );
   }
 }

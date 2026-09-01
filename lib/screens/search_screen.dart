@@ -6,6 +6,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/mas_theme.dart';
 import '../widgets/mas_ui.dart';
 import '../utils.dart';
@@ -20,6 +21,10 @@ const int _kMaxFetch = 2000;
 const int _kFetchSize = 200;
 const List<int> _kPageSizes = [20, 50, 100];
 
+/// Riwayat pencarian tersimpan di perangkat (tidak pernah dikirim ke server).
+const String _kRiwayatKey = 'maspart_riwayat_cari';
+const int _kRiwayatMax = 8;
+
 class SearchPartScreen extends StatefulWidget {
   const SearchPartScreen({super.key});
   @override
@@ -29,8 +34,14 @@ class SearchPartScreen extends StatefulWidget {
 class _SearchPartScreenState extends State<SearchPartScreen> {
   final _ctrl = TextEditingController();
   final _refineCtrl = TextEditingController();
+  final _scroll = ScrollController();
   Timer? _debounce;
   int _reqId = 0;
+
+  /// Pencarian terakhir di perangkat ini. Di lapangan PN yang sama dicari
+  /// berulang kali dalam sehari — mengetik ulang 12 karakter tiap kali adalah
+  /// pekerjaan yang bisa dihapus.
+  List<String> _riwayat = const [];
 
   int _tab = 0; // 0 = Part Number, 1 = Part Name
   bool _loading = false;
@@ -54,11 +65,62 @@ class _SearchPartScreenState extends State<SearchPartScreen> {
   bool get _byName => _tab == 1;
 
   @override
+  void initState() {
+    super.initState();
+    _loadRiwayat();
+  }
+
+  @override
   void dispose() {
     _debounce?.cancel();
+    _scroll.dispose();
     _ctrl.dispose();
     _refineCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadRiwayat() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = prefs.getStringList(_kRiwayatKey) ?? const [];
+      if (mounted) setState(() => _riwayat = list);
+    } catch (_) {
+      /* penyimpanan bermasalah → riwayat kosong, fitur lain tetap jalan */
+    }
+  }
+
+  /// Simpan hanya pencarian yang BERHASIL (ada hasilnya) — menyimpan kata kunci
+  /// nihil hanya akan menawarkan ulang pencarian yang sudah terbukti gagal.
+  Future<void> _simpanRiwayat(String term) async {
+    final t = term.trim();
+    if (t.isEmpty) return;
+    final next = [t, ..._riwayat.where((e) => e.toLowerCase() != t.toLowerCase())]
+        .take(_kRiwayatMax)
+        .toList();
+    if (mounted) setState(() => _riwayat = next);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_kRiwayatKey, next);
+    } catch (_) {/* tak fatal */}
+  }
+
+  Future<void> _hapusRiwayat() async {
+    if (mounted) setState(() => _riwayat = const []);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kRiwayatKey);
+    } catch (_) {/* tak fatal */}
+  }
+
+  /// Pindah halaman SELALU kembali ke atas daftar. Tanpa ini user menekan
+  /// "Berikutnya" di kaki layar lalu melihat kaki halaman berikutnya — 20 baris
+  /// pertamanya terlewat tanpa disadari.
+  void _setPage(int page) {
+    setState(() => _page = page);
+    if (_scroll.hasClients) {
+      _scroll.animateTo(0,
+          duration: const Duration(milliseconds: 260), curve: Curves.easeOutCubic);
+    }
   }
 
   void _onChanged(String v) {
@@ -84,6 +146,9 @@ class _SearchPartScreenState extends State<SearchPartScreen> {
   void _submit() {
     final q = _query.trim();
     if (q.isEmpty) return;
+    // Papan ketik menutupi separuh layar hasil; setelah menekan "Cari" ia tak
+    // punya alasan tetap terbuka.
+    FocusScope.of(context).unfocus();
     setState(() {
       _searched = true;
       _loading = true;
@@ -112,6 +177,7 @@ class _SearchPartScreenState extends State<SearchPartScreen> {
         if (!mounted || id != _reqId) return;
         acc.addAll(r.results);
       }
+      if (acc.isNotEmpty) _simpanRiwayat(term);
       setState(() {
         _all = acc;
         _totalCount = first.count;
@@ -199,7 +265,9 @@ class _SearchPartScreenState extends State<SearchPartScreen> {
       harga: r.harga,
       berat: r.berat,
     ));
-    AppNav.of(context).toast('${r.partNumber} masuk keranjang');
+    final nav = AppNav.of(context);
+    nav.toast('${r.partNumber} masuk keranjang',
+        actionLabel: 'Lihat', onAction: () => nav.go(MasScreen.keranjang));
   }
 
   @override
@@ -220,6 +288,7 @@ class _SearchPartScreenState extends State<SearchPartScreen> {
     final to = shown > 0 ? math.min(_pageClamped * _pageSize, shown) : 0;
 
     return ListView(
+      controller: _scroll,
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
       children: [
         MasCard(
@@ -242,6 +311,22 @@ class _SearchPartScreenState extends State<SearchPartScreen> {
                   onChanged: _onChanged,
                   onSubmitted: (_) => _submit(),
                   action: TextInputAction.search,
+                  // Part number bukan kata: koreksi & saran papan ketik justru
+                  // mengubah huruf/angka yang sudah benar.
+                  autocorrect: _byName,
+                  suffix: _query.trim().isEmpty
+                      ? null
+                      : InkResponse(
+                          radius: 20,
+                          onTap: () {
+                            _ctrl.clear();
+                            _onChanged('');
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                            child: Icon(Icons.close_rounded, size: 17, color: m.ink500),
+                          ),
+                        ),
                 ),
               ),
               const SizedBox(width: 10),
@@ -249,6 +334,8 @@ class _SearchPartScreenState extends State<SearchPartScreen> {
             ]),
           ]),
         ),
+        // Layar awal: riwayat + petunjuk, bukan ruang kosong di bawah kotak cari.
+        if (!_searched) _pembuka(m),
         if (_searched) ...[
           const SizedBox(height: 14),
           if (_loading)
@@ -390,6 +477,71 @@ class _SearchPartScreenState extends State<SearchPartScreen> {
     ]);
   }
 
+  /// Isi layar sebelum ada pencarian: riwayat (bila ada) + petunjuk singkat.
+  Widget _pembuka(MasColors m) {
+    if (_riwayat.isEmpty) {
+      return const MasEmpty(
+        icon: Icons.search_rounded,
+        title: 'Mulai cari part',
+        subtitle: 'Ketik part number (mis. 16Y-15-00010) atau pindah ke tab '
+            '"Part Name" untuk mencari dengan nama barang.',
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 18),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(child: MasEyebrow('Pencarian terakhir')),
+          InkWell(
+            onTap: _hapusRiwayat,
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: Text('Hapus',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: m.ink500)),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final t in _riwayat)
+              Material(
+                color: m.paper,
+                borderRadius: BorderRadius.circular(999),
+                child: InkWell(
+                  onTap: () {
+                    _ctrl.text = t;
+                    setState(() {
+                      _query = t;
+                      _searched = true;
+                      _loading = true;
+                    });
+                    _runSearch(t, _byName);
+                  },
+                  borderRadius: BorderRadius.circular(999),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: m.ink200),
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.history_rounded, size: 13, color: m.ink400),
+                      const SizedBox(width: 6),
+                      Text(t, style: masMono(size: 12, color: m.ink800)),
+                    ]),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ]),
+    );
+  }
+
   Widget _saranChip(MasColors m, SaranPart s) {
     final label = s.partNumber.isNotEmpty
         ? (s.partName.isNotEmpty ? '${s.partNumber} — ${s.partName}' : s.partNumber)
@@ -469,7 +621,7 @@ class _SearchPartScreenState extends State<SearchPartScreen> {
         label: '← Sebelumnya',
         primary: false,
         height: 34,
-        onTap: _pageClamped <= 1 ? null : () => setState(() => _page = _pageClamped - 1),
+        onTap: _pageClamped <= 1 ? null : () => _setPage(_pageClamped - 1),
       ),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -480,7 +632,7 @@ class _SearchPartScreenState extends State<SearchPartScreen> {
         label: 'Berikutnya →',
         primary: false,
         height: 34,
-        onTap: _pageClamped >= _totalPages ? null : () => setState(() => _page = _pageClamped + 1),
+        onTap: _pageClamped >= _totalPages ? null : () => _setPage(_pageClamped + 1),
       ),
     ]);
   }

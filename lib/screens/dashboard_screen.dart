@@ -25,21 +25,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    ApiService.aiStatus().then((v) {
-      if (mounted) setState(() => _aiOn = v);
-    });
-    // monitoring & index-status khusus admin — untuk peran lain endpoint menolak
-    // (403) dan kartunya memang tak dirender, jadi cukup diabaikan.
-    ApiService.monitoring().then((d) {
-      if (!mounted) return;
-      setState(() {
-        _online = d.onlineCount;
-        _activity = d.recentActivity.take(6).toList();
-      });
-    }).catchError((_) {});
-    ApiService.indexStatus().then((d) {
-      if (mounted) setState(() => _indexed = d.totalIndexed);
-    }).catchError((_) {});
+    _load();
+  }
+
+  /// Muat ulang semua angka. Dipakai saat layar dibuka DAN saat user menarik
+  /// layar ke bawah — dashboard yang gagal memuat sekali dulu menampilkan "—"
+  /// selamanya sampai aplikasi dibuka ulang.
+  Future<void> _load() async {
+    await Future.wait<void>([
+      ApiService.aiStatus().then((v) {
+        if (mounted) setState(() => _aiOn = v);
+      }).catchError((_) {}),
+      // monitoring & index-status khusus admin — untuk peran lain endpoint
+      // menolak (403) dan kartunya memang tak dirender, jadi cukup diabaikan.
+      ApiService.monitoring().then((d) {
+        if (!mounted) return;
+        setState(() {
+          _online = d.onlineCount;
+          _activity = d.recentActivity.take(6).toList();
+        });
+      }).catchError((_) {}),
+      ApiService.indexStatus().then((d) {
+        if (mounted) setState(() => _indexed = d.totalIndexed);
+      }).catchError((_) {}),
+    ]);
   }
 
   String _activityText(MonitoringActivity a) {
@@ -83,7 +92,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final quick = quickAll.where((q) => nav.accessible.contains(q.$4)).toList();
     final canAsisten = nav.accessible.contains(MasScreen.asisten);
 
-    return ListView(
+    return RefreshIndicator(
+      onRefresh: _load,
+      color: m.brand600,
+      backgroundColor: m.paper,
+      child: ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 28),
       children: [
         MasEyebrow(_dateLabel),
@@ -167,6 +181,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ],
       ],
+      ),
     );
   }
 

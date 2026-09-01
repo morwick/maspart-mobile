@@ -5,11 +5,14 @@ import 'package:flutter/material.dart';
 import '../theme/mas_theme.dart';
 import 'nav.dart';
 
-class MasDrawer extends StatelessWidget {
+class MasDrawer extends StatefulWidget {
   final MasScreen current;
   final String username;
   final String role;
   final List<NavSection> sections;
+
+  /// Versi terpasang (mis. "2.2.4"). Kosong = belum terbaca / tak ditampilkan.
+  final String version;
   final void Function(MasScreen) onGo;
   final VoidCallback onLogout;
   const MasDrawer({
@@ -18,9 +21,44 @@ class MasDrawer extends StatelessWidget {
     required this.username,
     required this.role,
     required this.sections,
+    this.version = '',
     required this.onGo,
     required this.onLogout,
   });
+
+  @override
+  State<MasDrawer> createState() => _MasDrawerState();
+}
+
+class _MasDrawerState extends State<MasDrawer> {
+  final _filterCtrl = TextEditingController();
+  String _filter = '';
+
+  MasScreen get current => widget.current;
+  String get username => widget.username;
+  String get role => widget.role;
+  void Function(MasScreen) get onGo => widget.onGo;
+  VoidCallback get onLogout => widget.onLogout;
+
+  @override
+  void dispose() {
+    _filterCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Seksi setelah disaring kotak cari. Admin punya 15 item di seksi Admin
+  /// saja — menggulir mencarinya lebih lambat daripada mengetik dua huruf.
+  List<NavSection> get _sections {
+    final q = _filter.trim().toLowerCase();
+    if (q.isEmpty) return widget.sections;
+    final out = <NavSection>[];
+    for (final sec in widget.sections) {
+      final items =
+          sec.items.where((it) => it.label.toLowerCase().contains(q)).toList();
+      if (items.isNotEmpty) out.add(NavSection(sec.label, items));
+    }
+    return out;
+  }
 
   static const _bg = Color(0xFF0F1411);
   static const _panel = Color(0xFF1B211D);
@@ -63,11 +101,18 @@ class MasDrawer extends StatelessWidget {
               ]),
             ]),
           ),
+          if (_totalItems > 8) _searchBox(),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
               children: [
-                for (final sec in sections) ...[
+                if (_sections.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 24, 10, 8),
+                    child: Text('Tidak ada menu yang cocok.',
+                        style: TextStyle(fontSize: 12.5, color: _muted)),
+                  ),
+                for (final sec in _sections) ...[
                   Padding(
                     padding: const EdgeInsets.fromLTRB(10, 16, 10, 6),
                     child: Text(sec.label.toUpperCase(),
@@ -100,7 +145,10 @@ class MasDrawer extends StatelessWidget {
                       Text(username,
                           maxLines: 1, overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFFF3F5F3))),
-                      Text(role.isEmpty ? 'user' : role,
+                      Text(
+                          widget.version.isEmpty
+                              ? (role.isEmpty ? 'user' : role)
+                              : '${role.isEmpty ? 'user' : role} · v${widget.version}',
                           maxLines: 1, overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 11, color: _muted)),
                     ]),
@@ -119,6 +167,49 @@ class MasDrawer extends StatelessWidget {
       ),
     );
   }
+
+  int get _totalItems =>
+      widget.sections.fold(0, (n, s) => n + s.items.length);
+
+  Widget _searchBox() => Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+        child: Container(
+          height: 38,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: _panel,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(children: [
+            const Icon(Icons.search_rounded, size: 15, color: _muted),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _filterCtrl,
+                onChanged: (v) => setState(() => _filter = v),
+                style: const TextStyle(fontSize: 13, color: Color(0xFFF3F5F3)),
+                cursorColor: _brand500,
+                textInputAction: TextInputAction.search,
+                decoration: const InputDecoration(
+                  isCollapsed: true,
+                  border: InputBorder.none,
+                  hintText: 'Cari menu…',
+                  hintStyle: TextStyle(fontSize: 13, color: _muted),
+                ),
+              ),
+            ),
+            if (_filter.isNotEmpty)
+              InkResponse(
+                radius: 18,
+                onTap: () {
+                  _filterCtrl.clear();
+                  setState(() => _filter = '');
+                },
+                child: const Icon(Icons.close_rounded, size: 15, color: _muted),
+              ),
+          ]),
+        ),
+      );
 
   Widget _item(NavItem it) {
     final active = it.screen == current;

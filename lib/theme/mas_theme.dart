@@ -3,7 +3,9 @@
 // Mendukung light + dark. Diakses lewat `context.mas`.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// ThemeExtension berisi seluruh palet desain (light & dark).
 @immutable
@@ -153,7 +155,8 @@ class MasColors extends ThemeExtension<MasColors> {
         ];
 
   @override
-  MasColors copyWith({bool? isDark}) => this;
+  MasColors copyWith({bool? isDark}) =>
+      (isDark == null || isDark == this.isDark) ? this : (isDark ? dark : light);
 
   @override
   MasColors lerp(ThemeExtension<MasColors>? other, double t) {
@@ -228,28 +231,114 @@ ThemeData buildMasTheme(Brightness brightness) {
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       backgroundColor: mas.ink800,
-      contentTextStyle: TextStyle(color: mas.ink50, fontWeight: FontWeight.w600),
+      contentTextStyle: TextStyle(color: mas.ink50, fontWeight: FontWeight.w600, fontSize: 13),
+      actionTextColor: mas.brand500,
+      insetPadding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(MasRadii.card)),
+      elevation: 6,
+    ),
+    // Transisi halaman Android 14+: gestur "predictive back" menampilkan
+    // pratinjau layar tujuan, bukan animasi geser polos.
+    pageTransitionsTheme: const PageTransitionsTheme(builders: {
+      TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
+    }),
+    // Bilah gulir terlihat di daftar panjang (stok, katalog, log admin) —
+    // tanpa ini user tak punya petunjuk posisi di daftar ribuan baris.
+    scrollbarTheme: ScrollbarThemeData(
+      thumbColor: WidgetStatePropertyAll(mas.ink300),
+      radius: const Radius.circular(999),
+      thickness: const WidgetStatePropertyAll(3),
     ),
     extensions: [mas],
   );
 }
 
-/// Controller tema global — toggle light/dark dari header.
+/// Gaya overlay sistem (ikon status bar & navigation bar) untuk satu mode.
+/// Dipakai lewat AnnotatedRegion di root — tanpa ini ikon status bar tetap
+/// GELAP saat tema gelap, alias tak terlihat.
+SystemUiOverlayStyle masOverlayStyle(Brightness brightness) {
+  final isDark = brightness == Brightness.dark;
+  final mas = isDark ? MasColors.dark : MasColors.light;
+  return SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+    statusBarBrightness: isDark ? Brightness.dark : Brightness.light, // iOS
+    systemNavigationBarColor: mas.canvas,
+    systemNavigationBarDividerColor: mas.ink150,
+    systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+    systemNavigationBarContrastEnforced: false,
+  );
+}
+
+/// Controller tema global — terang / gelap / ikut-sistem, dari header.
+///
+/// Pilihan DISIMPAN (SharedPreferences): sebelumnya setiap aplikasi dibuka
+/// ulang selalu balik terang, jadi tombol tema terasa tak bekerja. Default awal
+/// [ThemeMode.system] supaya HP bertema gelap langsung tampil gelap.
 class ThemeController extends ChangeNotifier {
-  ThemeMode _mode = ThemeMode.light;
+  static const _prefKey = 'maspart_theme_mode';
+
+  ThemeMode _mode = ThemeMode.system;
+  bool _loaded = false;
+
   ThemeMode get mode => _mode;
+
+  /// Preferensi sudah dibaca dari disk?
+  bool get loaded => _loaded;
+
+  /// Gelap EFEKTIF (memperhitungkan mode "ikut sistem") — dipakai ikon toggle.
+  bool isDarkIn(BuildContext context) => switch (_mode) {
+        ThemeMode.dark => true,
+        ThemeMode.light => false,
+        ThemeMode.system =>
+          MediaQuery.platformBrightnessOf(context) == Brightness.dark,
+      };
+
+  /// Kompatibilitas lama: gelap bila mode-nya memang dipilih gelap.
   bool get isDark => _mode == ThemeMode.dark;
 
-  void toggle() {
-    _mode = _mode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+  Future<void> load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefKey);
+      _mode = switch (raw) {
+        'dark' => ThemeMode.dark,
+        'light' => ThemeMode.light,
+        _ => ThemeMode.system,
+      };
+    } catch (_) {
+      /* penyimpanan bermasalah → ikut sistem */
+    }
+    _loaded = true;
     notifyListeners();
   }
+
+  Future<void> _persist() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefKey, _mode.name);
+    } catch (_) {
+      /* gagal simpan → pilihan tetap berlaku untuk sesi ini */
+    }
+  }
+
+  /// Toggle dua-arah dari mode yang SEDANG TERLIHAT: bila kini gelap (walau
+  /// karena ikut sistem), tombol memaksa terang, dan sebaliknya.
+  void toggleFrom(BuildContext context) =>
+      set(isDarkIn(context) ? ThemeMode.light : ThemeMode.dark);
+
+  /// Kompatibilitas lama (tanpa context).
+  void toggle() => set(_mode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark);
 
   void set(ThemeMode m) {
     if (_mode == m) return;
     _mode = m;
     notifyListeners();
+    _persist();
   }
+
+  /// Kembali mengikuti tema HP (tekan-lama tombol tema).
+  void followSystem() => set(ThemeMode.system);
 }
 
 /// Inherited access ke ThemeController.

@@ -81,6 +81,27 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     _loadSpec();
   }
 
+  /// Muat ulang SEMUA kartu (tarik-ke-bawah). Stok Accurate berubah sepanjang
+  /// hari; sebelumnya satu-satunya cara menyegarkannya adalah keluar dari layar
+  /// lalu membuka partnya lagi.
+  Future<void> _reloadAll() async {
+    setState(() {
+      _loadingPhotos = true;
+      _loadingStock = true;
+      _stockErr = null;
+      _loadingSpec = true;
+      _specErr = null;
+    });
+    await Future.wait<void>([
+      _backfillFromCatalog(),
+      _loadPhotos(),
+      _loadStock(),
+      _loadVarian(),
+      _loadSpec(),
+      if (_rakDiminta) _loadRak(),
+    ]);
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -510,7 +531,8 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
       harga: _hargaStr,
       berat: _beratGram,
     ));
-    nav.toast('$_pn masuk keranjang');
+    nav.toast('$_pn masuk keranjang',
+        actionLabel: 'Lihat', onAction: () => nav.go(MasScreen.keranjang));
   }
 
   /// Keranjang untuk SATU varian pemasok. `part_number` = kode varian apa
@@ -525,7 +547,8 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
       // Berat part FISIK sama untuk semua varian — yang beda hanya pemasoknya.
       berat: _beratGram,
     ));
-    nav.toast('${v.kode} masuk keranjang');
+    nav.toast('${v.kode} masuk keranjang',
+        actionLabel: 'Lihat', onAction: () => nav.go(MasScreen.keranjang));
   }
 
   @override
@@ -546,7 +569,12 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     final showStok = nav.showStok;   // pembeli → selalu false di sini
     final showHarga = nav.showHarga;
 
-    return ListView(
+    return RefreshIndicator(
+      onRefresh: _reloadAll,
+      color: m.brand600,
+      backgroundColor: m.paper,
+      child: ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
       children: [
         _backButton(m),
@@ -638,6 +666,7 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
           _CekUnitCard(pn: pn),
         ],
       ],
+      ),
     );
   }
 

@@ -52,3 +52,11 @@ app.*.map.json
 
 # Berkas kerja tooling lokal
 .claude/
+
+# Kunci penandatanganan rilis Android — RAHASIA, jangan pernah masuk git.
+android/key.properties
+**/*.jks
+**/*.keystore
+
+# Cache Kotlin Gradle (artefak build)
+android/.kotlin/

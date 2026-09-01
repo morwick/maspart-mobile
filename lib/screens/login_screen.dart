@@ -2,6 +2,8 @@
 // Phone 390×844): pita merek hijau di atas, form di bawahnya, footer menempel
 // ke dasar layar. Paritas dengan web frontend/src/app/login/page.tsx.
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../theme/mas_theme.dart';
 import '../widgets/mas_ui.dart';
 import '../api_service.dart';
@@ -27,6 +29,31 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _remember = true;
   String? _error;
 
+  /// Versi terpasang untuk footer. Dulu tertulis mati "v4.0" — angka yang tak
+  /// pernah cocok dengan versi APK mana pun, jadi laporan user tak bisa
+  /// dipakai untuk menentukan versi mereka.
+  String _version = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreLast();
+    PackageInfo.fromPlatform().then((i) {
+      if (mounted) setState(() => _version = 'v${i.version}');
+    }).catchError((_) {});
+  }
+
+  /// Isi awal form dari login terakhir (username saja — password tak pernah
+  /// disimpan).
+  Future<void> _restoreLast() async {
+    final (remember, username) = await AuthStorage.lastLogin();
+    if (!mounted) return;
+    setState(() {
+      _remember = remember;
+      if (username.isNotEmpty && _userCtrl.text.isEmpty) _userCtrl.text = username;
+    });
+  }
+
   @override
   void dispose() {
     _userCtrl.dispose();
@@ -47,19 +74,27 @@ class _LoginScreenState extends State<LoginScreen> {
       _loading = true;
       _error = null;
     });
+    // Centang "Ingat saya" menentukan apakah token ditulis ke disk atau hanya
+    // hidup selama proses aplikasi — DIPASANG SEBELUM login karena
+    // ApiService.login() yang menyimpan tokennya.
+    AuthStorage.persist = _remember;
     try {
       final token = await ApiService.login(u, p);
       await AuthStorage.saveToken(token);
+      await AuthStorage.rememberUsername(u, _remember);
       if (!mounted) return;
+      TextInput.finishAutofillContext(); // tawarkan simpan sandi ke pengelola HP
       Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AppShell()));
     } on ApiException catch (e) {
       if (!mounted) return;
+      HapticFeedback.heavyImpact();
       setState(() {
         _loading = false;
         _error = e.statusCode == 401 ? 'Username atau password salah. Coba lagi.' : e.message;
       });
     } catch (_) {
       if (!mounted) return;
+      HapticFeedback.heavyImpact();
       setState(() {
         _loading = false;
         _error = 'Gagal terhubung. Periksa koneksi Anda.';
@@ -154,41 +189,62 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: TextStyle(fontSize: 13.5, color: m.ink500)),
               const SizedBox(height: 24),
 
-              _label(context, 'Username'),
-              const SizedBox(height: 7),
-              MasInput(
-                controller: _userCtrl,
-                hint: 'andi.gudang',
-                action: TextInputAction.next,
-                height: 50,
-                radius: 10,
-                fontSize: 16,
-              ),
-              const SizedBox(height: 16),
+              AutofillGroup(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  _label(context, 'Username'),
+                  const SizedBox(height: 7),
+                  MasInput(
+                    controller: _userCtrl,
+                    hint: 'andi.gudang',
+                    action: TextInputAction.next,
+                    height: 50,
+                    radius: 10,
+                    fontSize: 16,
+                    autocorrect: false,
+                    autofillHints: const [AutofillHints.username],
+                    keyboardType: TextInputType.name,
+                  ),
+                  const SizedBox(height: 16),
 
-              _label(context, 'Password'),
-              const SizedBox(height: 7),
-              MasInput(
-                controller: _passCtrl,
-                hint: '••••••••',
-                obscure: _obscure,
-                action: TextInputAction.done,
-                onSubmitted: (_) => _submit(),
-                height: 50,
-                radius: 10,
-                fontSize: 16,
-                suffix: _pwToggle(context),
+                  _label(context, 'Password'),
+                  const SizedBox(height: 7),
+                  MasInput(
+                    controller: _passCtrl,
+                    hint: '••••••••',
+                    obscure: _obscure,
+                    action: TextInputAction.done,
+                    onSubmitted: (_) => _submit(),
+                    height: 50,
+                    radius: 10,
+                    fontSize: 16,
+                    autocorrect: false,
+                    autofillHints: const [AutofillHints.password],
+                    suffix: _pwToggle(context),
+                  ),
+                ]),
               ),
               const SizedBox(height: 4),
 
               InkWell(
-                onTap: () => setState(() => _remember = !_remember),
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  setState(() => _remember = !_remember);
+                },
                 child: SizedBox(
                   height: 44, // target sentuh nyaman
                   child: Row(children: [
                     _check(context, _remember),
                     const SizedBox(width: 10),
-                    Text('Ingat saya di device ini', style: TextStyle(fontSize: 14, color: m.ink700)),
+                    Expanded(
+                      child: Text(
+                        _remember
+                            ? 'Ingat saya di device ini'
+                            : 'Jangan ingat — keluar saat aplikasi ditutup',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 14, color: m.ink700),
+                      ),
+                    ),
                   ]),
                 ),
               ),
@@ -205,7 +261,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 20),
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                 Text('Lupa password? Hubungi admin.', style: TextStyle(fontSize: 12, color: m.ink400)),
-                Text('v4.0', style: masMono(size: 12, color: m.ink400)),
+                Text(_version, style: masMono(size: 12, color: m.ink400)),
               ]),
             ]),
           ),

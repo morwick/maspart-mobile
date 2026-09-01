@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Trafik ke server produksi (https://maspart.tech) WAJIB terenkripsi.
+
+  Sebelumnya manifest memakai android:usesCleartextTraffic="true" untuk SEMUA
+  host — izin yang hanya dibutuhkan saat menguji ke backend lokal, tetapi ikut
+  terbawa ke APK rilis di tangan pengguna. Di sini HTTP polos dibatasi hanya
+  untuk alamat pengembangan (adb reverse & emulator).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

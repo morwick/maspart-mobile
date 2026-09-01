@@ -5,6 +5,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -81,6 +82,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _updateDismissed = false; // user menutup banner
   String _downloadUrl = 'https://maspart.tech/download';
 
+  /// Versi terpasang, untuk kaki drawer. Kosong = belum terbaca.
+  String _appVersion = '';
+
+  /// Waktu tombol Kembali terakhir ditekan di beranda — dipakai pola "tekan
+  /// sekali lagi untuk keluar" supaya aplikasi tak tertutup tak sengaja.
+  DateTime? _lastBackAt;
+
   List<NavSection> get _sections => buildNavSections(
         role: _role,
         allowed: _allowedMenus,
@@ -95,6 +103,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _cart.addListener(_onCartChanged);
     _loadCachedConfig();
     _loadSession();
+    PackageInfo.fromPlatform().then((i) {
+      if (mounted) setState(() => _appVersion = i.version);
+    }).catchError((_) {});
   }
 
   /// Izin dimuat sekali saat sesi dibuka, padahal admin bisa mengubah centang
@@ -250,6 +261,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _go(MasScreen target, {Map<String, dynamic>? part}) {
+    // Menekan tujuan yang SEDANG dibuka (bilah bawah / drawer) tak boleh
+    // menumpuk riwayat — kalau tidak, tombol Kembali harus ditekan sekian kali
+    // untuk keluar dari satu layar yang sama.
+    if (target == _screen && part == null) {
+      if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+        Navigator.of(context).pop();
+      }
+      return;
+    }
     setState(() {
       _navigated = true;
       _history.add((_screen, _args));
@@ -270,10 +290,51 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     });
   }
 
-  void _toast(String message) {
+  /// Tombol Kembali perangkat keras Android. Shell ini menyimpan riwayatnya
+  /// SENDIRI (bukan lewat Navigator), jadi tanpa penanganan ini satu tekan
+  /// Kembali dari layar sedalam apa pun langsung MENUTUP aplikasi — cacat
+  /// paling terasa di HP.
+  ///
+  /// Urutannya: tutup drawer → mundur di riwayat → kembali ke beranda →
+  /// "tekan sekali lagi untuk keluar".
+  void _handleSystemBack() {
+    if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+      Navigator.of(context).pop();
+      return;
+    }
+    if (_history.isNotEmpty) {
+      HapticFeedback.selectionClick();
+      _back();
+      return;
+    }
+    final home = _homeScreen(_sections);
+    if (_screen != home) {
+      setState(() => _screen = home);
+      return;
+    }
+    final now = DateTime.now();
+    final last = _lastBackAt;
+    if (last != null && now.difference(last) < const Duration(seconds: 2)) {
+      SystemNavigator.pop();
+      return;
+    }
+    _lastBackAt = now;
+    _toast('Tekan Kembali sekali lagi untuk keluar');
+  }
+
+  /// Pesan singkat. [actionLabel] + [onAction] memberi JALAN KELUAR langsung
+  /// (mis. "masuk keranjang → Lihat"), supaya user tak perlu mencari sendiri
+  /// menu tujuannya setelah membaca notifikasinya.
+  void _toast(String message, {String? actionLabel, VoidCallback? onAction}) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+      ..showSnackBar(SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 3),
+        action: (actionLabel == null || onAction == null)
+            ? null
+            : SnackBarAction(label: actionLabel, onPressed: onAction),
+      ));
   }
 
   Future<void> _logout() async {
@@ -416,70 +477,102 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final m = context.mas;
     final title = _title;
     final isBuyer = _role == 'pembeli';
+    final sections = _sections;
+    final access = accessibleScreens(sections);
+    final updateWall = _forceUpdate || (_updateAvailable && !_updateDismissed);
+    // Papan ketik terbuka (mengetik di Asisten / kolom cari) → bilah bawah
+    // disembunyikan: ia akan naik menempel di atas papan ketik dan memakan
+    // ruang jawaban tanpa gunanya.
+    final keyboardUp = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final tabs = updateWall || keyboardUp || kNoBottomBar.contains(_screen)
+        ? const <NavTab>[]
+        : buildBottomTabs(role: _role, accessible: access);
 
-    return Scaffold(
-      key: _scaffoldKey,
-      backgroundColor: m.canvas,
-      drawerEnableOpenDragGesture: true,
-      drawer: Drawer(
-        backgroundColor: const Color(0xFF0F1411),
-        width: 272,
-        shape: const RoundedRectangleBorder(),
-        child: MasDrawer(
-          current: _screen,
+    return PopScope(
+      // Shell memakai riwayat internal, bukan Navigator: tanpa canPop:false
+      // tombol Kembali menutup aplikasi dari layar mana pun.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _handleSystemBack();
+      },
+      child: Scaffold(
+        key: _scaffoldKey,
+        backgroundColor: m.canvas,
+        drawerEnableOpenDragGesture: true,
+        drawer: Drawer(
+          backgroundColor: const Color(0xFF0F1411),
+          width: 272,
+          shape: const RoundedRectangleBorder(),
+          child: MasDrawer(
+            current: _screen,
+            username: _username,
+            role: _role,
+            sections: sections,
+            version: _appVersion,
+            onGo: (s) => _go(s),
+            onLogout: _logout,
+          ),
+        ),
+        bottomNavigationBar: tabs.isEmpty
+            ? null
+            : _BottomBar(
+                tabs: tabs,
+                current: _screen,
+                onTap: (t) => _go(t),
+                onMenu: () => _scaffoldKey.currentState?.openDrawer(),
+                menuActive: false,
+              ),
+        body: AppNav(
+          screen: _screen,
+          selectedPart: _args,
           username: _username,
           role: _role,
-          sections: _sections,
-          onGo: (s) => _go(s),
-          onLogout: _logout,
-        ),
-      ),
-      body: AppNav(
-        screen: _screen,
-        selectedPart: _args,
-        username: _username,
-        role: _role,
-        columns: _columns,
-        fitur: _fitur,
-        gudangKelola: _gudangKelola,
-        config: _appConfig,
-        accessible: accessibleScreens(_sections),
-        go: _go,
-        back: _back,
-        canBack: _history.isNotEmpty,
-        openDrawer: () => _scaffoldKey.currentState?.openDrawer(),
-        closeDrawer: () {
-          if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
-            Navigator.of(context).pop();
-          }
-        },
-        toast: _toast,
-        logout: _logout,
-        child: (_forceUpdate || (_updateAvailable && !_updateDismissed))
-            // Notifikasi update = SATU HALAMAN PENUH saat app dibuka (bisa
-            // ditutup kecuali force). Muncul di atas segalanya.
-            ? _updateScreen(m, dismissible: !_forceUpdate)
-            : SafeArea(
-                bottom: false,
-                child: Column(
-                  children: [
-                    _Header(
-                      title: title.$1,
-                      subtitle: title.$2,
-                      onMenu: () => _scaffoldKey.currentState?.openDrawer(),
-                      // Pintasan keranjang hanya berarti untuk pembeli.
-                      cartCount: isBuyer ? _cart.count : 0,
-                      onCart: isBuyer ? () => _go(MasScreen.keranjang) : null,
-                    ),
-                    Expanded(
-                      child: KeyedSubtree(
-                        key: ValueKey(_bodyKey),
-                        child: _buildBody(),
+          columns: _columns,
+          fitur: _fitur,
+          gudangKelola: _gudangKelola,
+          config: _appConfig,
+          accessible: access,
+          go: _go,
+          back: _back,
+          canBack: _history.isNotEmpty,
+          openDrawer: () => _scaffoldKey.currentState?.openDrawer(),
+          closeDrawer: () {
+            if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+              Navigator.of(context).pop();
+            }
+          },
+          toast: _toast,
+          logout: _logout,
+          child: updateWall
+              // Notifikasi update = SATU HALAMAN PENUH saat app dibuka (bisa
+              // ditutup kecuali force). Muncul di atas segalanya.
+              ? _updateScreen(m, dismissible: !_forceUpdate)
+              // Bawah: bila bilah bawah tampil, DIA yang menyerap inset gestur
+              // sistem; bila tidak, SafeArea ini yang melakukannya. Persis satu
+              // kali — aplikasi menggambar edge-to-edge (wajib di Android 15).
+              : SafeArea(
+                  bottom: tabs.isEmpty,
+                  child: Column(
+                    children: [
+                      _Header(
+                        title: title.$1,
+                        subtitle: title.$2,
+                        onMenu: () => _scaffoldKey.currentState?.openDrawer(),
+                        // Pintasan keranjang hanya berarti untuk pembeli.
+                        cartCount: isBuyer ? _cart.count : 0,
+                        onCart: isBuyer ? () => _go(MasScreen.keranjang) : null,
                       ),
-                    ),
-                  ],
+                      Expanded(
+                        child: KeyedSubtree(
+                          key: ValueKey(_bodyKey),
+                          child: _buildBody(),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+        ),
       ),
     );
   }
@@ -610,7 +703,7 @@ class _Header extends StatelessWidget {
         border: Border(bottom: BorderSide(color: m.ink150)),
       ),
       child: Row(children: [
-        _iconButton(context, Icons.menu_rounded, onMenu),
+        _iconButton(context, Icons.menu_rounded, onMenu, tooltip: 'Menu'),
         const SizedBox(width: 10),
         Expanded(
           child: Column(
@@ -641,8 +734,17 @@ class _Header extends StatelessWidget {
         ],
         _iconButton(
           context,
-          theme.isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
-          theme.toggle,
+          theme.isDarkIn(context) ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+          () => theme.toggleFrom(context),
+          tooltip: theme.mode == ThemeMode.system
+              ? 'Tema ikut HP — tekan untuk mengunci'
+              : 'Ganti tema (tekan lama: ikut HP)',
+          onLongPress: () {
+            theme.followSystem();
+            ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(const SnackBar(content: Text('Tema mengikuti setelan HP')));
+          },
         ),
       ]),
     );
@@ -651,7 +753,7 @@ class _Header extends StatelessWidget {
   Widget _cartButton(BuildContext context) {
     final m = context.mas;
     return Stack(clipBehavior: Clip.none, children: [
-      _iconButton(context, Icons.shopping_cart_outlined, onCart!),
+      _iconButton(context, Icons.shopping_cart_outlined, onCart!, tooltip: 'Keranjang'),
       if (cartCount > 0)
         Positioned(
           right: -3,
@@ -680,13 +782,28 @@ class _Header extends StatelessWidget {
     ]);
   }
 
-  Widget _iconButton(BuildContext context, IconData icon, VoidCallback onTap) {
+  Widget _iconButton(
+    BuildContext context,
+    IconData icon,
+    VoidCallback onTap, {
+    String? tooltip,
+    VoidCallback? onLongPress,
+  }) {
     final m = context.mas;
-    return Material(
+    Widget btn = Material(
       color: m.paper,
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
-        onTap: onTap,
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        onLongPress: onLongPress == null
+            ? null
+            : () {
+                HapticFeedback.mediumImpact();
+                onLongPress();
+              },
         borderRadius: BorderRadius.circular(8),
         child: Container(
           width: 36,
@@ -696,6 +813,118 @@ class _Header extends StatelessWidget {
             border: Border.all(color: m.ink200),
           ),
           child: Icon(icon, size: 16, color: m.ink700),
+        ),
+      ),
+    );
+    if (tooltip != null) btn = Tooltip(message: tooltip, child: btn);
+    return btn;
+  }
+}
+
+/// Bilah navigasi bawah — tujuan yang paling sering dipakai dalam SATU tekan.
+///
+/// Sebelumnya seluruh perpindahan layar harus lewat drawer (buka drawer →
+/// gulir → pilih): tiga gerakan untuk pekerjaan yang di lapangan dilakukan
+/// puluhan kali sehari, sambil memegang HP satu tangan. Isinya mengikuti peran
+/// & izin (lihat [buildBottomTabs]); slot terakhir membuka drawer untuk sisanya.
+class _BottomBar extends StatelessWidget {
+  final List<NavTab> tabs;
+  final MasScreen current;
+  final ValueChanged<MasScreen> onTap;
+  final VoidCallback onMenu;
+  final bool menuActive;
+
+  const _BottomBar({
+    required this.tabs,
+    required this.current,
+    required this.onTap,
+    required this.onMenu,
+    required this.menuActive,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final m = context.mas;
+    return Container(
+      decoration: BoxDecoration(
+        color: m.paper,
+        border: Border(top: BorderSide(color: m.ink150)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 58,
+          child: Row(children: [
+            for (final t in tabs)
+              Expanded(
+                child: _cell(
+                  context,
+                  label: t.label,
+                  icon: t.screen == current ? t.activeIcon : t.icon,
+                  active: t.screen == current,
+                  onTap: () => onTap(t.screen),
+                ),
+              ),
+            Expanded(
+              child: _cell(
+                context,
+                label: 'Menu',
+                icon: Icons.menu_rounded,
+                active: menuActive,
+                onTap: onMenu,
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _cell(
+    BuildContext context, {
+    required String label,
+    required IconData icon,
+    required bool active,
+    required VoidCallback onTap,
+  }) {
+    final m = context.mas;
+    final fg = active ? m.brand700 : m.ink500;
+    return Semantics(
+      button: true,
+      selected: active,
+      label: label,
+      child: InkResponse(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        radius: 44,
+        containedInkWell: true,
+        highlightShape: BoxShape.rectangle,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+              decoration: BoxDecoration(
+                color: active ? m.brand50 : Colors.transparent,
+                borderRadius: BorderRadius.circular(MasRadii.pill),
+              ),
+              child: Icon(icon, size: 19, color: fg),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+                color: fg,
+              ),
+            ),
+          ],
         ),
       ),
     );

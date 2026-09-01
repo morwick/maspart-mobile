@@ -232,6 +232,67 @@ List<NavSection> buildNavSections({
   return out.where((s) => s.items.isNotEmpty).toList();
 }
 
+/// Satu tujuan di bilah bawah (bottom navigation).
+class NavTab {
+  final String label;
+  final IconData icon;
+  final IconData activeIcon;
+  final MasScreen screen;
+  const NavTab(this.label, this.icon, this.activeIcon, this.screen);
+}
+
+/// Kandidat bilah bawah menurut peran, berurut prioritas. Yang tak boleh
+/// diakses akun ini dilewati, lalu diambil 4 teratas (slot ke-5 = "Menu").
+const List<NavTab> _tabsBuyer = [
+  NavTab('Belanja', Icons.storefront_outlined, Icons.storefront, MasScreen.toko),
+  NavTab('Cari', Icons.search_rounded, Icons.search_rounded, MasScreen.search),
+  NavTab('Asisten', Icons.smart_toy_outlined, Icons.smart_toy_rounded, MasScreen.asisten),
+  NavTab('Pesanan', Icons.receipt_long_outlined, Icons.receipt_long, MasScreen.pesanan),
+  NavTab('Chat', Icons.chat_bubble_outline_rounded, Icons.chat_bubble_rounded, MasScreen.chat),
+];
+
+const List<NavTab> _tabsStaff = [
+  NavTab('Beranda', Icons.dashboard_outlined, Icons.dashboard_rounded, MasScreen.dashboard),
+  NavTab('Cari', Icons.search_rounded, Icons.search_rounded, MasScreen.search),
+  NavTab('Asisten', Icons.smart_toy_outlined, Icons.smart_toy_rounded, MasScreen.asisten),
+  NavTab('Foto', Icons.photo_camera_outlined, Icons.photo_camera_rounded, MasScreen.foto),
+  NavTab('Harga', Icons.payments_outlined, Icons.payments_rounded, MasScreen.harga),
+  NavTab('Stok', Icons.grid_view_outlined, Icons.grid_view_rounded, MasScreen.stok),
+  NavTab('Populasi', Icons.local_shipping_outlined, Icons.local_shipping_rounded, MasScreen.populasi),
+];
+
+/// Maksimal 4 tujuan tetap; sisanya lewat tombol "Menu" (drawer).
+const int kMaxBottomTabs = 4;
+
+/// Bangun isi bilah bawah. Kosong (≤1 tujuan) → bilahnya tak ditampilkan sama
+/// sekali, supaya akun yang menunya dipangkas Menu Control tak dapat bilah
+/// berisi satu tombol.
+List<NavTab> buildBottomTabs({
+  required String role,
+  required Set<MasScreen> accessible,
+}) {
+  final src = role == 'pembeli' ? _tabsBuyer : _tabsStaff;
+  final out = <NavTab>[];
+  for (final t in src) {
+    if (!accessible.contains(t.screen)) continue;
+    out.add(t);
+    if (out.length == kMaxBottomTabs) break;
+  }
+  return out.length >= 2 ? out : const [];
+}
+
+/// Layar DALAM (detail) — bilah bawah disembunyikan di sini supaya isinya dapat
+/// tinggi penuh dan jelas bahwa user sedang "masuk ke dalam", bukan berpindah
+/// tujuan utama.
+const Set<MasScreen> kNoBottomBar = {
+  MasScreen.part,
+  MasScreen.pesananDetail,
+  MasScreen.orderDetail,
+  MasScreen.cabangPesananDetail,
+  MasScreen.keranjang,
+  MasScreen.pilihLokasi,
+};
+
 /// Kumpulan layar yang boleh diakses untuk peran/izin tertentu (untuk guard).
 Set<MasScreen> accessibleScreens(List<NavSection> sections) => {
       for (final s in sections)
@@ -270,7 +331,7 @@ class AppNav extends InheritedWidget {
   final bool canBack;
   final VoidCallback openDrawer;
   final VoidCallback closeDrawer;
-  final void Function(String message) toast;
+  final void Function(String message, {String? actionLabel, VoidCallback? onAction}) toast;
   final VoidCallback logout;
 
   const AppNav({
