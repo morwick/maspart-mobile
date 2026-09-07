@@ -38,6 +38,12 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
   List<String> _photos = [];
   bool _loadingPhotos = true;
 
+  /// Foto yang DISEMBUNYIKAN daftar-hitam karena terbukti bukan part ini
+  /// (SIMS kadang menempelkan foto part saudara). Hanya dipakai admin: sebagai
+  /// penanda + jalan memulihkan. `_fotoBusy` mengunci tombol saat request jalan.
+  int _fotoTersembunyi = 0;
+  bool _fotoBusy = false;
+
   /// Semua unit yang memakai PN ini (nama model dari kolom `file` katalog).
   List<String> _units = [];
 
@@ -215,10 +221,11 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
 
   Future<void> _loadPhotos() async {
     try {
-      final photos = _pn.isEmpty ? <String>[] : await ApiService.getPartPhotos(_pn);
+      final res = _pn.isEmpty ? const PartPhotos() : await ApiService.partPhotos(_pn);
       if (!mounted) return;
       setState(() {
-        _photos = photos;
+        _photos = res.photos;
+        _fotoTersembunyi = res.tersembunyi;
         _loadingPhotos = false;
       });
     } catch (_) {
@@ -227,6 +234,49 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
         _photos = [];
         _loadingPhotos = false;
       });
+    }
+  }
+
+  /// Admin menandai satu foto SALAH — hilang dari layar ini, dari etalase, dan
+  /// berhenti memberi suara di "Cari by Foto". Baris galeri tak dihapus, jadi
+  /// bisa dipulihkan lewat tautan "Pulihkan" di bawah kartu foto.
+  Future<void> _tandaiFotoSalah(String url) async {
+    if (_fotoBusy) return;
+    final ya = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Foto ini salah?'),
+        content: Text('Sembunyikan foto ini dari $_pn.\n\n'
+            'Foto juga berhenti dipakai "Cari by Foto". Bisa dipulihkan lagi.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Batal')),
+          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Sembunyikan')),
+        ],
+      ),
+    );
+    if (ya != true) return;
+    setState(() => _fotoBusy = true);
+    try {
+      await ApiService.fotoSalah(_pn, url);
+      await _loadPhotos();
+      if (mounted) AppNav.of(context).toast('Foto disembunyikan');
+    } catch (e) {
+      if (mounted) AppNav.of(context).toast('Gagal menandai foto: $e');
+    } finally {
+      if (mounted) setState(() => _fotoBusy = false);
+    }
+  }
+
+  Future<void> _pulihkanFoto() async {
+    if (_fotoBusy) return;
+    setState(() => _fotoBusy = true);
+    try {
+      await ApiService.fotoPulihkan(_pn);
+      await _loadPhotos();
+    } catch (e) {
+      if (mounted) AppNav.of(context).toast('Gagal memulihkan foto: $e');
+    } finally {
+      if (mounted) setState(() => _fotoBusy = false);
     }
   }
 
@@ -1743,12 +1793,14 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
   }
 
   Widget _imageCard(MasColors m) {
+    final isAdmin = AppNav.of(context).isAdmin;
+
     Widget tile(int i) {
       if (_loadingPhotos) {
         return AspectRatio(aspectRatio: 1, child: MasSkeleton(height: double.infinity));
       }
       if (i < _photos.length) {
-        return GestureDetector(
+        final gambar = GestureDetector(
           onTap: () => _openGallery(i),
           child: AspectRatio(
             aspectRatio: 1,
@@ -1764,6 +1816,30 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
             ),
           ),
         );
+        if (!isAdmin) return gambar;
+        // Tombol "foto salah" melayang di sudut — persis web. Hanya admin.
+        return Stack(children: [
+          gambar,
+          Positioned(
+            top: 4,
+            right: 4,
+            child: Material(
+              color: m.paper.withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(6),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(6),
+                onTap: _fotoBusy ? null : () => _tandaiFotoSalah(_photos[i]),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                  child: Text('✕ salah',
+                      style: TextStyle(
+                          fontSize: 10.5,
+                          color: _fotoBusy ? m.ink400 : m.danger600)),
+                ),
+              ),
+            ),
+          ),
+        ]);
       }
       return HatchBox(label: 'foto ${i + 1}');
     }
@@ -1786,6 +1862,23 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
           const SizedBox(height: 8),
           Text('${_photos.length} foto · ketuk untuk perbesar',
               style: TextStyle(fontSize: 11.5, color: m.ink400)),
+        ],
+        if (isAdmin && _fotoTersembunyi > 0) ...[
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+              child: Text('$_fotoTersembunyi foto disembunyikan (bukan part ini)',
+                  style: TextStyle(fontSize: 11.5, color: m.ink400)),
+            ),
+            TextButton(
+              onPressed: _fotoBusy ? null : _pulihkanFoto,
+              style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(0, 30),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+              child: const Text('Pulihkan', style: TextStyle(fontSize: 11.5)),
+            ),
+          ]),
         ],
       ]),
     );

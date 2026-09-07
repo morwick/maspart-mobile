@@ -578,16 +578,22 @@ class PartPhotos {
   final List<String> photos;
   final String source;
 
+  /// Foto yang disaring daftar-hitam (terbukti bukan part ini). Hanya
+  /// ditampilkan ke admin, sebagai jalan untuk memulihkannya kembali.
+  final int tersembunyi;
+
   const PartPhotos({
     this.partNumber = '',
     this.photos = const [],
     this.source = '',
+    this.tersembunyi = 0,
   });
 
   factory PartPhotos.fromJson(Map<String, dynamic> j) => PartPhotos(
         partNumber: _s(j['part_number']),
         photos: _strList(j['photos']),
         source: _s(j['source']),
+        tersembunyi: _i(j['tersembunyi']),
       );
 }
 

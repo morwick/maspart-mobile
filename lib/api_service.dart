@@ -496,6 +496,22 @@ class ApiService {
     return PartPhotos.fromJson(_Api._obj(data));
   }
 
+  /// Tandai satu foto SALAH untuk sebuah PN (admin). SIMS kadang menempelkan
+  /// foto part SAUDARA ke sebuah PN — foto yang ditandai hilang dari Detail
+  /// Part, etalase, DAN berhenti dipakai "Cari by Foto". Reversibel lewat
+  /// [fotoPulihkan]: baris galeri beserta embedding-nya tidak dihapus.
+  static Future<void> fotoSalah(String pn, String url, {String catatan = ''}) async {
+    await _Api.post('/api/admin/foto-blacklist',
+        body: {'pn': pn, 'urls': [url], 'semua': false, 'catatan': catatan});
+  }
+
+  /// Pulihkan foto yang sempat ditandai salah. [urls] kosong = pulihkan semua
+  /// foto PN itu.
+  static Future<void> fotoPulihkan(String pn, {List<String> urls = const []}) async {
+    await _Api.post('/api/admin/foto-blacklist/pulihkan',
+        body: {'pn': pn, 'urls': urls});
+  }
+
   /// Spesifikasi fisik resmi SIMS (berat & dimensi) — dasar hitung ongkir.
   static Future<PartSpecResponse> partSpec(String pn) async {
     final data = await _Api.get('/api/parts/spec', query: {'pn': pn});
