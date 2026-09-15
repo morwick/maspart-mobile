@@ -60,3 +60,6 @@ android/key.properties
 
 # Cache Kotlin Gradle (artefak build)
 android/.kotlin/
+
+# Java heap dump (jangan pernah di-commit)
+*.hprof
