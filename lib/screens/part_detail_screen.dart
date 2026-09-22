@@ -1930,8 +1930,6 @@ class _CekUnitCardState extends State<_CekUnitCard> {
   bool _busy = false;
   CekUnitResult? _res;
   String? _err; // gagal mengecek — BUKAN "tidak cocok"
-  Uint8List? _img;
-  bool _imgGagal = false;
 
   @override
   void initState() {
@@ -1979,8 +1977,6 @@ class _CekUnitCardState extends State<_CekUnitCard> {
       _busy = true;
       _err = null;
       _res = null;
-      _img = null;
-      _imgGagal = false;
     });
 
     CekUnitResult? hasil;
@@ -2004,62 +2000,6 @@ class _CekUnitCardState extends State<_CekUnitCard> {
       _res = hasil;
       _err = gagal ?? (pesanError.isNotEmpty ? pesanError : null);
     });
-
-    final id = hasil?.imageId;
-    if (id != null && id.isNotEmpty) await _muatExploded(id);
-  }
-
-  Future<void> _muatExploded(String id) async {
-    try {
-      final b = await ApiService.partExploded(id);
-      if (!mounted) return;
-      setState(() => _img = b);
-    } catch (_) {
-      // Gambar gagal ≠ hasil cek gagal: penjelasan teksnya tetap sahih.
-      if (!mounted) return;
-      setState(() => _imgGagal = true);
-    }
-  }
-
-  void _zoom(Uint8List bytes) {
-    showDialog<void>(
-      context: context,
-      // Latar putih: gambar EPC adalah garis gelap di atas latar transparan —
-      // di atas latar gelap gambarnya nyaris tak terlihat.
-      barrierColor: Colors.white,
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.white,
-        insetPadding: const EdgeInsets.all(10),
-        child: Stack(children: [
-          InteractiveViewer(
-            minScale: 1,
-            maxScale: 5,
-            boundaryMargin: const EdgeInsets.all(double.infinity),
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: Image.memory(bytes, fit: BoxFit.contain),
-            ),
-          ),
-          Positioned(
-            right: 4,
-            top: 4,
-            child: Material(
-              color: Colors.black12,
-              shape: const CircleBorder(),
-              child: InkWell(
-                customBorder: const CircleBorder(),
-                onTap: () => Navigator.of(ctx).pop(),
-                child: const SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: Icon(Icons.close_rounded, size: 22, color: Colors.black87),
-                ),
-              ),
-            ),
-          ),
-        ]),
-      ),
-    );
   }
 
   @override
@@ -2068,17 +2008,10 @@ class _CekUnitCardState extends State<_CekUnitCard> {
     final res = _res;
     final cocok = res?.checked == true && res?.cocok == true;
     final tidakCocok = res?.checked == true && res?.cocok == false;
-
-    final detail = <(String, String)>[
-      if (cocok) ...[
-        if ((res!.nama ?? '').isNotEmpty) ('Nama part', res.nama!),
-        if ((res.istilahLapangan ?? '').isNotEmpty) ('Istilah lapangan', res.istilahLapangan!),
-        if ((res.qty ?? '').isNotEmpty) ('Qty di unit', res.qty!),
-        if ((res.kategori ?? '').isNotEmpty) ('Kategori', res.kategori!),
-        if ((res.lokasi ?? '').isNotEmpty) ('Lokasi (figure)', res.lokasi!),
-        if (res.balon != null) ('Nomor balon', '${res.balon}'),
-      ],
-    ];
+    // Vonis ringkas saja (paritas web): tanpa exploded view & rincian figure.
+    final unit = (res?.frameNumber ?? '').isNotEmpty
+        ? res!.frameNumber!
+        : _ctl.text.trim().toUpperCase();
 
     return MasSectionCard(
       title: 'Cocok di unit saya?',
@@ -2116,8 +2049,7 @@ class _CekUnitCardState extends State<_CekUnitCard> {
             if (_busy) ...[
               const SizedBox(height: 10),
               Text(
-                'Mengecek ke katalog EPC unit ini — biasanya beberapa detik; '
-                'menyiapkan gambar exploded view bisa sedikit lebih lama…',
+                'Mengecek ke katalog EPC unit ini — biasanya beberapa detik…',
                 style: TextStyle(fontSize: 11.5, color: m.ink400),
               ),
             ],
@@ -2129,7 +2061,7 @@ class _CekUnitCardState extends State<_CekUnitCard> {
             // Pengecekan berhasil, tapi part memang tidak ada di unit ini.
             if (tidakCocok) ...[
               const SizedBox(height: 10),
-              _alertBox(m, res!.pesan ?? 'Part ini tidak terpasang di unit tersebut.', danger: true),
+              _alertBox(m, '❌ Tidak cocok — part ini tidak terpasang di unit $unit.', danger: true),
             ],
             if (cocok) ...[
               const SizedBox(height: 10),
@@ -2142,54 +2074,13 @@ class _CekUnitCardState extends State<_CekUnitCard> {
                   border: Border.all(color: m.brand600),
                 ),
                 child: Text(
-                  res!.penjelasan ?? res.pesan ?? 'Cocok — part ini terpasang di unit tersebut.',
-                  style: TextStyle(fontSize: 12.5, height: 1.5, color: m.ink800),
+                  '✅ Cocok — part ini terpasang di unit $unit.',
+                  style: TextStyle(fontSize: 12.5, height: 1.5, fontWeight: FontWeight.w600, color: m.ink800),
                 ),
               ),
-              if (_img != null) ...[
-                const SizedBox(height: 10),
-                GestureDetector(
-                  onTap: () => _zoom(_img!),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(MasRadii.card),
-                      border: Border.all(color: m.ink150),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(children: [
-                      Image.memory(_img!, fit: BoxFit.contain, width: double.infinity),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                        decoration: BoxDecoration(
-                          color: m.paper,
-                          border: Border(top: BorderSide(color: m.ink100)),
-                        ),
-                        child: Text(
-                          'Exploded view: ${res.lokasi ?? '-'}'
-                          '${res.balon != null ? ' — part ini nomor balon ${res.balon} (disorot)' : ''}'
-                          ' · ketuk untuk perbesar',
-                          style: TextStyle(fontSize: 11.5, color: m.ink500),
-                        ),
-                      ),
-                    ]),
-                  ),
-                ),
-              ] else if (_imgGagal) ...[
-                const SizedBox(height: 8),
-                Text('Gambar exploded view gagal dimuat — hasil pengecekan di atas tetap sahih.',
-                    style: TextStyle(fontSize: 11.5, color: m.ink400)),
-              ],
             ],
           ]),
         ),
-        for (int i = 0; i < detail.length; i++)
-          MasKeyValue(
-            label: detail[i].$1,
-            value: detail[i].$2,
-            divider: i < detail.length - 1,
-          ),
       ],
     );
   }

@@ -572,7 +572,9 @@ class ApiService {
   }) async {
     final data = await _Api.post(
       '/api/parts/cek-unit',
-      body: {'part_number': partNumber, 'rangka': rangka},
+      // gambar:false → backend melewati render exploded view (klien hanya
+      // menampilkan vonis Cocok / Tidak cocok).
+      body: {'part_number': partNumber, 'rangka': rangka, 'gambar': false},
       timeout: _Api._timeoutLong,
     );
     return CekUnitResult.fromJson(_Api._obj(data));
