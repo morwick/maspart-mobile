@@ -699,7 +699,8 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
         // Semua unit yang memakai PN ini (web: "Ditemukan di N unit"). Sebelum
         // katalog terjawab, tampilkan dulu unit dari argumen navigasi supaya
         // bagian ini tidak berkedip muncul-hilang.
-        if (unitList.isNotEmpty) ...[
+        // Daftar model unit = katalog internal; pembeli cukup "Cocok di unit saya?".
+        if (!isBuyer && unitList.isNotEmpty) ...[
           const SizedBox(height: 16),
           Text(
               unitList.length > 1
@@ -1684,7 +1685,7 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
   Widget _specCard(MasColors m) {
     if (_loadingSpec) return const MasSkeleton(height: 120);
 
-    final rows = _specRows(_spec?.spec);
+    final rows = _specRows(_spec?.spec, isBuyer: AppNav.of(context).isBuyer);
     final catatan = <Widget>[];
 
     if (_specErr != null) {
@@ -1719,7 +1720,7 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
 
   /// Baris spesifikasi: SIMS lebih dipercaya daripada kolom katalog, jadi nilai
   /// katalog hanya dipakai untuk mengisi yang belum ada.
-  List<(String, String)> _specRows(PartSpec? s) {
+  List<(String, String)> _specRows(PartSpec? s, {bool isBuyer = false}) {
     final item = _part;
     final rows = <(String, String)>[];
 
@@ -1730,7 +1731,8 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
       if (bb != null && bb != bk) rows.add(('Berat (bersih)', '$bb kg'));
       if ((s.dimensiCm ?? '').isNotEmpty) rows.add(('Dimensi (P×L×T)', '${s.dimensiCm} cm'));
       if ((s.satuan ?? '').isNotEmpty) rows.add(('Satuan', s.satuan!));
-      if (s.kemasanMinimum != null) rows.add(('Kemasan minimum', '${s.kemasanMinimum}'));
+      // Kemasan minimum = MOQ pembelian ke pabrik — internal saja (paritas web).
+      if (!isBuyer && s.kemasanMinimum != null) rows.add(('Kemasan minimum', '${s.kemasanMinimum}'));
       if ((s.merek ?? '').isNotEmpty) rows.add(('Merek', s.merek!));
     }
 
