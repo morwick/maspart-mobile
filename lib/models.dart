@@ -1626,6 +1626,105 @@ class PickupInfo {
       );
 }
 
+/// Saldo poin pembeli. `aktif` = migrasi 034 sudah jalan di server;
+/// `bolehTukar` = saklar penukaran (global, default mati) sudah dibuka.
+class PoinSaldo {
+  final bool aktif;
+  final int saldo;
+  final int rupiah;
+
+  /// Poin dari pesanan yang SUDAH dibayar tapi belum diterima. Belum bisa
+  /// dipakai, tapi wajib ditampilkan — tanpa ini pembeli yang baru membayar
+  /// mengira belanjanya tak menghasilkan poin.
+  final int tertunda;
+  final bool bolehTukar;
+  final int rpPerPoin;
+  final int nilaiPoin;
+  final int maksPersen;
+  final int minTukar;
+  final int masaHari;
+
+  const PoinSaldo({
+    this.aktif = false,
+    this.saldo = 0,
+    this.rupiah = 0,
+    this.tertunda = 0,
+    this.bolehTukar = false,
+    this.rpPerPoin = 10000,
+    this.nilaiPoin = 100,
+    this.maksPersen = 20,
+    this.minTukar = 50,
+    this.masaHari = 365,
+  });
+
+  factory PoinSaldo.fromJson(Map<String, dynamic> j) {
+    final a = (j['aturan'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return PoinSaldo(
+      aktif: j['aktif'] == true,
+      saldo: _i(j['saldo']),
+      rupiah: _i(j['rupiah']),
+      tertunda: _i(j['tertunda']),
+      bolehTukar: j['boleh_tukar'] == true,
+      rpPerPoin: _i(a['rp_per_poin']) == 0 ? 10000 : _i(a['rp_per_poin']),
+      nilaiPoin: _i(a['nilai_poin']) == 0 ? 100 : _i(a['nilai_poin']),
+      maksPersen: _i(a['maks_persen']) == 0 ? 20 : _i(a['maks_persen']),
+      minTukar: _i(a['min_tukar']) == 0 ? 50 : _i(a['min_tukar']),
+      masaHari: _i(a['masa_hari']) == 0 ? 365 : _i(a['masa_hari']),
+    );
+  }
+}
+
+/// Satu baris buku besar poin.
+class PoinBaris {
+  final int delta;          // + masuk, − keluar
+  final String reason;      // earn | redeem | reversal | expire | manual
+  final String orderCode;
+  final String note;
+  final String expiresAt;
+  final String createdAt;
+
+  const PoinBaris({
+    this.delta = 0,
+    this.reason = '',
+    this.orderCode = '',
+    this.note = '',
+    this.expiresAt = '',
+    this.createdAt = '',
+  });
+
+  factory PoinBaris.fromJson(Map<String, dynamic> j) => PoinBaris(
+        delta: _i(j['delta']),
+        reason: (j['reason'] ?? '').toString(),
+        orderCode: (j['order_code'] ?? '').toString(),
+        note: (j['note'] ?? '').toString(),
+        expiresAt: (j['expires_at'] ?? '').toString(),
+        createdAt: (j['created_at'] ?? '').toString(),
+      );
+}
+
+/// Batas penukaran poin untuk satu keranjang — dihitung SERVER supaya angka
+/// yang ditawarkan sama persis dengan yang diterima saat checkout.
+class PoinBatas {
+  final int maksPoin;
+  final int maksRupiah;
+  final int saldo;
+  final bool bolehTukar;
+
+  const PoinBatas({
+    this.maksPoin = 0,
+    this.maksRupiah = 0,
+    this.saldo = 0,
+    this.bolehTukar = false,
+  });
+
+  factory PoinBatas.fromJson(Map<String, dynamic> j) => PoinBatas(
+        maksPoin: _i(j['maks_poin']),
+        maksRupiah: _i(j['maks_rupiah']),
+        saldo: _i(j['saldo']),
+        bolehTukar: j['boleh_tukar'] == true,
+      );
+}
+
 class CartWeight {
   /// Yang ditagih kurir = isi paket + kemasan.
   final int weightGrams;

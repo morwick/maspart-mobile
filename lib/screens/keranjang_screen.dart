@@ -141,6 +141,9 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       if (!mounted) return;
       setState(() => _asal = r);
       await _refreshWeight();
+      // Batas poin bergantung harga barang keranjang → ikut disegarkan setiap
+      // keadaan server berubah (harga/stok/gudang bisa bergeser).
+      await _refreshPoin();
     } on ApiException catch (e) {
       if (!mounted) return;
       // Tanpa keadaan server kita tak boleh menebak harga → tampilkan errornya.
@@ -319,6 +322,43 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   int get _subtotal =>
       _itemsBeli.fold(0, (n, i) => n + _hargaOf(i) * i.qty);
 
+  // ── Poin ────────────────────────────────────────────────────────────
+  // `_poinMaks` datang dari SERVER (saldo x plafon 20% x minimal tukar) supaya
+  // angka yang ditawarkan sama persis dengan yang diterima saat checkout —
+  // kalau berbeda, pembeli menggeser slider ke angka yang kemudian ditolak.
+  int _poinMaks = 0;
+  int _poinSaldo = 0;
+  int _poinPakai = 0;
+  int _poinSigSubtotal = -1;
+
+  int get _potongan => _poinPakai * 100;
+
+  /// Ambil batas poin untuk isi keranjang saat ini. Plafon 20% mengikuti harga
+  /// barang, jadi batasnya ikut berubah tiap keranjang berubah.
+  Future<void> _refreshPoin() async {
+    final sub = _subtotal;
+    if (sub <= 0) {
+      if (mounted) setState(() { _poinMaks = 0; _poinPakai = 0; });
+      return;
+    }
+    if (sub == _poinSigSubtotal) return;
+    _poinSigSubtotal = sub;
+    try {
+      final b = await ApiService.poinBatas(sub);
+      if (!mounted) return;
+      setState(() {
+        _poinMaks = b.maksPoin;
+        _poinSaldo = b.saldo;
+        // Pilihan lama dipangkas ke batas baru, tak pernah dibiarkan melebihi.
+        if (_poinPakai > _poinMaks) _poinPakai = _poinMaks;
+      });
+    } on ApiException {
+      if (!mounted) return;
+      // Gagal tahu batasnya → jangan tawarkan sama sekali.
+      setState(() { _poinMaks = 0; _poinPakai = 0; });
+    }
+  }
+
   /// Ambil sendiri = tak ada ongkir sama sekali (bukan "ongkir belum dipilih").
   int get _ongkir => _ambilSendiri ? 0 : (_rate?.price ?? 0).round();
 
@@ -376,6 +416,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         courier: _ambilSendiri ? null : _rate?.courier,
         courierService: _ambilSendiri ? null : _rate?.service,
         shippingCost: _ongkir.toDouble(),
+        pointRedeem: _poinPakai,
         pickup: _ambilSendiri,
         weightGrams: _weightGrams,
         paymentMethod: 'gateway',
@@ -481,8 +522,11 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     final blokir = _blokir;
     final beli = _itemsBeli;
     final subtotal = _subtotal;
-    final ppn = ppnOf(subtotal);
-    final total = totalOf(subtotal, _ongkir);
+    // PPN INKLUSIF dihitung dari harga barang SETELAH potongan poin — sama
+    // dengan backend (orders.create_order); kalau tidak, angkanya berbeda
+    // antara layar dan faktur.
+    final ppn = ppnOf(subtotal - _potongan < 0 ? 0 : subtotal - _potongan);
+    final total = totalOf(subtotal, _ongkir) - _potongan;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
@@ -550,6 +594,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
                 onTap: () {
                   setState(() => _gudangPilih = g);
                   _refreshWeight();
+                  _refreshPoin();
                 },
                 child: Container(
                   padding:
@@ -1006,6 +1051,55 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
                   ? formatRupiah(_rate!.price)
                   : '—',
         ),
+        // Tukar poin — hanya muncul bila server memang menawarkan (fitur aktif,
+        // penukaran dibuka, saldo & keranjang cukup).
+        if (_poinMaks > 0) ...[
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Divider(height: 1, color: m.ink100),
+          ),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+              child: Text('🎁 Tukar poin',
+                  style: TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600, color: m.ink700)),
+            ),
+            Text('punya $_poinSaldo',
+                style: TextStyle(fontSize: 11.5, color: m.ink500)),
+          ]),
+          Row(children: [
+            Expanded(
+              child: Slider(
+                // ⛔ JANGAN `.clamp()`: num.clamp mengembalikan `num`, sedangkan
+                // Slider.value menuntut `double` → galat tipe saat kompilasi.
+                value: (_poinPakai > _poinMaks ? _poinMaks : _poinPakai).toDouble(),
+                min: 0,
+                max: _poinMaks.toDouble(),
+                divisions: _poinMaks > 10 ? (_poinMaks ~/ 10) : null,
+                label: '$_poinPakai poin',
+                onChanged: (v) => setState(() => _poinPakai = v.round()),
+              ),
+            ),
+            MasButton(
+              label: _poinPakai == _poinMaks ? 'Batal' : 'Maks',
+              primary: false,
+              height: 32,
+              onTap: () => setState(
+                  () => _poinPakai = _poinPakai == _poinMaks ? 0 : _poinMaks),
+            ),
+          ]),
+          Text(
+            'Maksimal $_poinMaks poin untuk keranjang ini (20% dari harga '
+            'barang). Poin tidak bisa membayar ongkir.',
+            style: TextStyle(fontSize: 11.5, color: m.ink400, height: 1.4),
+          ),
+        ],
+        if (_potongan > 0) ...[
+          const SizedBox(height: 6),
+          _sumRow(m, 'Potongan poin ($_poinPakai)',
+              '-${formatRupiah(_potongan)}'),
+        ],
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),
           child: Divider(height: 1, color: m.ink150),

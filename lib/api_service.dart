@@ -965,6 +965,7 @@ class ApiService {
     bool pickup = false,
     double? recipientLat,
     double? recipientLon,
+    int pointRedeem = 0,
   }) async {
     final data = await _Api.post(
       '/api/orders',
@@ -987,10 +988,36 @@ class ApiService {
         'recipient_phone': ?recipientPhone,
         'recipient_address': ?recipientAddress,
         'recipient_postal': ?recipientPostal,
+        // USULAN saja — server menghitung ulang batasnya dari saldo sungguhan
+        // (saldo × plafon 20% × minimal tukar), persis seperti ongkir & harga
+        // yang juga tak pernah dipercaya dari klien.
+        'point_redeem': pointRedeem,
       },
       timeout: _Api._timeoutLong,
     );
     return CreatedOrder.fromJson(_Api._obj(data));
+  }
+
+  // ── Poin MasPart ─────────────────────────────────────────────────────────
+  /// Saldo poin + poin tertunda + apakah penukaran sudah dibuka.
+  static Future<PoinSaldo> poin() async =>
+      PoinSaldo.fromJson(_Api._obj(await _Api.get('/api/points')));
+
+  /// Riwayat buku besar poin, terbaru dulu.
+  static Future<List<PoinBaris>> poinRiwayat({int limit = 100}) async {
+    final data = _Api._obj(await _Api.get('/api/points/riwayat?limit=$limit'));
+    return (data['items'] as List?)
+            ?.whereType<Map>()
+            .map((e) => PoinBaris.fromJson(e.cast<String, dynamic>()))
+            .toList() ??
+        [];
+  }
+
+  /// Poin terbanyak yang boleh dipakai untuk keranjang sebesar [belanja]
+  /// (rupiah BARANG, tanpa ongkir).
+  static Future<PoinBatas> poinBatas(int belanja) async {
+    final b = belanja < 0 ? 0 : belanja;
+    return PoinBatas.fromJson(_Api._obj(await _Api.get('/api/points/batas?belanja=$b')));
   }
 
   static Future<List<OrderSummary>> myOrders() async {

@@ -34,6 +34,7 @@ import '../screens/orders_screens.dart';
 import '../screens/part_detail_screen.dart';
 import '../screens/pesanan_detail_screen.dart';
 import '../screens/pesanan_screen.dart';
+import '../screens/poin_screen.dart';
 import '../screens/pilih_lokasi_screen.dart';
 import '../screens/rak_screen.dart';
 import '../screens/search_screen.dart';
@@ -400,6 +401,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         return const KeranjangScreen();
       case MasScreen.pesanan:
         return const PesananScreen();
+      case MasScreen.poin:
+        return const PoinScreen();
       case MasScreen.pesananDetail:
         return PesananDetailScreen(args: args);
       case MasScreen.pilihLokasi:

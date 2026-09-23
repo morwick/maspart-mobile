@@ -26,6 +26,7 @@ enum MasScreen {
   pesanan,
   pesananDetail,
   pilihLokasi,
+  poin,
   chat,
 
   // Cabang
@@ -73,6 +74,7 @@ const Map<MasScreen, (String, String)> kScreenTitles = {
   MasScreen.pesanan: ('Pesanan Saya', 'Riwayat & status pesanan'),
   MasScreen.pesananDetail: ('Detail Pesanan', ''),
   MasScreen.pilihLokasi: ('Ganti Lokasi', 'Pilih gudang tempat Anda berbelanja'),
+  MasScreen.poin: ('Poin Saya', 'Kumpulkan poin tiap belanja, tukar jadi potongan'),
   MasScreen.chat: ('Chat', 'Tanya gudang sebelum memesan'),
 
   MasScreen.cabangPesanan: ('Pesanan Masuk', 'Pesanan yang harus dipenuhi cabang ini'),
@@ -127,6 +129,7 @@ const List<NavItem> _navBuyer = [
   NavItem('Belanja', Icons.storefront_outlined, MasScreen.toko),
   NavItem('Cari Part', Icons.search_rounded, MasScreen.search, permKey: 'search'),
   NavItem('Asisten AI', Icons.smart_toy_rounded, MasScreen.asisten, permKey: 'ai'),
+  NavItem('Poin Saya', Icons.card_giftcard_rounded, MasScreen.poin, permKey: 'poin'),
   NavItem('Chat', Icons.chat_bubble_outline_rounded, MasScreen.chat),
   NavItem('Pesanan Saya', Icons.receipt_long_outlined, MasScreen.pesanan),
   NavItem('Ganti Lokasi', Icons.place_outlined, MasScreen.pilihLokasi),
