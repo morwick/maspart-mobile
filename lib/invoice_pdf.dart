@@ -33,6 +33,12 @@ String _payLabel(OrderDetail o) {
 }
 
 String _courierLabel(OrderDetail o) {
+  // Pesanan ambil sendiri tak berkurir — sebut gudang pengambilannya (harus
+  // berbunyi sama dengan invoice web).
+  if (o.pickup) {
+    final g = (o.pickupGudang ?? '').trim();
+    return 'AMBIL DI TOKO${g.isEmpty ? '' : ' — Gudang $g'}';
+  }
   final c = (o.courier ?? '').trim();
   if (c.isEmpty) return '—';
   final s = (o.courierService ?? '').trim();
@@ -221,8 +227,12 @@ Future<List<int>> buildInvoicePdf(OrderDetail o) async {
                 totalRow('Subtotal Produk (termasuk PPN)', formatRupiah(o.subtotal)),
                 if (ppn > 0) totalRow('— di dalamnya PPN 12%', formatRupiah(ppn)),
                 totalRow(
-                    'Ongkos Kirim${(o.courier ?? '').isNotEmpty ? ' (${_courierLabel(o)})' : ''}',
-                    o.shippingCost > 0 ? formatRupiah(o.shippingCost) : '—'),
+                    'Ongkos Kirim${o.pickup ? ' (ambil sendiri)' : (o.courier ?? '').isNotEmpty ? ' (${_courierLabel(o)})' : ''}',
+                    o.pickup
+                        ? 'Gratis'
+                        : o.shippingCost > 0
+                            ? formatRupiah(o.shippingCost)
+                            : '—'),
                 pw.Divider(color: line, height: 10),
                 totalRow('TOTAL PEMBAYARAN', formatRupiah(o.total), grand: true),
               ]),

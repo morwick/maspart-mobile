@@ -54,6 +54,11 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   String? _rateErr;
   bool _loadingRates = false;
 
+  /// Ambil di Toko — hanya ditawarkan bila SERVER bilang alamat ini dekat gudang
+  /// pemenuh (jarak + izin gudang dihitung di sana, dihitung ULANG saat order).
+  PickupInfo? _pickup;
+  bool _ambilSendiri = false;
+
   bool _gatewayOn = false;
   bool _busy = false;
   String? _error;
@@ -185,8 +190,36 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         _postalCtl.text.trim().length < 5) {
       return;
     }
-    _ongkirDebounce =
-        Timer(const Duration(milliseconds: 900), () => _cekOngkir());
+    _ongkirDebounce = Timer(const Duration(milliseconds: 900), () {
+      _cekOngkir();
+      _cekAmbilSendiri();
+    });
+  }
+
+  /// Kelayakan ambil di toko: ikut isi keranjang (gudang pemenuh bisa berpindah)
+  /// dan ikut kode pos alamat.
+  Future<void> _cekAmbilSendiri() async {
+    final beli = _itemsBeli;
+    if (beli.isEmpty) return;
+    try {
+      final p = await ApiService.shippingPickup(
+        items: [
+          for (final i in beli) CartLine(partNumber: i.partNumber, qty: i.qty),
+        ],
+        destPostal: _postalCtl.text.trim(),
+        alamat: _addressCtl.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _pickup = p;
+        // Pilihan ambil sendiri TAK BOLEH bertahan saat syaratnya hilang (ganti
+        // alamat jauh / tambah part dari gudang lain) — kalau dibiarkan,
+        // checkout ditolak server dengan alasan yang tak terlihat di layar.
+        if (!p.tersedia) _ambilSendiri = false;
+      });
+    } on ApiException {
+      if (mounted) setState(() => _pickup = null);
+    }
   }
 
   Future<void> _cekOngkir() async {
@@ -272,7 +305,8 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   int get _subtotal =>
       _itemsBeli.fold(0, (n, i) => n + _hargaOf(i) * i.qty);
 
-  int get _ongkir => (_rate?.price ?? 0).round();
+  /// Ambil sendiri = tak ada ongkir sama sekali (bukan "ongkir belum dipilih").
+  int get _ongkir => _ambilSendiri ? 0 : (_rate?.price ?? 0).round();
 
   // ── Checkout ────────────────────────────────────────────────────────
 
@@ -303,7 +337,8 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
 
     // Tarif tersedia tapi tak ada yang dipilih → pastikan itu disengaja
     // (mis. ambil sendiri di gudang), jangan diam-diam order tanpa ongkir.
-    if (_rates.isNotEmpty && _rate == null) {
+    // Mode ambil sendiri memang tak berkurir → jangan tanya apa pun.
+    if (!_ambilSendiri && _rates.isNotEmpty && _rate == null) {
       final ok = await _confirm(
         'Belum pilih kurir',
         'Anda belum memilih kurir/ongkir. Lanjut TANPA ongkir?\n\n'
@@ -324,9 +359,10 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
             CartLine(partNumber: i.partNumber, qty: i.qty, name: i.name),
         ],
         note: _noteCtl.text.trim(),
-        courier: _rate?.courier,
-        courierService: _rate?.service,
-        shippingCost: (_rate?.price ?? 0).toDouble(),
+        courier: _ambilSendiri ? null : _rate?.courier,
+        courierService: _ambilSendiri ? null : _rate?.service,
+        shippingCost: _ongkir.toDouble(),
+        pickup: _ambilSendiri,
         weightGrams: _weightGrams,
         paymentMethod: 'gateway',
         // Midtrans Snap — semua metode (VA/QRIS/e-wallet/kartu) dipilih di
@@ -744,39 +780,65 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
 
   Widget _ekspedisi(MasColors m) {
     final weightKg = _weightGrams / 1000;
+    final p = _pickup;
     return MasCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Expanded(
-            child: Text('🚚 Ekspedisi & Ongkir',
+            child: Text(
+                _ambilSendiri ? '🏬 Ambil di Toko' : '🚚 Ekspedisi & Ongkir',
                 style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: m.ink900)),
           ),
-          MasButton(
-            label: _loadingRates ? 'Mengecek…' : 'Cek Ongkir',
-            primary: false,
-            height: 34,
-            loading: _loadingRates,
-            onTap: _cekOngkir,
-          ),
+          if (!_ambilSendiri)
+            MasButton(
+              label: _loadingRates ? 'Mengecek…' : 'Cek Ongkir',
+              primary: false,
+              height: 34,
+              loading: _loadingRates,
+              onTap: _cekOngkir,
+            ),
         ]),
-        const SizedBox(height: 8),
-        // Berat tertagih = max(berat asli, volumetrik). Barang besar tapi
-        // ringan ditagih dari ukurannya — pembeli berhak tahu dasarnya.
-        Text(
-          'Berat kirim: ${weightKg.toStringAsFixed(weightKg % 1 == 0 ? 0 : 1)} kg '
-          '(yang lebih besar antara berat asli dan volumetrik)',
-          style: TextStyle(fontSize: 11.5, color: m.ink500),
-        ),
-        if (_gudangAktif.isNotEmpty) ...[
-          const SizedBox(height: 4),
+        // Pilihan cara terima — hanya muncul bila gudang pemenuh memang melayani
+        // ambil sendiri untuk alamat ini (server yang memutuskan).
+        if (p != null && p.tersedia) ...[
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+                child: _caraTerima(m, false, '🚚 Kirim ke alamat',
+                    'Ongkir sesuai tarif')),
+            const SizedBox(width: 8),
+            Expanded(
+                child: _caraTerima(m, true, '🏬 Ambil di toko',
+                    'Gudang ${p.gudang} · ±${p.jarakKm?.toStringAsFixed(0) ?? '?'} km · gratis')),
+          ]),
+        ],
+        if (_ambilSendiri) ...[
+          const SizedBox(height: 10),
           Text(
-            '🚚 Ongkir dihitung dari Gudang $_gudangAktif'
-            '${_lintasGudang ? ' — untuk ${_itemsBeli.length} part dari gudang ini saja.' : '.'}',
+            'Barang disiapkan di Gudang ${p?.gudang ?? _gudangAktif}. Bayar dulu '
+            'lewat aplikasi, lalu datang membawa kode pesanan — tanpa ongkir.'
+            '${(p?.pic.isNotEmpty ?? false) ? '\nKontak gudang: ${p!.pic}' : ''}',
+            style: TextStyle(fontSize: 12.5, color: m.ink700, height: 1.5),
+          ),
+        ] else ...[
+          const SizedBox(height: 8),
+          // Berat tertagih = max(berat asli, volumetrik). Barang besar tapi
+          // ringan ditagih dari ukurannya — pembeli berhak tahu dasarnya.
+          Text(
+            'Berat kirim: ${weightKg.toStringAsFixed(weightKg % 1 == 0 ? 0 : 1)} kg '
+            '(yang lebih besar antara berat asli dan volumetrik)',
             style: TextStyle(fontSize: 11.5, color: m.ink500),
           ),
+          if (_gudangAktif.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              '🚚 Ongkir dihitung dari Gudang $_gudangAktif'
+              '${_lintasGudang ? ' — untuk ${_itemsBeli.length} part dari gudang ini saja.' : '.'}',
+              style: TextStyle(fontSize: 11.5, color: m.ink500),
+            ),
         ],
         if (_rateErr != null) ...[
           const SizedBox(height: 10),
@@ -794,7 +856,36 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           Column(children: [
             for (final r in _rates) _rateRow(m, r),
           ]),
+        ],
       ]),
+    );
+  }
+
+  /// Tombol pilihan cara terima barang (kirim ↔ ambil sendiri).
+  Widget _caraTerima(MasColors m, bool ambil, String judul, String sub) {
+    final active = _ambilSendiri == ambil;
+    return GestureDetector(
+      onTap: () => setState(() => _ambilSendiri = ambil),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: active ? m.brand50 : m.paper,
+          borderRadius: BorderRadius.circular(MasRadii.input),
+          border: Border.all(color: active ? m.brand600 : m.ink200),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(judul,
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: m.ink900)),
+            Text(sub, style: TextStyle(fontSize: 11, color: m.ink500)),
+          ],
+        ),
+      ),
     );
   }
 
@@ -890,8 +981,14 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         const SizedBox(height: 6),
         _sumRow(
           m,
-          'Ongkir${_rate != null ? ' (${_rate!.courierName})' : ''}',
-          _rate != null ? formatRupiah(_rate!.price) : '—',
+          _ambilSendiri
+              ? 'Ongkir (ambil sendiri)'
+              : 'Ongkir${_rate != null ? ' (${_rate!.courierName})' : ''}',
+          _ambilSendiri
+              ? 'Gratis'
+              : _rate != null
+                  ? formatRupiah(_rate!.price)
+                  : '—',
         ),
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),

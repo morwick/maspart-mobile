@@ -1281,6 +1281,15 @@ class OrderDetail extends OrderSummary {
   final String? recipientPostal;
   final String? fulfillGudang;
 
+  /// Ambil sendiri di gudang (migrasi 033): tanpa kurir & tanpa ongkir. Titik
+  /// yang harus didatangi pembeli = gudang PEMENUH, dikirim terpisah dari
+  /// `gudang*` (cabang pemroses) karena keduanya bisa beda kota.
+  final bool pickup;
+  final String? pickupGudang;
+  final double? pickupLat;
+  final double? pickupLon;
+  final String? pickupPic;
+
   /// Mis. dibayar setelah order batal → perlu refund.
   final String? paymentNote;
 
@@ -1322,6 +1331,11 @@ class OrderDetail extends OrderSummary {
     this.recipientAddress,
     this.recipientPostal,
     this.fulfillGudang,
+    this.pickup = false,
+    this.pickupGudang,
+    this.pickupLat,
+    this.pickupLon,
+    this.pickupPic,
     this.paymentNote,
     this.penawaranStatus,
     this.penawaranNumber,
@@ -1361,6 +1375,11 @@ class OrderDetail extends OrderSummary {
         recipientAddress: _sOrNull(j['recipient_address']),
         recipientPostal: _sOrNull(j['recipient_postal']),
         fulfillGudang: _sOrNull(j['fulfill_gudang']),
+        pickup: _b(j['pickup']),
+        pickupGudang: _sOrNull(j['pickup_gudang']),
+        pickupLat: _dOrNull(j['pickup_lat']),
+        pickupLon: _dOrNull(j['pickup_lon']),
+        pickupPic: _sOrNull(j['pickup_pic']),
         paymentNote: _sOrNull(j['payment_note']),
         penawaranStatus: _sOrNull(j['penawaran_status']),
         penawaranNumber: _sOrNull(j['penawaran_number']),
@@ -1565,6 +1584,45 @@ class ShippingRates {
         rates: _list(j['rates'], ShippingRate.fromJson),
         error: _sOrNull(j['error']),
         available: _b(j['available']),
+      );
+}
+
+/// Kelayakan "Ambil di Toko" untuk isi keranjang + alamat saat ini. Server yang
+/// memutuskan (jarak ke gudang PEMENUH + izin gudang), dan memutuskannya LAGI
+/// saat order dibuat — layar hanya menampilkan jawabannya, termasuk `alasan`.
+class PickupInfo {
+  final bool tersedia;
+  final String gudang;
+  final double? jarakKm;
+  final double radiusKm;
+  final String pic;
+  final double? lat;
+  final double? lon;
+  final String alasan;
+  final bool didukung;
+
+  const PickupInfo({
+    this.tersedia = false,
+    this.gudang = '',
+    this.jarakKm,
+    this.radiusKm = 0,
+    this.pic = '',
+    this.lat,
+    this.lon,
+    this.alasan = '',
+    this.didukung = false,
+  });
+
+  factory PickupInfo.fromJson(Map<String, dynamic> j) => PickupInfo(
+        tersedia: _b(j['tersedia']),
+        gudang: _s(j['gudang']),
+        jarakKm: _dOrNull(j['jarak_km']),
+        radiusKm: _d(j['radius_km']),
+        pic: _s(j['pic']),
+        lat: _dOrNull(j['lat']),
+        lon: _dOrNull(j['lon']),
+        alasan: _s(j['alasan']),
+        didukung: _b(j['didukung']),
       );
 }
 

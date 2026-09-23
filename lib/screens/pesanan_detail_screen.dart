@@ -296,7 +296,7 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
             const SizedBox(height: 14),
           ],
 
-          MasCard(child: OrderStepper(status: o.status)),
+          MasCard(child: OrderStepper(status: o.status, pickup: o.pickup)),
           const SizedBox(height: 14),
 
           _items(m, o),
@@ -319,8 +319,15 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
             const SizedBox(height: 14),
           ],
 
-          _pengirim(m, o),
-          const SizedBox(height: 14),
+          // Pesanan ambil sendiri: yang penting bagi pembeli bukan "dikirim dari
+          // mana", tapi KE MANA ia harus datang.
+          if (o.pickup) ...[
+            _ambilDiToko(m, o),
+            const SizedBox(height: 14),
+          ] else ...[
+            _pengirim(m, o),
+            const SizedBox(height: 14),
+          ],
 
           if (o.recipientName != null || o.recipientAddress != null) ...[
             _penerima(m, o),
@@ -373,7 +380,7 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
     return MasSectionCard(
       title: o.orderCode,
       trailing: MasPill(
-        label: orderStatusLabel(o.status),
+        label: orderStatusLabel(o.status, pickup: o.pickup),
         tone: orderStatusTone(o.status),
         height: 20,
       ),
@@ -420,8 +427,14 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
             const SizedBox(height: 5),
             _sumRow(
               m,
-              'Ongkir${o.courier != null && o.courier!.isNotEmpty ? ' (${o.courier!.toUpperCase()}${o.courierService != null && o.courierService!.isNotEmpty ? ' ${o.courierService}' : ''})' : ''}',
-              o.shippingCost > 0 ? formatRupiah(o.shippingCost) : '—',
+              o.pickup
+                  ? 'Ongkir (ambil sendiri)'
+                  : 'Ongkir${o.courier != null && o.courier!.isNotEmpty ? ' (${o.courier!.toUpperCase()}${o.courierService != null && o.courierService!.isNotEmpty ? ' ${o.courierService}' : ''})' : ''}',
+              o.pickup
+                  ? 'Gratis'
+                  : o.shippingCost > 0
+                      ? formatRupiah(o.shippingCost)
+                      : '—',
             ),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 9),
@@ -590,6 +603,66 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                           fontWeight: FontWeight.w600,
                           color: m.brand700)),
                 ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Kartu "Ambil di Toko" — pengganti Lokasi Pengirim untuk pesanan yang
+  /// dijemput sendiri: alamat gudang, kontak, dan kode yang harus dibawa.
+  Widget _ambilDiToko(MasColors m, OrderDetail o) {
+    final gd = (o.pickupGudang?.isNotEmpty ?? false)
+        ? o.pickupGudang!
+        : (_gudangKirim(o).isNotEmpty ? _gudangKirim(o) : o.gudang);
+    return MasSectionCard(
+      title: '🏬 Ambil di Toko',
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Ambil sendiri di Gudang $gd — tanpa ongkir.',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: m.ink900)),
+              const SizedBox(height: 4),
+              Text(
+                'Bawa kode pesanan ${o.orderCode}'
+                '${o.status == 'diproses' ? ' setelah gudang mengabari barang siap.' : '.'}',
+                style: TextStyle(fontSize: 12, color: m.ink500),
+              ),
+              if (o.pickupPic != null && o.pickupPic!.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: () => _launch(
+                      'tel:${o.pickupPic!.replaceAll(RegExp(r'[^\d+]'), '')}'),
+                  child: Row(children: [
+                    Icon(Icons.phone_outlined, size: 14, color: m.brand700),
+                    const SizedBox(width: 5),
+                    Text(o.pickupPic!,
+                        style: masMono(
+                            size: 12.5,
+                            weight: FontWeight.w600,
+                            color: m.brand700)),
+                  ]),
+                ),
+              ],
+              if (o.pickupLat != null && o.pickupLon != null) ...[
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: () => _launch(
+                      'https://www.google.com/maps/search/?api=1&query=${o.pickupLat},${o.pickupLon}'),
+                  child: Text('Lihat lokasi gudang di peta →',
+                      style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: m.brand700)),
+                ),
+              ],
             ],
           ),
         ),

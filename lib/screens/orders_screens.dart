@@ -467,7 +467,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             const SizedBox(height: 14),
           ],
 
-          MasCard(child: OrderStepper(status: o.status)),
+          MasCard(child: OrderStepper(status: o.status, pickup: o.pickup)),
           const SizedBox(height: 14),
 
           _items(m, o),

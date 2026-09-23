@@ -478,7 +478,9 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
     final next = _nextStatus(o.status);
     if (next == null) return;
 
-    if (next == 'dikirim') {
+    // Pesanan ambil sendiri tak punya kurir & tak akan pernah punya resi —
+    // jangan minta nomor yang tak ada.
+    if (next == 'dikirim' && !o.pickup) {
       final resi = await _askResi(o);
       if (resi == null) return; // dibatalkan
       await _setStatus('dikirim', trackingNo: resi.isEmpty ? null : resi);
@@ -486,8 +488,9 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
     }
 
     final ok = await _confirm(
-      'Tandai ${orderStatusLabel(next)}',
-      'Ubah status pesanan $_code menjadi "${orderStatusLabel(next)}"?',
+      'Tandai ${orderStatusLabel(next, pickup: o.pickup)}',
+      'Ubah status pesanan $_code menjadi '
+          '"${orderStatusLabel(next, pickup: o.pickup)}"?',
     );
     if (ok != true) return;
     await _setStatus(next);
@@ -539,7 +542,7 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
             const SizedBox(height: 14),
           ],
 
-          MasCard(child: OrderStepper(status: o.status)),
+          MasCard(child: OrderStepper(status: o.status, pickup: o.pickup)),
           const SizedBox(height: 14),
 
           _items(m, o),
@@ -577,7 +580,7 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
     return MasSectionCard(
       title: o.orderCode,
       trailing: MasPill(
-        label: orderStatusLabel(o.status),
+        label: orderStatusLabel(o.status, pickup: o.pickup),
         tone: orderStatusTone(o.status),
         height: 20,
       ),
@@ -805,8 +808,11 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
 
               if (o.status == 'diproses') ...[
                 Text(
-                  'Pembayaran lunas. Kemas barang, lalu tandai dikirim beserta '
-                  'nomor resi.',
+                  o.pickup
+                      ? 'Pembayaran lunas. Siapkan barang di konter, kabari '
+                          'pembeli, lalu tandai siap diambil. Jangan dikirim.'
+                      : 'Pembayaran lunas. Kemas barang, lalu tandai dikirim '
+                          'beserta nomor resi.',
                   style: TextStyle(fontSize: 12.5, color: m.ink500, height: 1.45),
                 ),
                 const SizedBox(height: 10),
@@ -814,11 +820,14 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
 
               if (o.status == 'dikirim') ...[
                 Text(
-                  o.trackingNo != null && o.trackingNo!.isNotEmpty
-                      ? 'Sudah dikirim · resi ${o.trackingNo}. Tandai selesai '
-                          'setelah barang diterima pembeli.'
-                      : 'Sudah dikirim. Tandai selesai setelah barang diterima '
-                          'pembeli.',
+                  o.pickup
+                      ? 'Menunggu pembeli datang mengambil. Tandai selesai '
+                          'setelah barang diserahkan.'
+                      : o.trackingNo != null && o.trackingNo!.isNotEmpty
+                          ? 'Sudah dikirim · resi ${o.trackingNo}. Tandai selesai '
+                              'setelah barang diterima pembeli.'
+                          : 'Sudah dikirim. Tandai selesai setelah barang diterima '
+                              'pembeli.',
                   style: TextStyle(fontSize: 12.5, color: m.ink500, height: 1.45),
                 ),
                 const SizedBox(height: 10),
@@ -829,7 +838,9 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
                   label: _busy
                       ? 'Memproses…'
                       : (next == 'dikirim'
-                          ? '🚚 Tandai Dikirim'
+                          ? (o.pickup
+                              ? '🏬 Tandai Siap Diambil'
+                              : '🚚 Tandai Dikirim')
                           : '✓ Tandai Selesai'),
                   expand: true,
                   loading: _busy,

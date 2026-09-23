@@ -30,7 +30,14 @@ const Map<String, (String, MasPillTone)> kOrderStatus = {
   'batal': ('Batal', MasPillTone.danger),
 };
 
-String orderStatusLabel(String status) => kOrderStatus[status]?.$1 ?? status;
+/// Label status. Untuk pesanan AMBIL DI TOKO, status 'dikirim' berarti barangnya
+/// sudah siap di konter, bukan sedang di jalan — statusnya sendiri sengaja tidak
+/// ditambah, hanya kata yang dibaca pembeli yang berbeda. Dipakai di layar yang
+/// memang tahu pesanannya ambil sendiri (daftar pesanan hanya memuat ringkasan).
+String orderStatusLabel(String status, {bool pickup = false}) {
+  if (pickup && status == 'dikirim') return 'Siap Diambil';
+  return kOrderStatus[status]?.$1 ?? status;
+}
 
 MasPillTone orderStatusTone(String status) =>
     kOrderStatus[status]?.$2 ?? MasPillTone.neutral;
@@ -39,12 +46,16 @@ MasPillTone orderStatusTone(String status) =>
 const List<String> kOrderFlow = ['diproses', 'dikirim', 'selesai'];
 
 /// Tahapan progres pesanan untuk stepper. `done` = milestone sudah tercapai.
-List<({String label, bool done})> orderProgress(String status) {
+List<({String label, bool done})> orderProgress(String status,
+    {bool pickup = false}) {
   final paid = ['diproses', 'dikirim', 'selesai'].contains(status);
   return [
     (label: 'Dibayar', done: paid),
     (label: 'Diproses', done: paid),
-    (label: 'Dikirim', done: ['dikirim', 'selesai'].contains(status)),
+    (
+      label: pickup ? 'Siap Diambil' : 'Dikirim',
+      done: ['dikirim', 'selesai'].contains(status)
+    ),
     (label: 'Selesai', done: status == 'selesai'),
   ];
 }
@@ -69,12 +80,15 @@ String fmtDate(String? s) {
 /// Stepper progres pesanan (Dibayar → Diproses → Dikirim → Selesai).
 class OrderStepper extends StatelessWidget {
   final String status;
-  const OrderStepper({super.key, required this.status});
+
+  /// Pesanan diambil sendiri → langkah ketiga berbunyi "Siap Diambil".
+  final bool pickup;
+  const OrderStepper({super.key, required this.status, this.pickup = false});
 
   @override
   Widget build(BuildContext context) {
     final m = context.mas;
-    final steps = orderProgress(status);
+    final steps = orderProgress(status, pickup: pickup);
     final batal = status == 'batal';
 
     return Row(

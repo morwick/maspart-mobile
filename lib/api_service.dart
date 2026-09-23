@@ -875,6 +875,31 @@ class ApiService {
     return ShippingRates.fromJson(_Api._obj(data));
   }
 
+  /// Boleh AMBIL SENDIRI di gudang pemenuh? Jarak & izin gudang dihitung server
+  /// (dan dihitung ULANG saat order dibuat) — layar keranjang hanya menampilkan.
+  static Future<PickupInfo> shippingPickup({
+    List<CartLine> items = const [],
+    String destPostal = '',
+    double? lat,
+    double? lon,
+    String alamat = '',
+  }) async {
+    final data = await _Api.post(
+      '/api/shipping/pickup',
+      body: {
+        'items': items.map((e) => e.toJson()).toList(),
+        'dest_postal': destPostal,
+        'lat': lat,
+        'lon': lon,
+        // Cadangan penentu lokasi: banyak kode pos Indonesia tak dikenal
+        // Nominatim, sedangkan kecamatan/kotanya dikenal.
+        'alamat': alamat,
+      },
+      timeout: _Api._timeoutLong,
+    );
+    return PickupInfo.fromJson(_Api._obj(data));
+  }
+
   /// Alamat dari koordinat (untuk pin peta).
   static Future<GeoPlace> geoReverse(double lat, double lon) async {
     final data = await _Api.get(
@@ -935,11 +960,20 @@ class ApiService {
     String? recipientPhone,
     String? recipientAddress,
     String? recipientPostal,
+    bool pickup = false,
+    double? recipientLat,
+    double? recipientLon,
   }) async {
     final data = await _Api.post(
       '/api/orders',
       body: {
         'items': items.map((e) => e.toJson()).toList(),
+        // Titik alamat ikut dikirim agar server bisa MEMBUKTIKAN sendiri bahwa
+        // pembeli memang dekat gudang — flag `pickup` saja tak pernah cukup
+        // untuk menghapus ongkir dari tagihan.
+        'pickup': pickup,
+        'recipient_lat': recipientLat,
+        'recipient_lon': recipientLon,
         'note': ?note,
         'courier': ?courier,
         'courier_service': ?courierService,
