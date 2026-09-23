@@ -49,6 +49,10 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   String _gudangPilih = '';
 
   int _weightGrams = 0;
+
+  /// Berat dus + isian + bungkus yang ikut ditimbang kurir — ditampilkan
+  /// terpisah supaya pembeli tak menyangka beratnya salah hitung.
+  int _packingGrams = 0;
   List<ShippingRate> _rates = [];
   ShippingRate? _rate;
   String? _rateErr;
@@ -124,6 +128,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       setState(() {
         _asal = null;
         _weightGrams = 0;
+        _packingGrams = 0;
         _rates = [];
         _rate = null;
       });
@@ -150,7 +155,10 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   Future<void> _refreshWeight() async {
     final beli = _itemsBeli;
     if (beli.isEmpty) {
-      setState(() => _weightGrams = 0);
+      setState(() {
+        _weightGrams = 0;
+        _packingGrams = 0;
+      });
       return;
     }
     final sig = beli.map((i) => '${i.partNumber}:${i.qty}').join(',');
@@ -162,6 +170,9 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     final perkiraan = beli.fold<int>(0, (n, i) => n + i.qty) * 1000;
     setState(() {
       _weightGrams = perkiraan < 1000 ? 1000 : perkiraan;
+      // Angka kemasan keranjang LAMA tak boleh nyangkut di layar sampai jawaban
+      // server datang — lebih baik tak tampil daripada tampil salah.
+      _packingGrams = 0;
       // Berat berubah → ongkir lama tak berlaku lagi.
       _rates = [];
       _rate = null;
@@ -173,7 +184,10 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         [for (final i in beli) CartLine(partNumber: i.partNumber, qty: i.qty)],
       );
       if (!mounted) return;
-      setState(() => _weightGrams = w.weightGrams);
+      setState(() {
+        _weightGrams = w.weightGrams;
+        _packingGrams = w.packingGrams;
+      });
     } on ApiException {
       /* pakai estimasi — pembeli tetap bisa cek ongkir manual */
     }
@@ -825,11 +839,13 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           ),
         ] else ...[
           const SizedBox(height: 8),
-          // Berat tertagih = max(berat asli, volumetrik). Barang besar tapi
-          // ringan ditagih dari ukurannya — pembeli berhak tahu dasarnya.
+          // Berat tertagih = max(berat asli, volumetrik) + kemasan. Barang
+          // besar tapi ringan ditagih dari ukurannya, dan dus ikut ditimbang di
+          // konter — pembeli berhak tahu dasarnya.
           Text(
             'Berat kirim: ${weightKg.toStringAsFixed(weightKg % 1 == 0 ? 0 : 1)} kg '
-            '(yang lebih besar antara berat asli dan volumetrik)',
+            '(yang lebih besar antara berat asli dan volumetrik'
+            '${_packingGrams > 0 ? ', termasuk kemasan $_packingGrams g' : ''})',
             style: TextStyle(fontSize: 11.5, color: m.ink500),
           ),
           if (_gudangAktif.isNotEmpty) ...[

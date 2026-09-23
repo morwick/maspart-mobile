@@ -844,7 +844,9 @@ class ApiService {
   }
 
   /// Berat tertagih keranjang = max(berat asli, berat volumetrik) dari dimensi
-  /// SIMS. Dihitung server supaya sama persis dengan yang dipakai saat order.
+  /// SIMS, DITAMBAH berat kemasan (dus + isian + bungkus per pcs) yang ikut
+  /// ditimbang di konter kurir. Dihitung server supaya sama persis dengan yang
+  /// dipakai saat order.
   static Future<CartWeight> cartWeight(List<CartLine> items) async {
     final data = await _Api.post(
       '/api/shipping/weight',

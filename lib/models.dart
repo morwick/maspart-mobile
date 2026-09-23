@@ -1627,13 +1627,28 @@ class PickupInfo {
 }
 
 class CartWeight {
+  /// Yang ditagih kurir = isi paket + kemasan.
   final int weightGrams;
+
+  /// Isi paket saja: max(berat asli, volumetrik) per item x qty.
+  final int subtotalGrams;
+
+  /// Dus + isian + bungkus per pcs — ikut ditimbang di konter kurir.
+  final int packingGrams;
+
   final int defaultItemGrams;
 
-  const CartWeight({this.weightGrams = 0, this.defaultItemGrams = 0});
+  const CartWeight({
+    this.weightGrams = 0,
+    this.subtotalGrams = 0,
+    this.packingGrams = 0,
+    this.defaultItemGrams = 0,
+  });
 
   factory CartWeight.fromJson(Map<String, dynamic> j) => CartWeight(
         weightGrams: _i(j['weight_grams']),
+        subtotalGrams: _i(j['subtotal_grams']),
+        packingGrams: _i(j['packing_grams']),
         defaultItemGrams: _i(j['default_item_grams']),
       );
 }
