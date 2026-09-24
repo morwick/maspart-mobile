@@ -233,6 +233,28 @@ Future<List<int>> buildInvoicePdf(OrderDetail o) async {
                         : o.shippingCost > 0
                             ? formatRupiah(o.shippingCost)
                             : '—'),
+                // Potongan (migrasi 034/035) — tanpa ini Subtotal + Ongkir ≠
+                // Total di PDF. Paritas web pesanan/[code]/invoice. Minus pakai '-' biasa:
+                // font bawaan PDF (Helvetica, WinAnsi) tak punya glyph U+2212.
+                if (o.voucherDiscount > 0)
+                  totalRow('Voucher Diskon', '-${formatRupiah(o.voucherDiscount)}'),
+                if (o.shippingDiscount > 0)
+                  totalRow('Voucher Gratis Ongkir',
+                      '-${formatRupiah(o.shippingDiscount)}'),
+                if (o.pointDiscount > 0)
+                  totalRow('Potongan Poin (${thousands(o.pointRedeemed)} poin)',
+                      '-${formatRupiah(o.pointDiscount)}'),
+                if ((o.voucherCodes ?? '').trim().isNotEmpty)
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.only(top: 1),
+                    child: pw.Align(
+                      alignment: pw.Alignment.centerLeft,
+                      child: pw.Text(
+                        'Kode voucher: ${o.voucherCodes!.split(',').map((e) => e.trim()).join(', ')}',
+                        style: const pw.TextStyle(fontSize: 8, color: ink400),
+                      ),
+                    ),
+                  ),
                 pw.Divider(color: line, height: 10),
                 totalRow('TOTAL PEMBAYARAN', formatRupiah(o.total), grand: true),
               ]),

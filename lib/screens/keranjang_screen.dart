@@ -16,6 +16,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../api_service.dart';
 import '../app/nav.dart';
@@ -23,6 +24,7 @@ import '../cart.dart';
 import '../order_ui.dart';
 import '../theme/mas_theme.dart';
 import '../utils.dart';
+import '../widgets/voucher_tiket.dart';
 import '../widgets/mas_ui.dart';
 import 'pilih_lokasi_screen.dart';
 
@@ -41,6 +43,16 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   final _addressCtl = TextEditingController();
   final _postalCtl = TextEditingController();
   final _noteCtl = TextEditingController();
+
+  /// Alamat tersimpan di Profil (paritas web): alamat utama mengisi form, >1
+  /// alamat → pilihan "Kirim ke". Kosong bila fitur profil belum aktif.
+  List<Alamat> _alamatList = [];
+  int? _alamatId;
+
+  /// Titik peta penerima (dari alamat tersimpan / peta) — ikut dikirim ke cek
+  /// Ambil di Toko supaya jarak dihitung dari titik, bukan tebakan kode pos.
+  double? _lat;
+  double? _lon;
 
   /// Keadaan server untuk isi keranjang (harga, gudang, bisa dibeli).
   CartGudang? _asal;
@@ -68,6 +80,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   String? _error;
 
   Timer? _ongkirDebounce;
+  Timer? _pickupDebounce;
 
   /// Tanda tangan isi keranjang & gudang aktif — dipakai untuk tahu kapan
   /// perlu ambil ulang berat/ongkir, supaya tidak menembak server tiap rebuild.
@@ -85,6 +98,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   @override
   void dispose() {
     _ongkirDebounce?.cancel();
+    _pickupDebounce?.cancel();
     _cart.removeListener(_onCartChanged);
     _nameCtl.dispose();
     _phoneCtl.dispose();
@@ -108,6 +122,38 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       _phoneCtl.text = a.phone;
       _addressCtl.text = a.address;
       _postalCtl.text = a.postal;
+    });
+    _scheduleOngkir();
+    // Alamat profil menang atas prefill lokal (sumber yang dikelola pembeli
+    // sendiri di Profil). Gagal/503 pra-migrasi → diam, pakai prefill.
+    try {
+      final list = await ApiService.listAlamat();
+      if (!mounted) return;
+      setState(() => _alamatList = list);
+      Alamat? utama;
+      for (final x in list) {
+        if (x.isDefault) utama = x;
+      }
+      utama ??= list.isNotEmpty ? list.first : null;
+      if (utama != null) _pakaiAlamat(utama);
+    } catch (_) {
+      /* fitur profil belum aktif / offline */
+    }
+  }
+
+  void _pakaiAlamat(Alamat a) {
+    setState(() {
+      _alamatId = a.id;
+      _nameCtl.text = a.namaPenerima;
+      _phoneCtl.text = a.telepon;
+      _addressCtl.text = [a.alamat, a.kecamatan, a.kota, a.provinsi]
+          .where((e) => e.isNotEmpty)
+          .join(', ');
+      _postalCtl.text = a.kodePos;
+      _lat = a.lat;
+      _lon = a.lng;
+      _rates = [];
+      _rate = null;
     });
     _scheduleOngkir();
   }
@@ -202,15 +248,38 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   /// kurir. Debounce 900 ms supaya tak menembak tiap ketikan.
   void _scheduleOngkir() {
     _ongkirDebounce?.cancel();
-    if (_itemsBeli.isEmpty ||
-        _weightGrams <= 0 ||
-        _postalCtl.text.trim().length < 5) {
+    if (_itemsBeli.isNotEmpty &&
+        _weightGrams > 0 &&
+        _postalCtl.text.trim().length >= 5) {
+      _ongkirDebounce =
+          Timer(const Duration(milliseconds: 900), () => _cekOngkir());
+    }
+    _schedulePickup();
+  }
+
+  /// Jadwalkan cek Ambil di Toko saja (dipanggil juga saat alamat diketik —
+  /// tanpa ikut mengambil ulang tarif kurir).
+  void _schedulePickup() {
+    _pickupDebounce?.cancel();
+    if (!mounted) return;
+    // Ambil di Toko punya syarat SENDIRI (paritas web): cukup titik peta ATAU
+    // alamat terisi — kode pos belum 5 digit tak boleh menahan cek jarak.
+    // Syarat tak terpenuhi → info lama dibuang, jangan nyangkut di layar.
+    final bisaCekPickup = _itemsBeli.isNotEmpty &&
+        ((_lat != null && _lon != null) ||
+            _postalCtl.text.trim().length >= 5 ||
+            _addressCtl.text.trim().isNotEmpty);
+    if (!bisaCekPickup) {
+      if (_pickup != null || _ambilSendiri) {
+        setState(() {
+          _pickup = null;
+          _ambilSendiri = false;
+        });
+      }
       return;
     }
-    _ongkirDebounce = Timer(const Duration(milliseconds: 900), () {
-      _cekOngkir();
-      _cekAmbilSendiri();
-    });
+    _pickupDebounce =
+        Timer(const Duration(milliseconds: 900), () => _cekAmbilSendiri());
   }
 
   /// Kelayakan ambil di toko: ikut isi keranjang (gudang pemenuh bisa berpindah)
@@ -224,6 +293,8 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           for (final i in beli) CartLine(partNumber: i.partNumber, qty: i.qty),
         ],
         destPostal: _postalCtl.text.trim(),
+        lat: _lat,
+        lon: _lon,
         alamat: _addressCtl.text.trim(),
       );
       if (!mounted) return;
@@ -322,6 +393,93 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   int get _subtotal =>
       _itemsBeli.fold(0, (n, i) => n + _hargaOf(i) * i.qty);
 
+  // ── Voucher ─────────────────────────────────────────────────────────
+  // Penilaian (potongan + alasan) datang dari SERVER dengan fungsi hitung yang
+  // sama dengan checkout. Voucher terbaik dipasang otomatis (pola Shopee)
+  // sampai pembeli memilih sendiri di lembar Pilih Voucher. Paritas web
+  // `app/keranjang/page.tsx`.
+  List<Voucher> _vItems = [];
+  Map<String, String> _vPilih = {};
+  bool _vManual = false;
+  String _vSigDiminta = '';
+
+  Voucher? _vCari(String? code) {
+    if (code == null) return null;
+    for (final v in _vItems) {
+      if (v.code == code && v.bisa) return v;
+    }
+    return null;
+  }
+
+  int get _vDiskon => _vCari(_vPilih['diskon'])?.potongan ?? 0;
+  int get _vOngkir {
+    final p = _vCari(_vPilih['ongkir'])?.potongan ?? 0;
+    return p > _ongkir ? _ongkir : p;
+  }
+
+  List<String> get _vKode => [
+        if (_vCari(_vPilih['ongkir']) != null) _vPilih['ongkir']!,
+        if (_vCari(_vPilih['diskon']) != null) _vPilih['diskon']!,
+      ];
+
+  /// Dipanggil dari build: nilai ulang voucher bila harga barang, ongkir,
+  /// atau cara ambil berubah (minimal belanja & potongan ongkir ikut berubah).
+  void _jadwalVoucher() {
+    // Isi keranjang (PN×qty) ikut: ganti part dengan subtotal kebetulan sama
+    // tetap wajib dinilai ulang (paritas web `beliSig`).
+    final beliSig =
+        _itemsBeli.map((i) => '${i.partNumber}:${i.qty}').join(',');
+    final sig = '$beliSig|$_subtotal|$_ongkir|$_ambilSendiri';
+    if (sig == _vSigDiminta) return;
+    _vSigDiminta = sig;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshVoucher());
+  }
+
+  Future<List<Voucher>> _refreshVoucher() async {
+    final sub = _subtotal;
+    if (sub <= 0) {
+      if (mounted) setState(() { _vItems = []; _vPilih = {}; });
+      return const [];
+    }
+    try {
+      final r = await ApiService.voucherCheckout(sub, _ongkir, _ambilSendiri);
+      if (!mounted) return r.items;
+      final bisa = {for (final v in r.items) if (v.bisa) v.code};
+      setState(() {
+        _vItems = r.items;
+        _vPilih = _vManual
+            // Pilihan pembeli dipertahankan selama masih memenuhi syarat.
+            ? {
+                for (final e in _vPilih.entries)
+                  if (bisa.contains(e.value)) e.key: e.value,
+              }
+            : {...r.terbaik};
+      });
+      // Batas poin dihitung dari harga barang SETELAH voucher diskon.
+      _refreshPoin();
+      return r.items;
+    } catch (_) {
+      // Gagal menilai → jangan pasang voucher apa pun.
+      if (mounted) setState(() { _vItems = []; _vPilih = {}; });
+      return const [];
+    }
+  }
+
+  Future<void> _bukaVoucher() async {
+    final hasil = await showVoucherPicker(
+      context,
+      items: _vItems,
+      pilihan: _vPilih,
+      onMuatUlang: _refreshVoucher,
+    );
+    if (hasil == null || !mounted) return;
+    setState(() {
+      _vPilih = hasil;
+      _vManual = true;
+    });
+    _refreshPoin();
+  }
+
   // ── Poin ────────────────────────────────────────────────────────────
   // `_poinMaks` datang dari SERVER (saldo x plafon 20% x minimal tukar) supaya
   // angka yang ditawarkan sama persis dengan yang diterima saat checkout —
@@ -336,7 +494,9 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   /// Ambil batas poin untuk isi keranjang saat ini. Plafon 20% mengikuti harga
   /// barang, jadi batasnya ikut berubah tiap keranjang berubah.
   Future<void> _refreshPoin() async {
-    final sub = _subtotal;
+    // Voucher dulu, poin belakangan (sama dengan server): plafon 20% poin
+    // dari harga barang SETELAH voucher diskon.
+    final sub = _subtotal - _vDiskon < 0 ? 0 : _subtotal - _vDiskon;
     if (sub <= 0) {
       if (mounted) setState(() { _poinMaks = 0; _poinPakai = 0; });
       return;
@@ -417,6 +577,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         courierService: _ambilSendiri ? null : _rate?.service,
         shippingCost: _ongkir.toDouble(),
         pointRedeem: _poinPakai,
+        voucherCodes: _vKode,
         pickup: _ambilSendiri,
         weightGrams: _weightGrams,
         paymentMethod: 'gateway',
@@ -427,6 +588,10 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         recipientPhone: _phoneCtl.text.trim(),
         recipientAddress: _addressCtl.text.trim(),
         recipientPostal: _postalCtl.text.trim(),
+        // Titik peta ikut dikirim — server MENGHITUNG ULANG jarak ambil sendiri
+        // dari titik ini (paritas web `recipient_lat/lon`).
+        recipientLat: _lat,
+        recipientLon: _lon,
       );
 
       await _cart.saveAddress(SavedAddress(
@@ -484,6 +649,8 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           ? place.displayName
           : place.address;
       if (place.postal.isNotEmpty) _postalCtl.text = place.postal;
+      _lat = place.lat;
+      _lon = place.lon;
       _rates = [];
       _rate = null;
     });
@@ -525,8 +692,13 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     // PPN INKLUSIF dihitung dari harga barang SETELAH potongan poin — sama
     // dengan backend (orders.create_order); kalau tidak, angkanya berbeda
     // antara layar dan faktur.
-    final ppn = ppnOf(subtotal - _potongan < 0 ? 0 : subtotal - _potongan);
-    final total = totalOf(subtotal, _ongkir) - _potongan;
+    _jadwalVoucher();
+    final barangBersih = subtotal - _vDiskon - _potongan;
+    final ppn = ppnOf(barangBersih < 0 ? 0 : barangBersih);
+    final totalKotor =
+        totalOf(subtotal, _ongkir) - _vDiskon - _potongan - _vOngkir;
+    // Total tak pernah negatif (paritas web `Math.max(0, …)`).
+    final total = totalKotor < 0 ? 0 : totalKotor;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
@@ -749,6 +921,14 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
                       color: m.ink900)),
             ),
             MasButton(
+              label: _alamatList.isEmpty ? 'Simpan' : 'Kelola',
+              icon: Icons.person_outline_rounded,
+              primary: false,
+              height: 34,
+              onTap: () => AppNav.of(context).go(MasScreen.profil),
+            ),
+            const SizedBox(width: 6),
+            MasButton(
               label: 'Peta',
               icon: Icons.map_outlined,
               primary: false,
@@ -757,6 +937,49 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
             ),
           ]),
           const SizedBox(height: 12),
+          if (_alamatList.length > 1) ...[
+            _field(
+              m,
+              'Kirim ke',
+              DropdownButtonFormField<int>(
+                key: ValueKey(_alamatId),
+                initialValue: _alamatId,
+                isExpanded: true,
+                items: [
+                  for (final a in _alamatList)
+                    DropdownMenuItem(
+                      value: a.id,
+                      child: Text(
+                        '${a.label}${a.isDefault ? ' (utama)' : ''} — ${a.namaPenerima}, '
+                        '${[a.kecamatan, a.kota].where((e) => e.isNotEmpty).join(', ')} ${a.kodePos}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 13, color: m.ink900),
+                      ),
+                    ),
+                ],
+                onChanged: (id) {
+                  for (final a in _alamatList) {
+                    if (a.id == id) _pakaiAlamat(a);
+                  }
+                },
+                decoration: InputDecoration(
+                  isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(MasRadii.input),
+                    borderSide: BorderSide(color: m.ink200),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(MasRadii.input),
+                    borderSide: BorderSide(color: m.ink200),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
           _field(m, 'Nama penerima',
               MasInput(controller: _nameCtl, hint: 'Nama lengkap')),
           const SizedBox(height: 10),
@@ -773,6 +996,8 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
               controller: _addressCtl,
               hint: 'Jalan, no, RT/RW, kelurahan, kecamatan, kota, provinsi',
               maxLines: 3,
+              // Alamat ikut menentukan jarak ke gudang (paritas web).
+              onChanged: (_) => _schedulePickup(),
             ),
           ),
           const SizedBox(height: 10),
@@ -867,22 +1092,41 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           Row(children: [
             Expanded(
                 child: _caraTerima(m, false, '🚚 Kirim ke alamat',
-                    'Ongkir sesuai tarif')),
+                    'Dikirim ekspedisi, ongkir sesuai tarif')),
             const SizedBox(width: 8),
             Expanded(
                 child: _caraTerima(m, true, '🏬 Ambil di toko',
-                    'Gudang ${p.gudang} · ±${p.jarakKm?.toStringAsFixed(0) ?? '?'} km · gratis')),
+                    'Gudang ${p.gudang} · ±${_km(p.jarakKm)} km · gratis ongkir')),
           ]),
         ],
         if (_ambilSendiri) ...[
           const SizedBox(height: 10),
           Text(
-            'Barang disiapkan di Gudang ${p?.gudang ?? _gudangAktif}. Bayar dulu '
-            'lewat aplikasi, lalu datang membawa kode pesanan — tanpa ongkir.'
+            'Barang disiapkan di Gudang ${p?.gudang ?? _gudangAktif}'
+            '${p?.jarakKm != null ? ' (±${_km(p!.jarakKm)} km dari alamat Anda)' : ''}. '
+            'Bayar dulu lewat aplikasi, lalu datang membawa kode pesanan — '
+            'tak ada ongkir.'
             '${(p?.pic.isNotEmpty ?? false) ? '\nKontak gudang: ${p!.pic}' : ''}',
             style: TextStyle(fontSize: 12.5, color: m.ink700, height: 1.5),
           ),
+          if (p?.lat != null && p?.lon != null) ...[
+            const SizedBox(height: 8),
+            MasButton(
+              label: '🗺️ Lihat lokasi gudang',
+              primary: false,
+              height: 34,
+              onTap: () => _bukaUrl(
+                  'https://www.google.com/maps/search/?api=1&query=${p!.lat},${p.lon}'),
+            ),
+          ],
         ] else ...[
+          // Alasan tak bisa ambil sendiri hanya bila menyangkut jarak — pembeli
+          // luar kota tak perlu diberi tahu fitur yang tak relevan.
+          if (p != null && !p.tersedia && p.jarakKm != null) ...[
+            const SizedBox(height: 8),
+            Text('🏬 ${p.alasan}',
+                style: TextStyle(fontSize: 12, color: m.ink500, height: 1.4)),
+          ],
           const SizedBox(height: 8),
           // Berat tertagih = max(berat asli, volumetrik) + kemasan. Barang
           // besar tapi ringan ditagih dari ukurannya, dan dus ikut ditimbang di
@@ -920,6 +1164,22 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         ],
       ]),
     );
+  }
+
+  /// Jarak km apa adanya dari server (mis. 3,2) — bilangan bulat tanpa ",0".
+  String _km(double? v) {
+    if (v == null) return '?';
+    return v == v.roundToDouble()
+        ? v.toStringAsFixed(0)
+        : v.toStringAsFixed(1).replaceAll('.', ',');
+  }
+
+  Future<void> _bukaUrl(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (mounted) AppNav.of(context).toast('Tidak bisa membuka $url');
+    }
   }
 
   /// Tombol pilihan cara terima barang (kirim ↔ ambil sendiri).
@@ -1021,6 +1281,67 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         ),
       );
 
+  /// Baris "Voucher MasPart" — ketuk untuk membuka lembar Pilih Voucher.
+  Widget _barisVoucher(MasColors m) {
+    final hemat = _vDiskon + _vOngkir;
+    final nBisa = _vItems.where((v) => v.bisa).length;
+    return Material(
+      color: kOranyeVoucher.withValues(alpha: m.isDark ? 0.12 : 0.06),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(9),
+        side: BorderSide(color: kOranyeVoucher.withValues(alpha: 0.7)),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(9),
+        onTap: _bukaVoucher,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                gradient: const LinearGradient(
+                    colors: [kOranyeVoucher, kOranyeVoucher2]),
+              ),
+              child: const Icon(Icons.confirmation_number_outlined,
+                  size: 17, color: Colors.white),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Voucher MasPart',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: m.ink900)),
+                  Text(
+                    hemat > 0
+                        ? '${_vKode.length} voucher dipakai · hemat ${formatRupiah(hemat)}'
+                        : nBisa > 0
+                            ? '$nBisa voucher bisa dipakai'
+                            : 'Pilih atau masukkan kode voucher',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight:
+                            hemat > 0 ? FontWeight.w600 : FontWeight.w400,
+                        color: hemat > 0 ? kOranyeVoucher2 : m.ink500),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: m.ink400),
+          ]),
+        ),
+      ),
+    );
+  }
+
   Widget _ringkasan(
       MasColors m, int subtotal, int ppn, num total, int jumlahBeli) {
     final blokir = _blokir;
@@ -1051,6 +1372,20 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
                   ? formatRupiah(_rate!.price)
                   : '—',
         ),
+        const SizedBox(height: 10),
+        _barisVoucher(m),
+        if (_vDiskon > 0) ...[
+          const SizedBox(height: 6),
+          _sumRow(m, 'Voucher diskon (${_vPilih['diskon']})',
+              '−${formatRupiah(_vDiskon)}',
+              color: _kWarnaDiskon),
+        ],
+        if (_vOngkir > 0) ...[
+          const SizedBox(height: 6),
+          _sumRow(m, 'Gratis ongkir (${_vPilih['ongkir']})',
+              '−${formatRupiah(_vOngkir)}',
+              color: _kWarnaOngkir),
+        ],
         // Tukar poin — hanya muncul bila server memang menawarkan (fitur aktif,
         // penukaran dibuka, saldo & keranjang cukup).
         if (_poinMaks > 0) ...[
@@ -1065,7 +1400,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
                   style: TextStyle(
                       fontSize: 13, fontWeight: FontWeight.w600, color: m.ink700)),
             ),
-            Text('punya $_poinSaldo',
+            Text('punya ${thousands(_poinSaldo)}',
                 style: TextStyle(fontSize: 11.5, color: m.ink500)),
           ]),
           Row(children: [
@@ -1076,9 +1411,12 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
                 value: (_poinPakai > _poinMaks ? _poinMaks : _poinPakai).toDouble(),
                 min: 0,
                 max: _poinMaks.toDouble(),
-                divisions: _poinMaks > 10 ? (_poinMaks ~/ 10) : null,
-                label: '$_poinPakai poin',
-                onChanged: (v) => setState(() => _poinPakai = v.round()),
+                // Langkah 10 poin (paritas web step=10). Maks yang bukan
+                // kelipatan 10 tetap tercapai: pembagian dibulatkan KE ATAS,
+                // lalu `_poinLangkah` memangkas ke maks.
+                divisions: _poinMaks > 10 ? (_poinMaks + 9) ~/ 10 : null,
+                label: '${thousands(_poinPakai)} poin',
+                onChanged: (v) => setState(() => _poinPakai = _poinLangkah(v)),
               ),
             ),
             MasButton(
@@ -1090,15 +1428,16 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
             ),
           ]),
           Text(
-            'Maksimal $_poinMaks poin untuk keranjang ini (20% dari harga '
+            'Maksimal ${thousands(_poinMaks)} poin untuk keranjang ini (20% dari harga '
             'barang). Poin tidak bisa membayar ongkir.',
             style: TextStyle(fontSize: 11.5, color: m.ink400, height: 1.4),
           ),
         ],
         if (_potongan > 0) ...[
           const SizedBox(height: 6),
-          _sumRow(m, 'Potongan poin ($_poinPakai)',
-              '-${formatRupiah(_potongan)}'),
+          _sumRow(m, 'Potongan poin (${thousands(_poinPakai)})',
+              '−${formatRupiah(_potongan)}',
+              color: _kWarnaPoin),
         ],
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),
@@ -1134,17 +1473,30 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     );
   }
 
-  Widget _sumRow(MasColors m, String label, String value, {bool muted = false}) =>
+  /// Nilai slider → kelipatan 10 poin, tak pernah melebihi batas server.
+  int _poinLangkah(double v) {
+    if (v >= _poinMaks) return _poinMaks;
+    final r = (v / 10).round() * 10;
+    return r > _poinMaks ? _poinMaks : (r < 0 ? 0 : r);
+  }
+
+  // Warna baris potongan — sama dengan web (keranjang/page.tsx).
+  static const _kWarnaDiskon = Color(0xFFC9530F);
+  static const _kWarnaOngkir = Color(0xFF0B7D6E);
+  static const _kWarnaPoin = Color(0xFF167A4A);
+
+  Widget _sumRow(MasColors m, String label, String value,
+          {bool muted = false, Color? color}) =>
       Row(children: [
         Expanded(
           child: Text(label,
               style: TextStyle(
                   fontSize: muted ? 12.5 : 13,
-                  color: muted ? m.ink400 : m.ink500)),
+                  color: color ?? (muted ? m.ink400 : m.ink500))),
         ),
         Text(value,
             style: masMono(
                 size: muted ? 12.5 : 13,
-                color: muted ? m.ink400 : m.ink800)),
+                color: color ?? (muted ? m.ink400 : m.ink800))),
       ]);
 }

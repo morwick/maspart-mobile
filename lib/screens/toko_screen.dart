@@ -13,7 +13,10 @@ import '../app/nav.dart';
 import '../cart.dart';
 import '../theme/mas_theme.dart';
 import '../utils.dart';
+import '../widgets/flash_sale.dart';
 import '../widgets/mas_ui.dart';
+import '../widgets/penilaian.dart';
+import '../widgets/promo_banner.dart';
 
 const _pageSize = 24;
 
@@ -41,6 +44,9 @@ class _TokoScreenState extends State<TokoScreen> {
   TokoCatalog? _cat;
   List<TokoProduct> _items = [];
 
+  /// Isi strip flash sale — ditarik SENDIRI, sekali (lihat [_loadFlash]).
+  List<TokoProduct> _flashItems = [];
+
   bool _loading = true;
   bool _loadingMore = false;
   String? _error;
@@ -57,6 +63,7 @@ class _TokoScreenState extends State<TokoScreen> {
     _cart.addListener(_onCartChanged);
     _loadHome();
     _loadCatalog();
+    if (FlashSaleKampanye.tampil) _loadFlash();
   }
 
   @override
@@ -79,6 +86,26 @@ class _TokoScreenState extends State<TokoScreen> {
       // Beranda cuma pemanis (strip & kategori) — katalog di bawah tetap jalan,
       // jadi jangan menutup seluruh layar hanya karena ini gagal.
       if (mounted && e.isAuth) setState(() => _error = e.message);
+    }
+  }
+
+  /// Kolam strip flash sale — permintaan TERPISAH dari grid (sama seperti web):
+  /// `/api/buyer/home` terlalu sedikit setelah disaring, dan memakai `_items`
+  /// membuat isi promo ikut bergeser saat pembeli mengetik di kolom cari.
+  /// sort "relevan" + 100 (backend mendahulukan yang berfoto), lalu yang tak
+  /// berfoto dibuang dan diurutkan stok terbanyak di sini.
+  Future<void> _loadFlash() async {
+    try {
+      final r = await ApiService.tokoCatalog(
+          ready: true, sort: 'relevan', page: 1, pageSize: 100);
+      if (!mounted) return;
+      final berfoto = r.items
+          .where((p) => (p.foto ?? '').isNotEmpty)
+          .toList()
+        ..sort((a, b) => b.stok.compareTo(a.stok));
+      setState(() => _flashItems = berfoto);
+    } catch (_) {
+      /* strip promo tak sepenting katalog — diam saja bila gagal */
     }
   }
 
@@ -178,7 +205,6 @@ class _TokoScreenState extends State<TokoScreen> {
   Widget build(BuildContext context) {
     final m = context.mas;
     final nav = AppNav.of(context);
-    final lokasi = _cat?.lokasi ?? _home?.lokasi;
     final cat = _cat;
 
     return RefreshIndicator(
@@ -188,7 +214,16 @@ class _TokoScreenState extends State<TokoScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
         children: [
-          _hero(m, nav, lokasi),
+          _judul(m),
+
+          // Banner promo + strip flash sale — urutan sama dengan web /toko
+          // (di atas chip kategori). Keduanya mengatur jarak atasnya sendiri.
+          const PromoBanner(),
+          FlashSale(
+            items: _flashItems,
+            onOpen: (p) => nav.go(MasScreen.part,
+                part: {'part_number': p.partNumber, 'part_name': p.name}),
+          ),
 
           if (_home != null && _home!.kategori.isNotEmpty) ...[
             const SizedBox(height: 14),
@@ -216,10 +251,21 @@ class _TokoScreenState extends State<TokoScreen> {
           else if (_items.isEmpty)
             MasEmpty(
               icon: Icons.storefront_outlined,
-              title: 'Tidak ada produk yang cocok',
-              subtitle: _q.isNotEmpty
-                  ? 'Tidak ditemukan hasil untuk "$_q".'
-                  : 'Coba ubah kategori atau filter.',
+              // Teks sama dengan web /toko.
+              title: _q.isNotEmpty
+                  ? 'Tidak ada produk yang cocok dengan "$_q".'
+                  : 'Tidak ada produk yang cocok.',
+              subtitle: _q.isNotEmpty || _kategori.isNotEmpty
+                  ? 'Coba kata kunci atau kategori lain.'
+                  : 'Coba ubah filter.',
+              action: _q.isNotEmpty || _kategori.isNotEmpty
+                  ? MasButton(
+                      label: 'Tampilkan semua produk',
+                      primary: false,
+                      height: 38,
+                      onTap: _resetFilter,
+                    )
+                  : null,
             )
           else ...[
             _grid([
@@ -255,137 +301,91 @@ class _TokoScreenState extends State<TokoScreen> {
 
   // ── Bagian ──────────────────────────────────────────────────────────
 
-  Widget _hero(MasColors m, AppNav nav, String? lokasi) {
-    final total = _cart.count;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [m.brand700, m.brand500],
-        ),
-        boxShadow: m.shadow2,
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('Belanja Part',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                      letterSpacing: -0.3,
-                    )),
-                const SizedBox(height: 3),
-                Text(
-                  _home != null
-                      ? '${thousands(_home!.totalProduk)} produk siap dibeli'
-                      : 'Memuat etalase…',
-                  style: TextStyle(
-                      fontSize: 12.5, color: Colors.white.withValues(alpha: 0.9)),
-                ),
-              ],
-            ),
-          ),
-        ]),
-        const SizedBox(height: 12),
-        Row(children: [
-          _heroChip(
-            icon: Icons.place_outlined,
-            label: lokasi != null && lokasi.isNotEmpty
-                ? 'Gudang $lokasi'
-                : 'Pilih lokasi',
-            onTap: () => nav.go(MasScreen.pilihLokasi),
-          ),
+  /// Baris judul + kolom cari — pengganti hero hijau lama.
+  ///
+  /// ⛔ JANGAN hidupkan lagi hero besar (gradien + chip lokasi + chip
+  /// keranjang), sama seperti web /toko: keranjang sudah ada di header, dan di
+  /// HP hero mendorong banner & flash sale keluar layar pertama. Yang memang
+  /// cuma ada di sini: jumlah produk etalase + kolom cari.
+  Widget _judul(MasColors m) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          Text('Belanja Part',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: m.ink900,
+                letterSpacing: -0.3,
+              )),
           const SizedBox(width: 8),
-          _heroChip(
-            icon: Icons.shopping_cart_outlined,
-            label: total > 0 ? 'Keranjang · $total' : 'Keranjang',
-            solid: true,
-            brand: m.brand700,
-            onTap: () => nav.go(MasScreen.keranjang),
+          Flexible(
+            child: Text(
+              _home != null
+                  ? '${thousands(_home!.totalProduk)} produk siap dibeli'
+                  : 'Memuat etalase…',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12.5, color: m.ink500),
+            ),
           ),
-        ]),
-        const SizedBox(height: 12),
-        // Kolom cari duduk di atas hero (kartu putih melayang) seperti web.
-        Container(
-          height: 46,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: m.paper,
-            borderRadius: BorderRadius.circular(MasRadii.input),
-            boxShadow: m.shadow2,
-          ),
-          child: Row(children: [
-            Icon(Icons.search_rounded, size: 18, color: m.ink400),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _searchCtl,
-                onChanged: _onSearchChanged,
-                style: TextStyle(fontSize: 14, color: m.ink900),
-                cursorColor: m.brand600,
-                decoration: InputDecoration(
-                  isCollapsed: true,
-                  border: InputBorder.none,
-                  hintText: 'Cari part number atau nama part…',
-                  hintStyle: TextStyle(color: m.ink400, fontSize: 13.5),
-                ),
+        ],
+      ),
+      const SizedBox(height: 10),
+      Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: m.paper,
+          borderRadius: BorderRadius.circular(MasRadii.input),
+          border: Border.all(color: m.ink200),
+        ),
+        child: Row(children: [
+          Icon(Icons.search_rounded, size: 18, color: m.ink400),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: _searchCtl,
+              onChanged: (v) {
+                setState(() {}); // tampil/sembunyikan tombol ✕
+                _onSearchChanged(v);
+              },
+              style: TextStyle(fontSize: 14, color: m.ink900),
+              cursorColor: m.brand600,
+              decoration: InputDecoration(
+                isCollapsed: true,
+                border: InputBorder.none,
+                hintText: 'Cari part number atau nama part…',
+                hintStyle: TextStyle(color: m.ink400, fontSize: 13.5),
               ),
             ),
-            if (_searchCtl.text.isNotEmpty)
-              GestureDetector(
-                onTap: () {
-                  _searchCtl.clear();
-                  _debounce?.cancel();
-                  _q = '';
-                  _loadCatalog();
-                },
-                child: Icon(Icons.close_rounded, size: 18, color: m.ink400),
-              ),
-          ]),
-        ),
-      ]),
-    );
+          ),
+          if (_searchCtl.text.isNotEmpty)
+            GestureDetector(
+              onTap: () {
+                _searchCtl.clear();
+                _debounce?.cancel();
+                _q = '';
+                _loadCatalog();
+              },
+              child: Icon(Icons.close_rounded, size: 18, color: m.ink400),
+            ),
+        ]),
+      ),
+    ]);
   }
 
-  Widget _heroChip({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    bool solid = false,
-    Color? brand,
-  }) {
-    final fg = solid ? (brand ?? Colors.black) : Colors.white;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-        decoration: BoxDecoration(
-          color: solid ? Colors.white : Colors.white.withValues(alpha: 0.16),
-          borderRadius: BorderRadius.circular(999),
-          border: solid
-              ? null
-              : Border.all(color: Colors.white.withValues(alpha: 0.32)),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 15, color: fg),
-          const SizedBox(width: 6),
-          Text(label,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: solid ? FontWeight.w700 : FontWeight.w600,
-                color: fg,
-              )),
-        ]),
-      ),
-    );
+  /// "Tampilkan semua produk" di hasil kosong — kosongkan cari + kategori.
+  void _resetFilter() {
+    _debounce?.cancel();
+    _searchCtl.clear();
+    setState(() {
+      _q = '';
+      _kategori = '';
+    });
+    _loadCatalog();
   }
 
   Widget _kategoriChips(MasColors m) {
@@ -688,9 +688,27 @@ class _ProductCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         color: m.brand700,
                       )),
-                  if (p.ready)
-                    Text('Stok ${thousands(p.stok)}',
-                        style: TextStyle(fontSize: 10.5, color: m.ink500)),
+                  // Baris ala Shopee: ★ rata-rata · terjual · stok.
+                  Wrap(
+                    spacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (p.ulasan > 0) ...[
+                        const Icon(Icons.star_rounded, size: 12, color: kBintang),
+                        Text(fmtRating(p.rating),
+                            style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                                color: m.ink700)),
+                      ],
+                      if (p.terjual > 0)
+                        Text('${p.ulasan > 0 ? '· ' : ''}${terjualLabel(p.terjual)} terjual',
+                            style: TextStyle(fontSize: 10.5, color: m.ink500)),
+                      if (p.ready)
+                        Text('${p.ulasan > 0 || p.terjual > 0 ? '· ' : ''}Stok ${thousands(p.stok)}',
+                            style: TextStyle(fontSize: 10.5, color: m.ink500)),
+                    ],
+                  ),
                   const SizedBox(height: 8),
                   _action(m),
                 ],

@@ -52,6 +52,9 @@ dependencies:
   intl: ^0.20.3
   pdf: ^3.12.0
   package_info_plus: ^9.0.1
+  # Login/daftar pembeli via Google (paritas web). serverClientId = Client ID
+  # Web dari /api/app/meta supaya ID token lolos verifikasi backend.
+  google_sign_in: ^6.2.2
 
 dev_dependencies:
   flutter_test:
@@ -86,6 +89,8 @@ flutter:
 
   assets:
     - assets/logo.png
+    # Gambar banner promo etalase (salinan frontend/public/promo/ web).
+    - assets/promo/
 
   # Font Geist + JetBrains Mono dimuat via paket google_fonts (sesuai desain),
   # jadi tidak perlu deklarasi font bundel di sini.

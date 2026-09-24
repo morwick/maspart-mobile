@@ -19,8 +19,11 @@ import '../invoice_pdf.dart';
 import '../order_ui.dart';
 import '../theme/mas_theme.dart';
 import '../utils.dart';
+import '../widgets/beli_lagi.dart';
 import '../widgets/mas_ui.dart';
 import '../widgets/order_chat.dart';
+import '../widgets/penilaian.dart';
+import '../widgets/retur_ui.dart';
 import 'pembayaran_webview.dart';
 
 /// Gudang FISIK pengirim, tanpa prefiks nomor. Kolom `gudang` berisi CABANG
@@ -54,6 +57,11 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
   Timer? _poll;
   bool _autopayDone = false;
   bool _invoiceBusy = false;
+  bool _beliLagiBusy = false;
+
+  /// Buka sheet Nilai otomatis: setelah "Pesanan Diterima" atau datang dari
+  /// tombol "⭐ Nilai" di daftar pesanan (args['nilai'] == true).
+  late bool _bukaNilai = widget.args['nilai'] == true;
 
   String get _code => '${widget.args['order_code'] ?? ''}';
 
@@ -176,11 +184,16 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
   }
 
   Future<void> _doConfirm() async {
+    final pickup = _order?.pickup ?? false;
     final ok = await _confirm(
-      'Konfirmasi penerimaan',
-      'Konfirmasi bahwa barang sudah Anda terima? Pesanan akan ditandai selesai.',
+      pickup ? 'Barang sudah diambil?' : 'Pesanan diterima?',
+      pickup
+          ? 'Konfirmasi bahwa barang sudah Anda ambil & periksa? Pesanan akan ditandai selesai.'
+          : 'Konfirmasi bahwa barang sudah Anda terima & periksa? Pesanan akan ditandai selesai.',
     );
     if (ok != true) return;
+    // Seperti Shopee: begitu pesanan diterima, langsung tawarkan penilaian.
+    if (mounted) setState(() => _bukaNilai = true);
     await _run('confirm', () => ApiService.confirmOrder(_code),
         gagal: 'Gagal mengonfirmasi penerimaan.');
   }
@@ -266,6 +279,18 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
     }
   }
 
+  /// "Beli Lagi": isi pesanan ini dimasukkan lagi ke keranjang (harga/stok
+  /// terkini dari server), lalu ringkasan + buka Keranjang.
+  Future<void> _beliLagi() async {
+    if (_beliLagiBusy) return;
+    setState(() => _beliLagiBusy = true);
+    try {
+      await beliLagiDariPesanan(context, _code);
+    } finally {
+      if (mounted) setState(() => _beliLagiBusy = false);
+    }
+  }
+
   // ── Build ───────────────────────────────────────────────────────────
 
   @override
@@ -314,6 +339,19 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
             const SizedBox(height: 14),
           ],
 
+          // Beli Lagi (pola Shopee) — pesanan selesai / batal / dikirim.
+          if (nav.isBuyer && kStatusBeliLagi.contains(o.status)) ...[
+            MasButton(
+              label: _beliLagiBusy ? 'Memasukkan ke keranjang…' : 'Beli Lagi',
+              icon: Icons.replay_rounded,
+              primary: o.status != 'dikirim',
+              expand: true,
+              loading: _beliLagiBusy,
+              onTap: _beliLagiBusy ? null : _beliLagi,
+            ),
+            const SizedBox(height: 14),
+          ],
+
           if (o.trackingNo != null && o.trackingNo!.isNotEmpty) ...[
             _pengiriman(m, o),
             const SizedBox(height: 14),
@@ -336,6 +374,26 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
 
           _pembayaran(m, o),
           const SizedBox(height: 14),
+
+          // Penilaian ala Shopee — muncul begitu pesanan selesai.
+          if (o.status == 'selesai' && o.penilaian != null) ...[
+            PenilaianPesananCard(
+              order: o,
+              peran: PeranPenilaian.pembeli,
+              bukaOtomatis: _bukaNilai,
+              onChange: () {
+                setState(() => _bukaNilai = false);
+                _load();
+              },
+            ),
+            const SizedBox(height: 14),
+          ],
+
+          // Return per barang — tombol Ajukan Return / status return berjalan.
+          if (o.retur?.aktif == true) ...[
+            ReturPesananCard(order: o, peran: PeranRetur.pembeli),
+            const SizedBox(height: 14),
+          ],
 
           OrderChat(
             title: 'Chat dengan Gudang ${o.gudang}',
@@ -436,6 +494,8 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                       ? formatRupiah(o.shippingCost)
                       : '—',
             ),
+            // Potongan voucher/poin + kode voucher — paritas web OrderPotongan.
+            OrderPotongan(order: o),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 9),
               child: Divider(height: 1, color: m.ink150),
@@ -643,6 +703,8 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                   child: Row(children: [
                     Icon(Icons.phone_outlined, size: 14, color: m.brand700),
                     const SizedBox(width: 5),
+                    Text('Kontak gudang: ',
+                        style: TextStyle(fontSize: 12.5, color: m.ink500)),
                     Text(o.pickupPic!,
                         style: masMono(
                             size: 12.5,
@@ -882,7 +944,7 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
               if (lunas)
                 _alert(
                   m,
-                  'Pembayaran terverifikasi. Status: ${orderStatusLabel(o.status)}.',
+                  'Pembayaran terverifikasi. Status: ${orderStatusLabel(o.status, pickup: o.pickup)}.',
                   tone: MasPillTone.brand,
                 ),
 
@@ -900,7 +962,7 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                 MasButton(
                   label: _busy == 'confirm'
                       ? 'Memproses…'
-                      : '✓ Konfirmasi Terima Barang',
+                      : (o.pickup ? '✓ Barang Sudah Diambil' : '✓ Pesanan Diterima'),
                   expand: true,
                   loading: _busy == 'confirm',
                   onTap: _busy != null ? null : _doConfirm,

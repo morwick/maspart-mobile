@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../theme/mas_theme.dart';
 import '../widgets/mas_ui.dart';
+import '../widgets/penilaian.dart';
 import '../widgets/rak_editor.dart';
 import '../utils.dart';
 import '../api_service.dart';
@@ -36,6 +37,8 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
   late Map<String, dynamic> _part = Map<String, dynamic>.from(widget.part);
 
   List<String> _photos = [];
+  int _fotoIdx = 0;                       // foto aktif di galeri
+  final PageController _fotoCtl = PageController();
   bool _loadingPhotos = true;
 
   /// Foto yang DISEMBUNYIKAN daftar-hitam karena terbukti bukan part ini
@@ -212,6 +215,7 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
   @override
   void dispose() {
     _cart.removeListener(_onCartChanged);
+    _fotoCtl.dispose();
     super.dispose();
   }
 
@@ -225,9 +229,11 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
       if (!mounted) return;
       setState(() {
         _photos = res.photos;
+        _fotoIdx = 0;
         _fotoTersembunyi = res.tersembunyi;
         _loadingPhotos = false;
       });
+      if (_fotoCtl.hasClients) _fotoCtl.jumpToPage(0);
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -325,6 +331,10 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
   // panggilan pertama bisa 10-60 dtk (PN umum dipakai belasan ribu model), dan
   // gambar hanya tampil bila user memang meminta.
   PartExplodedFigure? _exploded;
+
+  /// Ringkasan penilaian (dari UlasanProdukSection) → baris ★ di bawah judul.
+  double _rataUlasan = 0;
+  int _jumlahUlasan = 0;
   bool _explodedBusy = false;
   String? _explodedErr;
 
@@ -508,6 +518,44 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     return g.isNotEmpty ? g.first.$1 : null;
   }
 
+  /// Buang awalan nomor Accurate: "1. Jakarta" → "Jakarta" (= `locName` web).
+  static String _locName(String s) {
+    final t = s.replaceFirst(RegExp(r'^\s*\d+\s*\.\s*'), '').trim();
+    return t.isNotEmpty ? t : s;
+  }
+
+  bool _bukaChat = false;
+
+  /// Tombol "Chat Gudang" → layar chat dengan KEY gudang (bukan nama mentah
+  /// "1. Jakarta" — backend menolak key tak dikenal dengan 404). Sama dengan
+  /// web `chatKey`: cocokkan nama lokasi stok ke label `/api/buyer/locations`,
+  /// fallback ke gudang milik pembeli.
+  Future<void> _chatGudang(AppNav nav) async {
+    if (_bukaChat) return;
+    setState(() => _bukaChat = true);
+    String? key;
+    try {
+      final loc = _lokasiBuyer;
+      if (loc != null) {
+        final nama = _locName(loc).toLowerCase();
+        final locs = await ApiService.buyerLocations();
+        for (final l in locs) {
+          if (l.label.trim().toLowerCase() == nama) {
+            key = l.key;
+            break;
+          }
+        }
+      }
+      key ??= (await ApiService.buyerLocation()).key;
+    } catch (_) {
+      /* gagal memetakan → buka daftar percakapan tanpa gudang terpilih */
+    }
+    if (!mounted) return;
+    setState(() => _bukaChat = false);
+    nav.go(MasScreen.chat,
+        part: {if (key != null && key.isNotEmpty) 'gudang': key});
+  }
+
   // ── Varian pemasok ──────────────────────────────────────────────────
   //
   // UI varian hanya hidup bila keluarganya memang > 1 kartu Accurate (dijaga
@@ -649,6 +697,11 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
                   const SizedBox(height: 2),
                   Text(name, style: TextStyle(fontSize: 13.5, color: m.ink600)),
                 ],
+                // Baris ala Shopee: "4,8 ★★★★★ | 12 Penilaian".
+                if (_jumlahUlasan > 0) ...[
+                  const SizedBox(height: 4),
+                  RatingRingkas(rata: _rataUlasan, jumlah: _jumlahUlasan),
+                ],
               ]),
             ),
             Icon(Icons.copy_rounded, size: 18, color: m.brand600),
@@ -716,6 +769,20 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
         if (pn.isNotEmpty) ...[
           const SizedBox(height: 16),
           _CekUnitCard(pn: pn),
+          // Penilaian pembeli ala Shopee — rata-rata, sebaran, filter, ulasan.
+          const SizedBox(height: 16),
+          UlasanProdukSection(
+            key: ValueKey('ulasan-$pn'),
+            pn: pn,
+            onRingkas: (rata, jumlah) {
+              if (!mounted) return;
+              if (rata == _rataUlasan && jumlah == _jumlahUlasan) return;
+              setState(() {
+                _rataUlasan = rata;
+                _jumlahUlasan = jumlah;
+              });
+            },
+          ),
         ],
       ],
       ),
@@ -1160,8 +1227,8 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
           primary: false,
           height: 38,
           expand: true,
-          onTap: () => nav.go(MasScreen.chat,
-              part: {if (_lokasiBuyer != null) 'gudang': _lokasiBuyer}),
+          loading: _bukaChat,
+          onTap: () => _chatGudang(nav),
         ),
       ]),
     );
@@ -1794,57 +1861,111 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     );
   }
 
+  /// Galeri ala Shopee/Tokopedia (paritas web `GaleriProduk.tsx`): SATU foto
+  /// utama yang bisa diusap + penanda "2/7" + deretan thumbnail. Ketuk foto
+  /// utama → layar penuh. Tombol "✕ salah" (admin) menempel di foto aktif.
   Widget _imageCard(MasColors m) {
     final isAdmin = AppNav.of(context).isAdmin;
+    final n = _photos.length;
+    final aktif = n == 0 ? 0 : _fotoIdx.clamp(0, n - 1);
 
-    Widget tile(int i) {
+    Widget utama() {
       if (_loadingPhotos) {
         return AspectRatio(aspectRatio: 1, child: MasSkeleton(height: double.infinity));
       }
-      if (i < _photos.length) {
-        final gambar = GestureDetector(
-          onTap: () => _openGallery(i),
-          child: AspectRatio(
-            aspectRatio: 1,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: Image.network(
-                ApiService.partImageUrl(_photos[i]),
-                fit: BoxFit.cover,
-                loadingBuilder: (c, w, p) => p == null ? w : Center(
-                    child: CircularProgressIndicator(strokeWidth: 2.2, color: m.brand100)),
-                errorBuilder: (c, e, s) => HatchBox(label: 'foto ${i + 1}'),
+      if (n == 0) return AspectRatio(aspectRatio: 1, child: HatchBox(label: 'Tidak ada gambar'));
+      return AspectRatio(
+        aspectRatio: 1,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Stack(children: [
+            PageView.builder(
+              controller: _fotoCtl,
+              itemCount: n,
+              onPageChanged: (i) => setState(() => _fotoIdx = i),
+              itemBuilder: (_, i) => GestureDetector(
+                onTap: () => _openGallery(i),
+                child: Container(
+                  color: Colors.white,
+                  child: Image.network(
+                    ApiService.partImageUrl(_photos[i]),
+                    fit: BoxFit.contain,
+                    loadingBuilder: (c, w, p) => p == null ? w : Center(
+                        child: CircularProgressIndicator(strokeWidth: 2.2, color: m.brand100)),
+                    errorBuilder: (c, e, s) => HatchBox(label: 'foto ${i + 1}'),
+                  ),
+                ),
+              ),
+            ),
+            if (n > 1)
+              Positioned(
+                right: 8,
+                bottom: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                  child: Text('${aktif + 1}/$n',
+                      style: const TextStyle(
+                          fontSize: 11.5, fontWeight: FontWeight.w600, color: Colors.white)),
+                ),
+              ),
+            if (isAdmin)
+              Positioned(
+                top: 6,
+                right: 6,
+                child: Material(
+                  color: m.paper.withValues(alpha: 0.92),
+                  borderRadius: BorderRadius.circular(6),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(6),
+                    onTap: _fotoBusy ? null : () => _tandaiFotoSalah(_photos[aktif]),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                      child: Text('✕ salah',
+                          style: TextStyle(
+                              fontSize: 10.5, color: _fotoBusy ? m.ink400 : m.danger600)),
+                    ),
+                  ),
+                ),
+              ),
+          ]),
+        ),
+      );
+    }
+
+    Widget deretan() => SizedBox(
+          height: 58,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: n,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (_, i) => GestureDetector(
+              onTap: () {
+                setState(() => _fotoIdx = i);
+                if (_fotoCtl.hasClients) {
+                  _fotoCtl.animateToPage(i,
+                      duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+                }
+              },
+              child: Container(
+                width: 58,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                      color: i == aktif ? m.brand600 : m.ink200, width: i == aktif ? 2 : 1),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Image.network(ApiService.partImageUrl(_photos[i]),
+                    fit: BoxFit.contain,
+                    errorBuilder: (c, e, s) => const SizedBox.shrink()),
               ),
             ),
           ),
         );
-        if (!isAdmin) return gambar;
-        // Tombol "foto salah" melayang di sudut — persis web. Hanya admin.
-        return Stack(children: [
-          gambar,
-          Positioned(
-            top: 4,
-            right: 4,
-            child: Material(
-              color: m.paper.withValues(alpha: 0.92),
-              borderRadius: BorderRadius.circular(6),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(6),
-                onTap: _fotoBusy ? null : () => _tandaiFotoSalah(_photos[i]),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-                  child: Text('✕ salah',
-                      style: TextStyle(
-                          fontSize: 10.5,
-                          color: _fotoBusy ? m.ink400 : m.danger600)),
-                ),
-              ),
-            ),
-          ),
-        ]);
-      }
-      return HatchBox(label: 'foto ${i + 1}');
-    }
 
     return MasCard(
       padding: const EdgeInsets.all(16),
@@ -1855,15 +1976,10 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
           const MasPill(label: 'sumber: SIMS', tone: MasPillTone.neutral, height: 20),
         ]),
         const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: tile(0)),
-          const SizedBox(width: 8),
-          Expanded(child: tile(1)),
-        ]),
-        if (_photos.length > 2) ...[
+        utama(),
+        if (n > 1) ...[
           const SizedBox(height: 8),
-          Text('${_photos.length} foto · ketuk untuk perbesar',
-              style: TextStyle(fontSize: 11.5, color: m.ink400)),
+          deretan(),
         ],
         if (isAdmin && _fotoTersembunyi > 0) ...[
           const SizedBox(height: 8),

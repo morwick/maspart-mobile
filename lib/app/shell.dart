@@ -15,6 +15,7 @@ import '../auth_storage.dart';
 import '../cart.dart';
 import '../theme/mas_theme.dart';
 import '../utils.dart';
+import '../widgets/notif_bell.dart';
 import 'mas_drawer.dart';
 import 'nav.dart';
 
@@ -22,6 +23,7 @@ import '../screens/admin_ai_screens.dart';
 import '../screens/admin_manage_screens.dart';
 import '../screens/admin_pengetahuan_screen.dart';
 import '../screens/asisten_screen.dart';
+import '../screens/beli_lagi_screen.dart';
 import '../screens/cabang_screens.dart';
 import '../screens/chat_screen.dart';
 import '../screens/dashboard_screen.dart';
@@ -35,8 +37,11 @@ import '../screens/part_detail_screen.dart';
 import '../screens/pesanan_detail_screen.dart';
 import '../screens/pesanan_screen.dart';
 import '../screens/poin_screen.dart';
+import '../screens/profil_screen.dart';
+import '../screens/voucher_screen.dart';
 import '../screens/pilih_lokasi_screen.dart';
 import '../screens/rak_screen.dart';
+import '../screens/retur_screens.dart';
 import '../screens/search_screen.dart';
 import '../screens/toko_screen.dart';
 
@@ -339,6 +344,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Future<void> _logout() async {
+    await ApiService.logout(); // audit log: LOGOUT (sebelum token dibuang)
     await AuthStorage.clearToken();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
@@ -361,6 +367,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     };
     if (detailPesanan.contains(_screen) && a?['order_code'] != null) {
       return ('${a!['order_code']}', 'Detail pesanan');
+    }
+    if ((_screen == MasScreen.returDetail ||
+            _screen == MasScreen.cabangReturDetail) &&
+        a?['return_code'] != null) {
+      return ('Return ${a!['return_code']}', 'Detail return');
+    }
+    if (_screen == MasScreen.returAjukan && a?['order_code'] != null) {
+      return ('Ajukan Return', 'Pesanan ${a!['order_code']}');
     }
     return kScreenTitles[_screen] ?? ('MasPart', '');
   }
@@ -400,21 +414,37 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       case MasScreen.keranjang:
         return const KeranjangScreen();
       case MasScreen.pesanan:
-        return const PesananScreen();
+        return PesananScreen(args: args);
       case MasScreen.poin:
         return const PoinScreen();
+      case MasScreen.voucher:
+        return const VoucherScreen();
       case MasScreen.pesananDetail:
         return PesananDetailScreen(args: args);
+      case MasScreen.beliLagi:
+        return const BeliLagiScreen();
       case MasScreen.pilihLokasi:
         return const PilihLokasiScreen();
       case MasScreen.chat:
         return ChatScreen(args: args);
+      case MasScreen.profil:
+        return const ProfilScreen();
+      case MasScreen.returSaya:
+        return const ReturSayaScreen();
+      case MasScreen.returAjukan:
+        return AjukanReturScreen(args: args);
+      case MasScreen.returDetail:
+        return ReturDetailScreen(args: args);
 
       // Cabang
       case MasScreen.cabangPesanan:
         return const CabangPesananScreen();
       case MasScreen.cabangPesananDetail:
         return CabangPesananDetailScreen(args: args);
+      case MasScreen.cabangRetur:
+        return const CabangReturScreen();
+      case MasScreen.cabangReturDetail:
+        return CabangReturDetailScreen(args: args);
       case MasScreen.cabangPenjualan:
         return const CabangPenjualanScreen();
       case MasScreen.cabangChat:
@@ -466,6 +496,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       MasScreen.orderDetail ||
       MasScreen.cabangPesananDetail =>
         '${_screen.name}:${a?['order_code'] ?? ''}',
+      MasScreen.returAjukan =>
+        'returAjukan:${a?['order_code'] ?? ''}:${a?['pn'] ?? ''}',
+      MasScreen.returDetail || MasScreen.cabangReturDetail =>
+        '${_screen.name}:${a?['return_code'] ?? ''}',
       // Dua layar ini bisa dibuka dengan isian awal (Chat Gudang dari Detail
       // Part, "+ Sinonim" dari Pencarian Nihil). Tanpa argumen di kunci, state
       // kunjungan sebelumnya terpakai ulang dan prefill-nya hilang.
@@ -565,6 +599,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         // Pintasan keranjang hanya berarti untuk pembeli.
                         cartCount: isBuyer ? _cart.count : 0,
                         onCart: isBuyer ? () => _go(MasScreen.keranjang) : null,
+                        // Lonceng notifikasi (status return) — pembeli saja,
+                        // paritas web NotifBell.
+                        showNotif: isBuyer,
                       ),
                       Expanded(
                         child: KeyedSubtree(
@@ -684,6 +721,7 @@ class _Header extends StatelessWidget {
   final VoidCallback onMenu;
   final int cartCount;
   final VoidCallback? onCart;
+  final bool showNotif;
 
   const _Header({
     required this.title,
@@ -691,6 +729,7 @@ class _Header extends StatelessWidget {
     required this.onMenu,
     this.cartCount = 0,
     this.onCart,
+    this.showNotif = false,
   });
 
   @override
@@ -731,6 +770,7 @@ class _Header extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
+        if (showNotif) const NotifBell(),
         if (onCart != null) ...[
           _cartButton(context),
           const SizedBox(width: 8),

@@ -13,6 +13,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'config.dart';
 import 'auth_storage.dart';
+import 'device_id.dart';
 import 'models.dart';
 
 export 'models.dart';
@@ -281,6 +282,14 @@ class _Api {
   }
 }
 
+/// Satu unggahan bukti retur yang sedang berjalan: [url] selesai dengan URL
+/// publik file, [batal] memutus koneksinya (url lalu gagal "dibatalkan").
+class ReturUnggah {
+  final Future<String> url;
+  final void Function() batal;
+  ReturUnggah._(this.url, this.batal);
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // ApiService
 // ══════════════════════════════════════════════════════════════════════
@@ -295,8 +304,16 @@ class ApiService {
     final r = await http
         .post(
           _Api._uri('/api/auth/login'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'username': username, 'password': password}),
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': DeviceId.userAgent(),
+          },
+          body: jsonEncode({
+            'username': username,
+            'password': password,
+            // Kunci ke perangkat pertama (Menu Control → Sesi) — paritas web.
+            'device_id': await DeviceId.get(),
+          }),
         )
         .timeout(_Api._timeout);
 
@@ -316,8 +333,16 @@ class ApiService {
     final r = await http
         .post(
           _Api._uri('/api/auth/login'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'username': username, 'password': password}),
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': DeviceId.userAgent(),
+          },
+          body: jsonEncode({
+            'username': username,
+            'password': password,
+            // Kunci ke perangkat pertama (Menu Control → Sesi) — paritas web.
+            'device_id': await DeviceId.get(),
+          }),
         )
         .timeout(_Api._timeout);
     if (r.statusCode < 200 || r.statusCode >= 300) {
@@ -326,6 +351,40 @@ class ApiService {
     final data = TokenResponse.fromJson(_Api._obj(jsonDecode(r.body)));
     await AuthStorage.saveToken(data.accessToken);
     return data;
+  }
+
+  /// Masuk/daftar dengan akun Google: [idToken] dari Google Sign-In (audience =
+  /// Client ID Web backend). Akun baru otomatis role pembeli (`created`).
+  static Future<({TokenResponse token, bool created})> loginGoogle(
+      String idToken) async {
+    final r = await http
+        .post(
+          _Api._uri('/api/auth/google'),
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': DeviceId.userAgent(),
+          },
+          body: jsonEncode({
+            'credential': idToken,
+            'device_id': await DeviceId.get(),
+          }),
+        )
+        .timeout(_Api._timeout);
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+      throw ApiException(r.statusCode, _Api._errorMessage(r));
+    }
+    final j = _Api._obj(jsonDecode(r.body));
+    final data = TokenResponse.fromJson(j);
+    await AuthStorage.saveToken(data.accessToken);
+    return (token: data, created: j['created'] == true);
+  }
+
+  /// Catat LOGOUT di audit log server (best-effort — gagal jaringan tak
+  /// boleh menahan user keluar).
+  static Future<void> logout() async {
+    try {
+      await _Api.post('/api/auth/logout', timeout: const Duration(seconds: 4));
+    } catch (_) {}
   }
 
   /// Info user yang sedang login (bentuk peta — dipakai layar lama).
@@ -799,6 +858,61 @@ class ApiService {
     );
   }
 
+  // ── Profil & alamat pengiriman pembeli (paritas /profil web) ──
+
+  static Future<BuyerProfile> buyerProfile() async =>
+      BuyerProfile.fromJson(_Api._obj(await _Api.get('/api/buyer/profile')));
+
+  static Future<BuyerProfile> updateBuyerProfile(
+      {required String nama, required String telepon}) async {
+    final data = _Api._obj(await _Api.put('/api/buyer/profile',
+        body: {'nama': nama, 'telepon': telepon}));
+    return BuyerProfile.fromJson(
+        (data['profile'] as Map?)?.cast<String, dynamic>() ?? const {});
+  }
+
+  static Future<List<Alamat>> listAlamat() async {
+    final data = _Api._obj(await _Api.get('/api/buyer/alamat'));
+    return (data['alamat'] as List?)
+            ?.whereType<Map>()
+            .map((e) => Alamat.fromJson(e.cast<String, dynamic>()))
+            .toList() ??
+        const [];
+  }
+
+  static Future<void> createAlamat(Alamat a) async {
+    await _Api.post('/api/buyer/alamat', body: a.toInput());
+  }
+
+  static Future<void> updateAlamat(int id, Alamat a) async {
+    await _Api.put('/api/buyer/alamat/$id', body: a.toInput());
+  }
+
+  static Future<void> deleteAlamat(int id) async {
+    await _Api.delete('/api/buyer/alamat/$id');
+  }
+
+  static Future<void> setAlamatDefault(int id) async {
+    await _Api.post('/api/buyer/alamat/$id/default');
+  }
+
+  /// Autocomplete kecamatan/kota. `manual` = RajaOngkir belum aktif →
+  /// form beralih ke isian bebas (sama dengan WilayahPicker web).
+  static Future<({List<Wilayah> results, bool manual, String? error})>
+      searchWilayah(String q) async {
+    final data =
+        _Api._obj(await _Api.get('/api/geo/wilayah', query: {'q': q}));
+    return (
+      results: (data['results'] as List?)
+              ?.whereType<Map>()
+              .map((e) => Wilayah.fromJson(e.cast<String, dynamic>()))
+              .toList() ??
+          const <Wilayah>[],
+      manual: data['manual'] == true,
+      error: data['error']?.toString(),
+    );
+  }
+
   /// Beranda toko: kategori, produk terlaris & unggulan untuk lokasi pembeli.
   static Future<TokoHome> tokoHome() async =>
       TokoHome.fromJson(_Api._obj(await _Api.get('/api/buyer/home')));
@@ -966,6 +1080,7 @@ class ApiService {
     double? recipientLat,
     double? recipientLon,
     int pointRedeem = 0,
+    List<String> voucherCodes = const [],
   }) async {
     final data = await _Api.post(
       '/api/orders',
@@ -992,6 +1107,9 @@ class ApiService {
         // (saldo × plafon 20% × minimal tukar), persis seperti ongkir & harga
         // yang juga tak pernah dipercaya dari klien.
         'point_redeem': pointRedeem,
+        // Hanya KODE — potongannya dihitung ulang server; voucher yang tak
+        // berlaku lagi menolak pesanan (tagihan = yang dilihat pembeli).
+        'voucher_codes': voucherCodes,
       },
       timeout: _Api._timeoutLong,
     );
@@ -1020,6 +1138,57 @@ class ApiService {
     return PoinBatas.fromJson(_Api._obj(await _Api.get('/api/points/batas?belanja=$b')));
   }
 
+  // ── Voucher (migrasi 035) ────────────────────────────────────────────────
+  static List<Voucher> _vouchers(dynamic v) =>
+      (v as List?)
+          ?.whereType<Map>()
+          .map((e) => Voucher.fromJson(e.cast<String, dynamic>()))
+          .toList() ??
+      [];
+
+  /// Voucher yang bisa diklaim + Voucher Saya. `aktif` false = migrasi 035
+  /// belum jalan (tampilkan "belum tersedia", bukan daftar kosong).
+  static Future<({bool aktif, List<Voucher> tersedia, List<Voucher> saya})>
+      vouchers() async {
+    final d = _Api._obj(await _Api.get('/api/vouchers'));
+    return (
+      aktif: d['aktif'] == true,
+      tersedia: _vouchers(d['tersedia']),
+      saya: _vouchers(d['saya']),
+    );
+  }
+
+  /// Klaim voucher ke Voucher Saya → pesan untuk pembeli.
+  static Future<String> klaimVoucher(int id) async {
+    final d = _Api._obj(await _Api.post('/api/vouchers/$id/klaim', body: const {}));
+    return (d['pesan'] ?? 'Voucher berhasil diklaim.').toString();
+  }
+
+  /// Klaim lewat kode (termasuk voucher tersembunyi).
+  static Future<String> klaimKodeVoucher(String code) async {
+    final d = _Api._obj(
+        await _Api.post('/api/vouchers/klaim-kode', body: {'code': code}));
+    return (d['pesan'] ?? 'Voucher berhasil diklaim.').toString();
+  }
+
+  /// Voucher Saya dinilai untuk keranjang ini + usulan terbaik per jenis.
+  /// Fungsi hitungnya SAMA dengan checkout di server.
+  static Future<({List<Voucher> items, Map<String, String> terbaik})>
+      voucherCheckout(int belanja, int ongkir, bool pickup) async {
+    final b = belanja < 0 ? 0 : belanja;
+    final o = ongkir < 0 ? 0 : ongkir;
+    final d = _Api._obj(await _Api.get(
+        '/api/vouchers/checkout?belanja=$b&ongkir=$o&pickup=$pickup'));
+    final t = (d['terbaik'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return (
+      items: _vouchers(d['items']),
+      terbaik: {
+        for (final e in t.entries)
+          if (e.value != null) e.key: e.value.toString(),
+      },
+    );
+  }
+
   static Future<List<OrderSummary>> myOrders() async {
     final data = _Api._obj(await _Api.get('/api/orders'));
     return (data['orders'] as List?)
@@ -1032,6 +1201,28 @@ class ApiService {
   static Future<OrderDetail> order(String code) async {
     final data = await _Api.get('/api/orders/${Uri.encodeComponent(code)}');
     return OrderDetail.fromJson(_Api._obj(data));
+  }
+
+  /// "Beli Lagi" satu pesanan: isi pesanan dinilai ulang dengan harga/stok/
+  /// berat TERKINI. Server tidak menulis keranjang — klien yang memasukkan
+  /// item `bisa_dibeli`. 404 = bukan pesanan milik pembeli; 409 = alamat /
+  /// profil belum lengkap (pesan `detail` siap ditampilkan).
+  static Future<BeliLagiPesanan> beliLagiPesanan(String code) async {
+    final data = await _Api.get(
+        '/api/orders/${Uri.encodeComponent(code)}/beli-lagi');
+    return BeliLagiPesanan.fromJson(_Api._obj(data));
+  }
+
+  /// Semua part yang pernah dibeli (pesanan lunas), satu baris per PN,
+  /// terbaru dulu. ⛔ 503 = riwayat GAGAL dibaca (ApiException) — layar wajib
+  /// menampilkan galat + coba lagi, BUKAN "belum pernah beli".
+  static Future<List<BeliLagiItem>> beliLagiRiwayat() async {
+    final data = _Api._obj(await _Api.get('/api/beli-lagi'));
+    return (data['items'] as List?)
+            ?.whereType<Map>()
+            .map((e) => BeliLagiItem.fromJson(e.cast<String, dynamic>()))
+            .toList() ??
+        const [];
   }
 
   /// Pembeli mengonfirmasi barang sudah diterima.
@@ -1052,6 +1243,245 @@ class ApiService {
       files: [(field: 'file', bytes: bytes, filename: filename)],
     ));
     return data['url']?.toString() ?? '';
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Penilaian pembeli (ala Shopee/Tokopedia, migrasi 038)
+  // ────────────────────────────────────────────────────────────────────
+
+  static Future<ReviewConfig> reviewConfig() async =>
+      ReviewConfig.fromJson(_Api._obj(await _Api.get('/api/reviews/config')));
+
+  /// body: {rating_layanan, rating_kirim?, anonim, produk: [{part_number,
+  /// rating, tags, komentar, foto}]} — semua produk pesanan wajib dinilai.
+  static Future<Penilaian> submitReview(
+      String code, Map<String, dynamic> body) async {
+    final data = await _Api.post(
+      '/api/orders/${Uri.encodeComponent(code)}/review',
+      body: body,
+    );
+    return Penilaian.fromJson(_Api._obj(data));
+  }
+
+  static Future<String> uploadReviewPhoto({
+    required Uint8List bytes,
+    String filename = 'ulasan.jpg',
+  }) async {
+    final data = _Api._obj(await _Api.multipart(
+      '/api/reviews/foto',
+      files: [(field: 'file', bytes: bytes, filename: filename)],
+    ));
+    return data['url']?.toString() ?? '';
+  }
+
+  /// PN lewat query — PN bisa mengandung '/'.
+  static Future<ProdukUlasan> productReviews(
+    String pn, {
+    int? bintang,
+    String filter = '',
+    int page = 1,
+  }) async {
+    final data = await _Api.get('/api/reviews/produk', query: {
+      'pn': pn,
+      'page': '$page',
+      if (bintang != null) 'bintang': '$bintang',
+      if (filter.isNotEmpty) 'filter': filter,
+    });
+    return ProdukUlasan.fromJson(_Api._obj(data));
+  }
+
+  /// Balasan penjual — sekali per ulasan, hanya gudang pemenuh.
+  static Future<void> replyReview(int id, String teks) =>
+      _Api.post('/api/branch/reviews/$id/balas', body: {'teks': teks});
+
+  // ────────────────────────────────────────────────────────────────────
+  // Return / pengembalian barang (migrasi 039)
+  // ────────────────────────────────────────────────────────────────────
+
+  static Future<ReturConfig> getReturConfig() async =>
+      ReturConfig.fromJson(_Api._obj(await _Api.get('/api/returns/config')));
+
+  static Future<ReturPesanan> getOrderReturns(String code) async =>
+      ReturPesanan.fromJson(_Api._obj(
+          await _Api.get('/api/orders/${Uri.encodeComponent(code)}/returns')));
+
+  /// body = AjukanReturBody web: part_number, qty, reason, reason_detail,
+  /// pn_dipesan, pn_diterima, description, requested_resolution,
+  /// unboxing_video_url, video_meta {durasi?, ukuran?, direkam_at?, nama?},
+  /// evidence_photo_urls.
+  static Future<ReturDetail> ajukanRetur(
+      String code, Map<String, dynamic> body) async {
+    final data = await _Api.post(
+      '/api/orders/${Uri.encodeComponent(code)}/returns',
+      body: body,
+    );
+    return ReturDetail.fromJson(_Api._obj(data));
+  }
+
+  static Future<({bool aktif, List<ReturRingkas> returns})> getMyReturns() async {
+    final data = _Api._obj(await _Api.get('/api/returns'));
+    return (
+      aktif: data['aktif'] != false,
+      returns: _returList(data['returns']),
+    );
+  }
+
+  static Future<ReturDetail> getRetur(String code) async => ReturDetail.fromJson(
+      _Api._obj(await _Api.get('/api/returns/${Uri.encodeComponent(code)}')));
+
+  static Future<ReturDetail> tambahBuktiRetur(
+    String code, {
+    required List<String> videoUrls,
+    required List<String> fotoUrls,
+    String catatan = '',
+  }) async {
+    final data = await _Api.post(
+      '/api/returns/${Uri.encodeComponent(code)}/bukti',
+      body: {'video_urls': videoUrls, 'foto_urls': fotoUrls, 'catatan': catatan},
+    );
+    return ReturDetail.fromJson(_Api._obj(data));
+  }
+
+  static Future<ReturDetail> kirimBalikRetur(
+      String code, String kurir, String resi) async {
+    final data = await _Api.post(
+      '/api/returns/${Uri.encodeComponent(code)}/kirim',
+      body: {'kurir': kurir, 'resi': resi},
+    );
+    return ReturDetail.fromJson(_Api._obj(data));
+  }
+
+  static Future<ReturDetail> batalRetur(String code) async {
+    final data = await _Api.post(
+      '/api/returns/${Uri.encodeComponent(code)}/batal',
+      body: const <String, dynamic>{},
+    );
+    return ReturDetail.fromJson(_Api._obj(data));
+  }
+
+  /// Gudang pemenuh (akun cabang). [status]: '' semua, 'aktif' berjalan, atau
+  /// kode status (menunggu_kirim, dikirim_balik, diterima_gudang, diproses).
+  static Future<({bool aktif, List<ReturRingkas> returns})> branchListReturns(
+      {String status = ''}) async {
+    final data = _Api._obj(
+        await _Api.get('/api/branch/returns', query: {'status': status}));
+    return (
+      aktif: data['aktif'] != false,
+      returns: _returList(data['returns']),
+    );
+  }
+
+  static Future<ReturDetail> branchGetRetur(String code) async =>
+      ReturDetail.fromJson(_Api._obj(
+          await _Api.get('/api/branch/returns/${Uri.encodeComponent(code)}')));
+
+  /// Aksi gudang: `terima_barang` | `periksa` | `catatan` (+ `note`).
+  static Future<ReturDetail> branchAksiRetur(
+    String code,
+    String aksi, {
+    String? note,
+  }) async {
+    final data = await _Api.post(
+      '/api/branch/returns/${Uri.encodeComponent(code)}/aksi',
+      body: {'aksi': aksi, if (note != null) 'note': note},
+    );
+    return ReturDetail.fromJson(_Api._obj(data));
+  }
+
+  static List<ReturRingkas> _returList(dynamic v) =>
+      (v as List?)
+          ?.whereType<Map>()
+          .map((e) => ReturRingkas.fromJson(e.cast<String, dynamic>()))
+          .toList() ??
+      const [];
+
+  // ── Lonceng notifikasi ─────────────────────────────────────────────
+
+  static Future<({bool aktif, int belumDibaca, List<Notifikasi> notifikasi})>
+      getNotifikasi() async {
+    final data = _Api._obj(await _Api.get('/api/notifikasi'));
+    return (
+      aktif: data['aktif'] == true,
+      belumDibaca: (data['belum_dibaca'] as num?)?.toInt() ?? 0,
+      notifikasi: (data['notifikasi'] as List?)
+              ?.whereType<Map>()
+              .map((e) => Notifikasi.fromJson(e.cast<String, dynamic>()))
+              .toList() ??
+          const <Notifikasi>[],
+    );
+  }
+
+  /// [ids] kosong = tandai SEMUA notifikasi milik user sudah dibaca.
+  static Future<void> bacaNotifikasi([List<int> ids = const []]) =>
+      _Api.post('/api/notifikasi/baca', body: {'ids': ids});
+
+  /// Unggah bukti retur (video/foto) DENGAN progres — padanan
+  /// `uploadBuktiRetur` (XHR) di web. Isi file dialirkan dari [stream] (mis.
+  /// `XFile.openRead()`), bukan dibaca utuh ke RAM: video bisa puluhan MB.
+  /// Progres = byte yang sudah diserahkan ke soket (tertahan backpressure,
+  /// jadi mengikuti laju unggah sebenarnya). [jenis] 'video' | 'foto'.
+  static ReturUnggah uploadBuktiRetur({
+    required String jenis,
+    required Stream<List<int>> stream,
+    required int length,
+    required String filename,
+    void Function(int pct)? onProgress,
+  }) {
+    final client = http.Client();
+    var dibatalkan = false;
+
+    Future<String> jalan() async {
+      final token = await _Api._token();
+      var terkirim = 0;
+      var pctLama = -1;
+      final dihitung = stream.map((chunk) {
+        terkirim += chunk.length;
+        final mentah = length > 0 ? (terkirim * 100) ~/ length : 0;
+        final pct = mentah > 100 ? 100 : mentah;
+        if (pct != pctLama) {
+          pctLama = pct;
+          onProgress?.call(pct);
+        }
+        return chunk;
+      });
+      final req = http.MultipartRequest(
+          'POST', _Api._uri('/api/returns/$jenis'))
+        ..headers['Authorization'] = 'Bearer $token'
+        ..files.add(http.MultipartFile('file', dihitung, length,
+            filename: filename));
+      http.Response r;
+      try {
+        final streamed =
+            await client.send(req).timeout(const Duration(minutes: 20));
+        r = await http.Response.fromStream(streamed);
+      } catch (_) {
+        if (dibatalkan) throw ApiException(0, 'Unggahan dibatalkan.');
+        throw ApiException(0, 'Koneksi terputus saat mengunggah.');
+      } finally {
+        client.close();
+      }
+      if (r.statusCode < 200 || r.statusCode >= 300) {
+        if (r.statusCode == 401) await _Api._throw(r);
+        final msg = _Api._errorMessage(r);
+        throw ApiException(r.statusCode,
+            msg.startsWith('HTTP ') ? 'Unggah gagal (HTTP ${r.statusCode})' : msg);
+      }
+      String url = '';
+      try {
+        url = _Api._obj(jsonDecode(utf8.decode(r.bodyBytes)))['url']
+                ?.toString() ??
+            '';
+      } catch (_) {/* bukan JSON */}
+      if (url.isEmpty) {
+        throw ApiException(r.statusCode, 'Unggah gagal (HTTP ${r.statusCode})');
+      }
+      return url;
+    }
+
+    return ReturUnggah._(jalan(), () {
+      dibatalkan = true;
+      client.close();
+    });
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -1156,6 +1586,27 @@ class ApiService {
         '/api/branch/orders/${Uri.encodeComponent(code)}/status',
         body: {'status': status, 'tracking_no': ?trackingNo},
       );
+
+  /// Pilihan alasan kendala: [(key, label)] — satu sumber dengan web.
+  static Future<List<(String, String)>> branchKendalaAlasan() async {
+    final data = _Api._obj(await _Api.get('/api/branch/kendala/alasan'));
+    return [
+      for (final a in (data['alasan'] as List? ?? const []).whereType<Map>())
+        ('${a['key'] ?? ''}', '${a['label'] ?? ''}'),
+    ];
+  }
+
+  /// Gudang melapor kendala ke admin — pengganti batal (gudang tak boleh
+  /// membatalkan pesanan lunas). Kembalian: tersimpan di pesanan atau belum
+  /// (migrasi 037 belum jalan → hanya Telegram).
+  static Future<bool> reportBranchKendala(
+      String code, String alasan, String catatan) async {
+    final data = _Api._obj(await _Api.post(
+      '/api/branch/orders/${Uri.encodeComponent(code)}/kendala',
+      body: {'alasan': alasan, 'catatan': catatan},
+    ));
+    return data['tersimpan'] == true;
+  }
 
   static Future<SalesRecap> branchSales() async =>
       SalesRecap.fromJson(_Api._obj(await _Api.get('/api/branch/sales')));

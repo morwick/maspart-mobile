@@ -2621,9 +2621,9 @@ class _GudangScreenState extends State<GudangScreen> {
               ),
               _CheckRow(
                 value: r.selectable,
-                label: 'Bisa dipilih pembeli',
+                label: 'Gudang utama pembeli',
                 subtitle:
-                    'Muncul di daftar lokasi belanja. Perlu Key/Akun cabang untuk routing pesanan.',
+                    'Pembeli otomatis memakai gudang utama terdekat dari alamat pengirimannya. Perlu Key/Akun cabang untuk routing pesanan.',
                 onChanged: (v) => setState(() => r.selectable = v),
               ),
             ]),

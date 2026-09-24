@@ -19,7 +19,8 @@ class OrderChat extends StatefulWidget {
   final Future<List<ChatMessage>> Function() fetch;
   final Future<void> Function(String body) send;
 
-  /// Polling berkala supaya balasan lawan bicara muncul tanpa refresh manual.
+  /// Polling berkala supaya balasan lawan bicara muncul tanpa refresh manual
+  /// (7 detik — sama dengan web `OrderChat.tsx`).
   final Duration pollEvery;
 
   const OrderChat({
@@ -28,7 +29,7 @@ class OrderChat extends StatefulWidget {
     required this.me,
     required this.fetch,
     required this.send,
-    this.pollEvery = const Duration(seconds: 12),
+    this.pollEvery = const Duration(seconds: 7),
   });
 
   @override
@@ -111,7 +112,7 @@ class _OrderChatState extends State<OrderChat> {
     final m = context.mas;
 
     return MasSectionCard(
-      title: widget.title,
+      title: widget.title.startsWith('💬') ? widget.title : '💬 ${widget.title}',
       children: [
         if (_loading)
           const Padding(
@@ -190,69 +191,59 @@ class _OrderChatState extends State<OrderChat> {
     );
   }
 
+  /// Nama peran pengirim — sama dengan `roleLabel` web.
+  static const _roleLabel = {
+    'pembeli': 'Pembeli',
+    'gudang': 'Gudang',
+    'admin': 'Admin',
+  };
+
   Widget _bubble(MasColors m, ChatMessage msg) {
-    final mine = msg.senderUsername == widget.me;
+    final mine =
+        msg.senderUsername.toLowerCase() == widget.me.toLowerCase();
+    // Label di BAWAH gelembung (seperti web): "Anda" atau nama peran + waktu.
+    final siapa = mine
+        ? 'Anda'
+        : (_roleLabel[msg.senderRole] ??
+            (msg.senderRole.isNotEmpty ? msg.senderRole : msg.senderUsername));
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        mainAxisAlignment:
-            mine ? MainAxisAlignment.end : MainAxisAlignment.start,
-        children: [
-          Flexible(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-              decoration: BoxDecoration(
-                color: mine ? m.brand600 : m.ink100,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(12),
-                  topRight: const Radius.circular(12),
-                  bottomLeft: Radius.circular(mine ? 12 : 3),
-                  bottomRight: Radius.circular(mine ? 3 : 12),
+      child: Align(
+        alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+        child: FractionallySizedBox(
+          widthFactor: 0.82,
+          alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+          child: Column(
+            crossAxisAlignment:
+                mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: mine ? m.brand600 : m.paper,
+                  borderRadius: BorderRadius.circular(10),
+                  border: mine ? null : Border.all(color: m.ink150),
+                ),
+                child: Text(
+                  msg.body,
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.45,
+                    color: mine ? Colors.white : m.ink800,
+                  ),
                 ),
               ),
-              child: Column(
-                crossAxisAlignment:
-                    mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (!mine)
-                    Text(
-                      // Peran lebih berguna dari username: pembeli ingin tahu
-                      // dia sedang bicara dengan gudang atau admin.
-                      msg.senderRole.isNotEmpty
-                          ? '${msg.senderUsername} · ${msg.senderRole}'
-                          : msg.senderUsername,
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600,
-                        color: m.ink500,
-                      ),
-                    ),
-                  if (!mine) const SizedBox(height: 3),
-                  Text(
-                    msg.body,
-                    style: TextStyle(
-                      fontSize: 13,
-                      height: 1.4,
-                      color: mine ? Colors.white : m.ink900,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    fmtDate(msg.createdAt),
-                    style: TextStyle(
-                      fontSize: 9.5,
-                      color: mine
-                          ? Colors.white.withValues(alpha: 0.75)
-                          : m.ink400,
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 2),
+              Text(
+                '$siapa · ${fmtDate(msg.createdAt)}',
+                style: TextStyle(fontSize: 10, color: m.ink400),
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

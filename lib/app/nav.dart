@@ -25,13 +25,21 @@ enum MasScreen {
   keranjang,
   pesanan,
   pesananDetail,
+  beliLagi,
   pilihLokasi,
   poin,
+  voucher,
   chat,
+  profil,
+  returSaya,
+  returAjukan,
+  returDetail,
 
   // Cabang
   cabangPesanan,
   cabangPesananDetail,
+  cabangRetur,
+  cabangReturDetail,
   cabangPenjualan,
   cabangChat,
 
@@ -73,12 +81,20 @@ const Map<MasScreen, (String, String)> kScreenTitles = {
   MasScreen.keranjang: ('Keranjang', 'Tinjau part, pilih ekspedisi, lalu bayar'),
   MasScreen.pesanan: ('Pesanan Saya', 'Riwayat & status pesanan'),
   MasScreen.pesananDetail: ('Detail Pesanan', ''),
+  MasScreen.beliLagi: ('Beli Lagi', 'Barang yang pernah kamu beli'),
   MasScreen.pilihLokasi: ('Ganti Lokasi', 'Pilih gudang tempat Anda berbelanja'),
   MasScreen.poin: ('Poin Saya', 'Kumpulkan poin tiap belanja, tukar jadi potongan'),
+  MasScreen.voucher: ('Voucher', 'Klaim voucher gratis ongkir & diskon'),
   MasScreen.chat: ('Chat', 'Tanya gudang sebelum memesan'),
+  MasScreen.profil: ('Profil Saya', 'Data akun & alamat pengiriman'),
+  MasScreen.returSaya: ('Return Saya', 'Pengajuan pengembalian barang'),
+  MasScreen.returAjukan: ('Ajukan Return', ''),
+  MasScreen.returDetail: ('Detail Return', ''),
 
   MasScreen.cabangPesanan: ('Pesanan Masuk', 'Pesanan yang harus dipenuhi cabang ini'),
   MasScreen.cabangPesananDetail: ('Detail Pesanan', ''),
+  MasScreen.cabangRetur: ('Return Masuk', 'Barang return yang diterima & diperiksa gudang ini'),
+  MasScreen.cabangReturDetail: ('Detail Return', ''),
   MasScreen.cabangPenjualan: ('Laporan Penjualan', 'Rekap omzet cabang'),
   MasScreen.cabangChat: ('Chat Pembeli', 'Percakapan dengan pembeli'),
 
@@ -126,13 +142,28 @@ const NavItem _navDashboard =
 /// Menu pembeli — hanya alur belanja. Item ber-permKey tetap tunduk Menu
 /// Control: admin mematikan "Asisten AI" → menunya hilang untuk pembeli juga.
 const List<NavItem> _navBuyer = [
+  // 'Cari Part' SENGAJA tidak ada (paritas web 2026-09-23): kotak cari di
+  // etalase Belanja sudah jadi pencarian pembeli.
   NavItem('Belanja', Icons.storefront_outlined, MasScreen.toko),
-  NavItem('Cari Part', Icons.search_rounded, MasScreen.search, permKey: 'search'),
   NavItem('Asisten AI', Icons.smart_toy_rounded, MasScreen.asisten, permKey: 'ai'),
-  NavItem('Poin Saya', Icons.card_giftcard_rounded, MasScreen.poin, permKey: 'poin'),
   NavItem('Chat', Icons.chat_bubble_outline_rounded, MasScreen.chat),
   NavItem('Pesanan Saya', Icons.receipt_long_outlined, MasScreen.pesanan),
-  NavItem('Ganti Lokasi', Icons.place_outlined, MasScreen.pilihLokasi),
+  // Beli Lagi (pola Tokopedia/Shopee) — riwayat barang yang pernah dibeli.
+  // Hanya di menu pembeli, jadi guard layar otomatis menolak peran lain.
+  NavItem('Beli Lagi', Icons.replay_rounded, MasScreen.beliLagi),
+  // Return / pengembalian barang (migrasi 039) — paritas web NAV_BUYER.
+  NavItem('Return Saya', Icons.assignment_return_outlined, MasScreen.returSaya),
+  // Poin & Voucher tanpa permKey (paritas web): hak SEMUA pembeli — dengan
+  // kunci, menu baru tersembunyi sampai admin mencentang tiap akun.
+  NavItem('Poin Saya', Icons.card_giftcard_rounded, MasScreen.poin),
+  NavItem('Voucher', Icons.confirmation_number_outlined, MasScreen.voucher),
+  // Paritas web (menu akun "Profil Saya"): data akun + alamat pengiriman.
+  NavItem('Profil Saya', Icons.person_outline_rounded, MasScreen.profil),
+  // ⛔ 'Ganti Lokasi' DICABUT 2026-09-23: gudang acuan pembeli diturunkan
+  // dari ALAMAT PENGIRIMAN-nya (backend `buyer_lokasi`). Menanyakannya lagi
+  // berarti dua jawaban untuk satu pertanyaan, dan yang manual biasanya yang
+  // basi. Layarnya sendiri dipertahankan sebagai layar anak untuk akun lama
+  // yang belum punya alamat sama sekali.
 ];
 
 const List<NavItem> _navPrimary = [
@@ -171,6 +202,7 @@ const List<NavItem> _navAdmin = [
 
 const List<NavItem> _navCabang = [
   NavItem('Pesanan Masuk', Icons.shopping_cart_outlined, MasScreen.cabangPesanan),
+  NavItem('Return Masuk', Icons.assignment_return_outlined, MasScreen.cabangRetur),
   NavItem('Chat', Icons.chat_bubble_outline_rounded, MasScreen.cabangChat),
   NavItem('Laporan Penjualan', Icons.bar_chart_rounded, MasScreen.cabangPenjualan),
 ];
@@ -179,10 +211,14 @@ const List<NavItem> _navCabang = [
 /// boleh dijegal guard izin.
 const Set<MasScreen> _kChildScreens = {
   MasScreen.part,
+  MasScreen.pilihLokasi,
   MasScreen.pesananDetail,
   MasScreen.orderDetail,
   MasScreen.cabangPesananDetail,
   MasScreen.keranjang,
+  MasScreen.returAjukan,
+  MasScreen.returDetail,
+  MasScreen.cabangReturDetail,
 };
 
 /// Bangun struktur drawer sesuai peran & izin — persis logika web (AppShell.tsx):
@@ -248,7 +284,6 @@ class NavTab {
 /// diakses akun ini dilewati, lalu diambil 4 teratas (slot ke-5 = "Menu").
 const List<NavTab> _tabsBuyer = [
   NavTab('Belanja', Icons.storefront_outlined, Icons.storefront, MasScreen.toko),
-  NavTab('Cari', Icons.search_rounded, Icons.search_rounded, MasScreen.search),
   NavTab('Asisten', Icons.smart_toy_outlined, Icons.smart_toy_rounded, MasScreen.asisten),
   NavTab('Pesanan', Icons.receipt_long_outlined, Icons.receipt_long, MasScreen.pesanan),
   NavTab('Chat', Icons.chat_bubble_outline_rounded, Icons.chat_bubble_rounded, MasScreen.chat),
@@ -294,6 +329,9 @@ const Set<MasScreen> kNoBottomBar = {
   MasScreen.cabangPesananDetail,
   MasScreen.keranjang,
   MasScreen.pilihLokasi,
+  MasScreen.returAjukan,
+  MasScreen.returDetail,
+  MasScreen.cabangReturDetail,
 };
 
 /// Kumpulan layar yang boleh diakses untuk peran/izin tertentu (untuk guard).

@@ -22,33 +22,67 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int? _indexed;
   List<MonitoringActivity>? _activity;
 
+  /// Akun staf cabang (izin `branch` dari /api/auth/permissions) — null =
+  /// bukan akun cabang / belum termuat. Sama dengan web `/beranda`.
+  String? _branch;
+  int? _branchN;
+  double? _omzet;
+
   @override
   void initState() {
     super.initState();
-    _load();
+    // AppNav (peran) baru bisa dibaca setelah frame pertama.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _load();
+    });
   }
 
   /// Muat ulang semua angka. Dipakai saat layar dibuka DAN saat user menarik
   /// layar ke bawah — dashboard yang gagal memuat sekali dulu menampilkan "—"
   /// selamanya sampai aplikasi dibuka ulang.
   Future<void> _load() async {
+    final isAdmin = AppNav.of(context).isAdmin;
     await Future.wait<void>([
       ApiService.aiStatus().then((v) {
         if (mounted) setState(() => _aiOn = v);
       }).catchError((_) {}),
-      // monitoring & index-status khusus admin — untuk peran lain endpoint
-      // menolak (403) dan kartunya memang tak dirender, jadi cukup diabaikan.
-      ApiService.monitoring().then((d) {
-        if (!mounted) return;
-        setState(() {
-          _online = d.onlineCount;
-          _activity = d.recentActivity.take(6).toList();
-        });
-      }).catchError((_) {}),
-      ApiService.indexStatus().then((d) {
-        if (mounted) setState(() => _indexed = d.totalIndexed);
-      }).catchError((_) {}),
+      // monitoring & index-status khusus admin — peran lain PASTI ditolak
+      // (403), jadi jangan dipanggil sama sekali.
+      if (isAdmin)
+        ApiService.monitoring().then((d) {
+          if (!mounted) return;
+          setState(() {
+            _online = d.onlineCount;
+            _activity = d.recentActivity.take(6).toList();
+          });
+        }).catchError((_) {}),
+      if (isAdmin)
+        ApiService.indexStatus().then((d) {
+          if (mounted) setState(() => _indexed = d.totalIndexed);
+        }).catchError((_) {}),
+      if (!isAdmin) _loadCabang(),
     ]);
+  }
+
+  /// Ringkas cabang (hanya akun cabang): pesanan masuk + omzet.
+  Future<void> _loadCabang() async {
+    try {
+      final p = await ApiService.getMyPermissions();
+      final b = (p.branch ?? '').trim();
+      if (!mounted) return;
+      setState(() => _branch = b.isEmpty ? null : b);
+      if (b.isEmpty) return;
+      await Future.wait<void>([
+        ApiService.branchOrdersCount().then((n) {
+          if (mounted) setState(() => _branchN = n);
+        }).catchError((_) {}),
+        ApiService.branchSales().then((r) {
+          if (mounted) setState(() => _omzet = r.omzet);
+        }).catchError((_) {}),
+      ]);
+    } catch (_) {
+      /* jaringan mati → kartu cabang tak tampil */
+    }
   }
 
   String _activityText(MonitoringActivity a) {
@@ -84,9 +118,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ('Cari Part', 'Part number / nama', Icons.search_rounded, MasScreen.search),
       ('Tanya Asisten', 'Stok, harga, BOM per-VIN', Icons.smart_toy_rounded, MasScreen.asisten),
       ('Cari by Foto', 'Kenali part dari gambar', Icons.photo_camera_outlined, MasScreen.foto),
+      // Urutan & isi = 8 kartu web `/beranda` (TILES).
+      ('Stok', 'Stok gudang & cabang', Icons.grid_view_rounded, MasScreen.stok),
+      ('Harga', 'Daftar & cari harga', Icons.payments_outlined, MasScreen.harga),
       ('Populasi Unit', 'Armada terdaftar', Icons.local_shipping_outlined, MasScreen.populasi),
-      ('Harga', 'Daftar & batch harga', Icons.payments_outlined, MasScreen.harga),
       ('Bandingkan Part', 'Dua part berdampingan', Icons.compare_arrows_rounded, MasScreen.compare),
+      ('Batch Download', 'Unduh massal katalog', Icons.download_rounded, MasScreen.batch),
     ];
     // Hanya menu yang boleh diakses akun ini (persis gating drawer).
     final quick = quickAll.where((q) => nav.accessible.contains(q.$4)).toList();
@@ -104,6 +141,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         const SizedBox(height: 4),
         Text('$_greeting, ${nav.username} 👷',
             style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: m.ink900, letterSpacing: -0.4)),
+        if (_branch != null) ...[
+          const SizedBox(height: 3),
+          Text('Cabang $_branch', style: TextStyle(fontSize: 12.5, color: m.ink500)),
+        ],
         const SizedBox(height: 14),
         Row(children: [
           Expanded(child: MasButton(label: 'Cari Part', icon: Icons.search_rounded, expand: true, onTap: () => nav.go(MasScreen.search))),
@@ -113,6 +154,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ]),
         const SizedBox(height: 18),
+        if (_branch != null && !isAdmin) ...[
+          IntrinsicHeight(
+            child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => nav.go(MasScreen.cabangPesanan),
+                  child: _statCard('PESANAN MASUK', _branchN == null ? '—' : thousands(_branchN!),
+                      'menunggu diproses', Icons.shopping_cart_outlined, MasPillTone.brand),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => nav.go(MasScreen.cabangPenjualan),
+                  child: _statCard('OMZET CABANG', _omzet == null ? '—' : formatRupiah(_omzet),
+                      'lihat laporan penjualan', Icons.show_chart_rounded, MasPillTone.info,
+                      valueSize: 18),
+                ),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 12),
+        ],
         if (isAdmin) ...[
           IntrinsicHeight(
             child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -185,7 +249,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _statCard(String label, String value, String sub, IconData icon, MasPillTone tone) {
+  Widget _statCard(String label, String value, String sub, IconData icon, MasPillTone tone,
+      {double valueSize = 26}) {
     final m = context.mas;
     return MasCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
@@ -194,7 +259,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _iconChip(icon, tone),
         ]),
         const SizedBox(height: 8),
-        Text(value, style: masMono(size: 26, weight: FontWeight.w700, color: m.ink900, letterSpacing: -0.5)),
+        Text(value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: masMono(size: valueSize, weight: FontWeight.w700, color: m.ink900, letterSpacing: -0.5)),
         const SizedBox(height: 2),
         Text(sub, style: TextStyle(fontSize: 11.5, color: m.ink500)),
       ]),

@@ -177,6 +177,23 @@ class CartStore extends ChangeNotifier {
     await _save();
   }
 
+  /// Tambah BANYAK part sekaligus (Beli Lagi) — qty tiap item = `item.qty`.
+  /// Aturannya sama dengan [add]: PN yang sudah ada di keranjang qty-nya
+  /// DITAMBAH, bukan ditimpa. Disimpan sekali saja di akhir.
+  Future<void> addMany(Iterable<CartItem> items) async {
+    for (final item in items) {
+      if (item.partNumber.isEmpty) continue;
+      final qty = item.qty < 1 ? 1 : item.qty;
+      final i = _items.indexWhere((e) => e.partNumber == item.partNumber);
+      if (i >= 0) {
+        _items[i] = _items[i].copyWith(qty: _items[i].qty + qty);
+      } else {
+        _items.add(item.copyWith(qty: qty));
+      }
+    }
+    await _save();
+  }
+
   Future<void> setQty(String pn, int qty) async {
     final i = _items.indexWhere((e) => e.partNumber == pn);
     if (i < 0) return;

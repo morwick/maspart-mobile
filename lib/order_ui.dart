@@ -4,7 +4,9 @@
 // kalau tidak, tagihan ke pembeli tak akan cocok dengan dokumen Accurate.
 
 import 'package:flutter/material.dart';
+import 'models.dart';
 import 'theme/mas_theme.dart';
+import 'utils.dart';
 import 'widgets/mas_ui.dart';
 
 /// PPN 12% **INKLUSIF** — harga jual Accurate SUDAH mengandung PPN, jadi pajak
@@ -135,5 +137,55 @@ class OrderStepper extends StatelessWidget {
         ],
       ],
     );
+  }
+}
+
+/// Warna baris potongan — sama dengan web (`OrderPotongan.tsx`, keranjang).
+const Color kWarnaVoucherDiskon = Color(0xFFC9530F);
+const Color kWarnaVoucherOngkir = Color(0xFF0B7D6E);
+
+/// Baris potongan pesanan (voucher diskon, voucher ongkir, poin) + kode voucher.
+/// Cerminan `components/OrderPotongan.tsx` — dipakai detail pesanan pembeli,
+/// admin, dan cabang. Tanpa baris ini Subtotal + Ongkir ≠ Total dan orang
+/// mengira sistem salah hitung.
+class OrderPotongan extends StatelessWidget {
+  final OrderDetail order;
+  const OrderPotongan({super.key, required this.order});
+
+  @override
+  Widget build(BuildContext context) {
+    final m = context.mas;
+    final o = order;
+    final baris = <(String, num, Color)>[
+      if (o.voucherDiscount > 0)
+        ('Voucher diskon', o.voucherDiscount, kWarnaVoucherDiskon),
+      if (o.shippingDiscount > 0)
+        ('Voucher gratis ongkir', o.shippingDiscount, kWarnaVoucherOngkir),
+      if (o.pointDiscount > 0)
+        ('Potongan poin (${thousands(o.pointRedeemed)})', o.pointDiscount,
+            m.brand700),
+    ];
+    final kode = (o.voucherCodes ?? '').trim();
+    if (baris.isEmpty && kode.isEmpty) return const SizedBox.shrink();
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      for (final (label, n, warna) in baris)
+        Padding(
+          padding: const EdgeInsets.only(top: 5),
+          child: Row(children: [
+            Expanded(
+                child: Text(label,
+                    style: TextStyle(fontSize: 13, color: warna))),
+            Text('−${formatRupiah(n)}',
+                style: masMono(size: 13, color: warna)),
+          ]),
+        ),
+      if (kode.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 3),
+          child: Text(
+              'Kode voucher: ${kode.split(',').map((e) => e.trim()).join(', ')}',
+              style: TextStyle(fontSize: 11.5, color: m.ink400)),
+        ),
+    ]);
   }
 }

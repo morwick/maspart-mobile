@@ -79,12 +79,147 @@ class UserOut {
   final String role;
   final String? gudang;
 
-  const UserOut({required this.username, required this.role, this.gudang});
+  /// Pembeli: sudah punya alamat utama? false → layar Lengkapi Profil.
+  /// null = bukan pembeli / backend lama.
+  final bool? profileComplete;
+
+  const UserOut(
+      {required this.username,
+      required this.role,
+      this.gudang,
+      this.profileComplete});
 
   factory UserOut.fromJson(Map<String, dynamic> j) => UserOut(
         username: _s(j['username']),
         role: _s(j['role']),
         gudang: _sOrNull(j['gudang']),
+        profileComplete:
+            j['profile_complete'] == null ? null : _b(j['profile_complete']),
+      );
+}
+
+// ── Profil & alamat pembeli (migrasi 032) — cerminan BuyerProfile/Alamat/
+// Wilayah di frontend/src/lib/api.ts ──
+
+class BuyerProfile {
+  final String username;
+  final String nama;
+  final String? email;
+  final String telepon;
+  final String authProvider; // 'password' | 'google'
+  final String? gudangLabel;
+  final bool profileComplete;
+
+  const BuyerProfile({
+    required this.username,
+    this.nama = '',
+    this.email,
+    this.telepon = '',
+    this.authProvider = 'password',
+    this.gudangLabel,
+    this.profileComplete = false,
+  });
+
+  factory BuyerProfile.fromJson(Map<String, dynamic> j) => BuyerProfile(
+        username: _s(j['username']),
+        nama: _s(j['nama']),
+        email: _sOrNull(j['email']),
+        telepon: _s(j['telepon']),
+        authProvider: _s(j['auth_provider'], 'password'),
+        gudangLabel: _sOrNull((j['gudang'] as Map?)?['label']),
+        profileComplete: _b(j['profile_complete']),
+      );
+}
+
+class Alamat {
+  final int id;
+  final String label;
+  final String namaPenerima;
+  final String telepon;
+  final String provinsi;
+  final String kota;
+  final String kecamatan;
+  final String kodePos;
+  final String alamat;
+  final double? lat;
+  final double? lng;
+  final bool isDefault;
+
+  const Alamat({
+    this.id = 0,
+    this.label = 'Rumah',
+    this.namaPenerima = '',
+    this.telepon = '',
+    this.provinsi = '',
+    this.kota = '',
+    this.kecamatan = '',
+    this.kodePos = '',
+    this.alamat = '',
+    this.lat,
+    this.lng,
+    this.isDefault = false,
+  });
+
+  factory Alamat.fromJson(Map<String, dynamic> j) => Alamat(
+        id: _i(j['id']),
+        label: _s(j['label'], 'Rumah'),
+        namaPenerima: _s(j['nama_penerima']),
+        telepon: _s(j['telepon']),
+        provinsi: _s(j['provinsi']),
+        kota: _s(j['kota']),
+        kecamatan: _s(j['kecamatan']),
+        kodePos: _s(j['kode_pos']),
+        alamat: _s(j['alamat']),
+        lat: j['lat'] == null ? null : _d(j['lat']),
+        lng: j['lng'] == null ? null : _d(j['lng']),
+        isDefault: _b(j['is_default']),
+      );
+
+  /// Body POST/PUT /api/buyer/alamat (AlamatInput di web).
+  Map<String, dynamic> toInput() => {
+        'label': label,
+        'nama_penerima': namaPenerima,
+        'telepon': telepon,
+        'provinsi': provinsi,
+        'kota': kota,
+        'kecamatan': kecamatan,
+        'kode_pos': kodePos,
+        'alamat': alamat,
+        'lat': lat,
+        'lng': lng,
+        'is_default': isDefault,
+      };
+
+  /// "Kec. X, Kota Y, Provinsi Z" tanpa bagian kosong.
+  String get wilayah =>
+      [kecamatan, kota, provinsi].where((e) => e.isNotEmpty).join(', ');
+}
+
+/// Hasil autocomplete wilayah (RajaOngkir — sumber yang sama dengan ongkir).
+class Wilayah {
+  final String label;
+  final String provinsi;
+  final String kota;
+  final String kecamatan;
+  final String kelurahan;
+  final String kodePos;
+
+  const Wilayah({
+    this.label = '',
+    this.provinsi = '',
+    this.kota = '',
+    this.kecamatan = '',
+    this.kelurahan = '',
+    this.kodePos = '',
+  });
+
+  factory Wilayah.fromJson(Map<String, dynamic> j) => Wilayah(
+        label: _s(j['label']),
+        provinsi: _s(j['provinsi']),
+        kota: _s(j['kota']),
+        kecamatan: _s(j['kecamatan']),
+        kelurahan: _s(j['kelurahan']),
+        kodePos: _s(j['kode_pos']),
       );
 }
 
@@ -492,12 +627,20 @@ class AppMeta {
   final AppVersionInfo version;
   final Map<String, dynamic> config;
 
-  const AppMeta({this.version = const AppVersionInfo(), this.config = const {}});
+  /// OAuth Client ID Google (tipe Web) dari backend — jadi `serverClientId`
+  /// Google Sign-In. Kosong = login Google belum diaktifkan → tombol disembunyikan.
+  final String googleClientId;
+
+  const AppMeta(
+      {this.version = const AppVersionInfo(),
+      this.config = const {},
+      this.googleClientId = ''});
 
   factory AppMeta.fromJson(Map<String, dynamic> j) => AppMeta(
         version: AppVersionInfo.fromJson(
             (j['version'] as Map?)?.cast<String, dynamic>() ?? const {}),
         config: (j['config'] as Map?)?.cast<String, dynamic>() ?? const {},
+        googleClientId: _s(j['google_client_id']),
       );
 }
 
@@ -1204,12 +1347,16 @@ class OrderItemDetail {
   final int qty;
   final double lineTotal;
 
+  /// Hanya detail pesanan CABANG: kode rak di gudang pemenuh ('' = belum dicatat).
+  final String rak;
+
   const OrderItemDetail({
     required this.partNumber,
     this.name = '',
     this.price = 0,
     this.qty = 0,
     this.lineTotal = 0,
+    this.rak = '',
   });
 
   factory OrderItemDetail.fromJson(Map<String, dynamic> j) => OrderItemDetail(
@@ -1218,6 +1365,7 @@ class OrderItemDetail {
         price: _d(j['price']),
         qty: _i(j['qty']),
         lineTotal: _d(j['line_total']),
+        rak: _s(j['rak']),
       );
 }
 
@@ -1230,6 +1378,25 @@ class OrderSummary {
   final String? paymentProofUrl;
   final String createdAt;
 
+  /// Cuplikan untuk kartu "Pesanan Saya" — hanya diisi GET /api/orders (daftar
+  /// milik pembeli). Nama sengaja beda dari field [OrderDetail] (`pickup`,
+  /// `items`, …) supaya subkelas itu tak perlu diubah.
+  final bool ringkasPickup;
+  final String? ringkasGudangKirim; // fulfill_gudang
+  final String? ringkasKurir;
+  final String? ringkasResi;
+  final String? batasBayar; // payment_expiry
+  final List<OrderItemDetail> cuplikan;
+
+  /// Hanya pesanan selesai di daftar pembeli: tombol "⭐ Nilai" ala Shopee.
+  final bool sudahDinilai;
+  final bool bisaNilai;
+  final String? updatedAt;
+
+  /// Daftar pesanan pembeli: boleh diajukan return (dikirim, atau selesai
+  /// ≤ batas hari retur) — tombol "↩ Ajukan Return" di kartu (migrasi 039).
+  final bool bisaRetur;
+
   const OrderSummary({
     required this.orderCode,
     this.username = '',
@@ -1238,6 +1405,16 @@ class OrderSummary {
     this.status = '',
     this.paymentProofUrl,
     this.createdAt = '',
+    this.ringkasPickup = false,
+    this.ringkasGudangKirim,
+    this.ringkasKurir,
+    this.ringkasResi,
+    this.batasBayar,
+    this.cuplikan = const [],
+    this.sudahDinilai = false,
+    this.bisaNilai = false,
+    this.updatedAt,
+    this.bisaRetur = false,
   });
 
   factory OrderSummary.fromJson(Map<String, dynamic> j) => OrderSummary(
@@ -1248,6 +1425,20 @@ class OrderSummary {
         status: _s(j['status']),
         paymentProofUrl: _sOrNull(j['payment_proof_url']),
         createdAt: _s(j['created_at']),
+        ringkasPickup: _b(j['pickup']),
+        ringkasGudangKirim: _sOrNull(j['fulfill_gudang']),
+        ringkasKurir: _sOrNull(j['courier']),
+        ringkasResi: _sOrNull(j['tracking_no']),
+        batasBayar: _sOrNull(j['payment_expiry']),
+        sudahDinilai: _b(j['sudah_dinilai']),
+        bisaNilai: _b(j['bisa_nilai']),
+        updatedAt: _sOrNull(j['updated_at']),
+        bisaRetur: _b(j['bisa_retur']),
+        cuplikan: (j['items'] as List?)
+                ?.whereType<Map>()
+                .map((e) => OrderItemDetail.fromJson(e.cast<String, dynamic>()))
+                .toList() ??
+            const [],
       );
 }
 
@@ -1263,6 +1454,14 @@ class OrderDetail extends OrderSummary {
   final double subtotal;
   final double? tax;
   final double shippingCost;
+
+  /// Potongan (migrasi 034/035). Tanpa ini Subtotal + Ongkir ≠ Total di layar
+  /// detail, dan pembeli mengira ditagih salah.
+  final int pointRedeemed;
+  final int pointDiscount;
+  final int voucherDiscount;
+  final int shippingDiscount;
+  final String? voucherCodes;
   final String? courier;
   final String? courierService;
   final String? trackingNo;
@@ -1297,6 +1496,22 @@ class OrderDetail extends OrderSummary {
   final String? penawaranStatus;
   final String? penawaranNumber;
   final String? penawaranNote;
+
+  /// Hanya detail pesanan CABANG — identitas pengirim di surat jalan & label paket.
+  final String gudangFisik;
+  final String gudangFisikPic;
+  final String gudangFisikPostal;
+
+  /// Laporan kendala dari gudang pemenuh (migrasi 037) — admin menindaklanjuti.
+  final String? kendalaNote;
+  final String? kendalaAt;
+  final String? kendalaBy;
+
+  /// Penilaian (hanya pesanan selesai, migrasi 038).
+  final Penilaian? penilaian;
+
+  /// Keadaan return per barang (status dikirim/selesai, migrasi 039).
+  final ReturPesanan? retur;
   final List<OrderItemDetail> items;
 
   const OrderDetail({
@@ -1314,6 +1529,11 @@ class OrderDetail extends OrderSummary {
     this.subtotal = 0,
     this.tax,
     this.shippingCost = 0,
+    this.pointRedeemed = 0,
+    this.pointDiscount = 0,
+    this.voucherDiscount = 0,
+    this.shippingDiscount = 0,
+    this.voucherCodes,
     this.courier,
     this.courierService,
     this.trackingNo,
@@ -1340,6 +1560,14 @@ class OrderDetail extends OrderSummary {
     this.penawaranStatus,
     this.penawaranNumber,
     this.penawaranNote,
+    this.gudangFisik = '',
+    this.gudangFisikPic = '',
+    this.gudangFisikPostal = '',
+    this.kendalaNote,
+    this.kendalaAt,
+    this.kendalaBy,
+    this.penilaian,
+    this.retur,
     this.items = const [],
   });
 
@@ -1358,6 +1586,11 @@ class OrderDetail extends OrderSummary {
         subtotal: _d(j['subtotal']),
         tax: _dOrNull(j['tax']),
         shippingCost: _d(j['shipping_cost']),
+        pointRedeemed: _i(j['point_redeemed']),
+        pointDiscount: _i(j['point_discount']),
+        voucherDiscount: _i(j['voucher_discount']),
+        shippingDiscount: _i(j['shipping_discount']),
+        voucherCodes: _sOrNull(j['voucher_codes']),
         courier: _sOrNull(j['courier']),
         courierService: _sOrNull(j['courier_service']),
         trackingNo: _sOrNull(j['tracking_no']),
@@ -1384,6 +1617,18 @@ class OrderDetail extends OrderSummary {
         penawaranStatus: _sOrNull(j['penawaran_status']),
         penawaranNumber: _sOrNull(j['penawaran_number']),
         penawaranNote: _sOrNull(j['penawaran_note']),
+        gudangFisik: _s(j['gudang_fisik']),
+        gudangFisikPic: _s(j['gudang_fisik_pic']),
+        gudangFisikPostal: _s(j['gudang_fisik_postal']),
+        kendalaNote: _sOrNull(j['kendala_note']),
+        kendalaAt: _sOrNull(j['kendala_at']),
+        kendalaBy: _sOrNull(j['kendala_by']),
+        penilaian: j['penilaian'] is Map
+            ? Penilaian.fromJson((j['penilaian'] as Map).cast<String, dynamic>())
+            : null,
+        retur: j['retur'] is Map
+            ? ReturPesanan.fromJson((j['retur'] as Map).cast<String, dynamic>())
+            : null,
         items: _list(j['items'], OrderItemDetail.fromJson),
       );
 
@@ -1644,6 +1889,10 @@ class PoinSaldo {
   final int minTukar;
   final int masaHari;
 
+  /// `aturan` memang dikirim server. Tanpa ini layar tak boleh menampilkan
+  /// "Cara kerjanya" — angka di bawah hanyalah nol/default, bukan aturan nyata.
+  final bool adaAturan;
+
   const PoinSaldo({
     this.aktif = false,
     this.saldo = 0,
@@ -1655,21 +1904,26 @@ class PoinSaldo {
     this.maksPersen = 20,
     this.minTukar = 50,
     this.masaHari = 365,
+    this.adaAturan = false,
   });
 
   factory PoinSaldo.fromJson(Map<String, dynamic> j) {
-    final a = (j['aturan'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final raw = j['aturan'];
+    final a = (raw is Map) ? raw.cast<String, dynamic>() : const <String, dynamic>{};
+    // Nilai aturan disimpan APA ADANYA (paritas web): 0 tetap 0 — mis.
+    // min_tukar 0 = tanpa minimal, bukan "pakai default 50".
     return PoinSaldo(
       aktif: j['aktif'] == true,
       saldo: _i(j['saldo']),
       rupiah: _i(j['rupiah']),
       tertunda: _i(j['tertunda']),
       bolehTukar: j['boleh_tukar'] == true,
-      rpPerPoin: _i(a['rp_per_poin']) == 0 ? 10000 : _i(a['rp_per_poin']),
-      nilaiPoin: _i(a['nilai_poin']) == 0 ? 100 : _i(a['nilai_poin']),
-      maksPersen: _i(a['maks_persen']) == 0 ? 20 : _i(a['maks_persen']),
-      minTukar: _i(a['min_tukar']) == 0 ? 50 : _i(a['min_tukar']),
-      masaHari: _i(a['masa_hari']) == 0 ? 365 : _i(a['masa_hari']),
+      rpPerPoin: _i(a['rp_per_poin']),
+      nilaiPoin: _i(a['nilai_poin']),
+      maksPersen: _i(a['maks_persen']),
+      minTukar: _i(a['min_tukar']),
+      masaHari: _i(a['masa_hari']),
+      adaAturan: raw is Map,
     );
   }
 }
@@ -1699,6 +1953,94 @@ class PoinBaris {
         note: (j['note'] ?? '').toString(),
         expiresAt: (j['expires_at'] ?? '').toString(),
         createdAt: (j['created_at'] ?? '').toString(),
+      );
+}
+
+/// Voucher belanja (migrasi 035). Satu kelas untuk tiga konteks — daftar
+/// klaim, Voucher Saya, dan penilaian checkout — field yang tak relevan untuk
+/// suatu konteks dibiarkan bawaan. Paritas `Voucher` di `frontend/src/lib/api.ts`.
+class Voucher {
+  final int id;
+  final String code;
+  final String judul;
+  final String deskripsi;
+  final String jenis; // 'ongkir' | 'diskon'
+  final String tipe; // 'nominal' | 'persen'
+  final int nilai;
+  final int maksPotongan;
+  final int minBelanja;
+  final int? kuota;
+  final String mulai;
+  final String berakhir;
+  final String label; // dirakit server, mis. "Gratis Ongkir s/d Rp 20.000"
+  final int? sisaKuota;
+
+  /// Migrasi 036: tanpa klaim — langsung ada di keranjang semua pembeli.
+  final bool otomatis;
+  // daftar klaim
+  final bool diklaim;
+  final bool terpakai;
+  // Voucher Saya
+  final int? klaimId;
+  final String usedOrderCode;
+  final bool berlaku;
+  // penilaian checkout
+  final int potongan;
+  final String alasan;
+  final bool bisa;
+
+  const Voucher({
+    this.id = 0,
+    this.code = '',
+    this.judul = '',
+    this.deskripsi = '',
+    this.jenis = 'diskon',
+    this.tipe = 'nominal',
+    this.nilai = 0,
+    this.maksPotongan = 0,
+    this.minBelanja = 0,
+    this.kuota,
+    this.mulai = '',
+    this.berakhir = '',
+    this.label = '',
+    this.sisaKuota,
+    this.otomatis = false,
+    this.diklaim = false,
+    this.terpakai = false,
+    this.klaimId,
+    this.usedOrderCode = '',
+    this.berlaku = true,
+    this.potongan = 0,
+    this.alasan = '',
+    this.bisa = false,
+  });
+
+  bool get ongkir => jenis == 'ongkir';
+
+  factory Voucher.fromJson(Map<String, dynamic> j) => Voucher(
+        id: _i(j['id']),
+        code: _s(j['code']),
+        judul: _s(j['judul']),
+        deskripsi: _s(j['deskripsi']),
+        jenis: _s(j['jenis'], 'diskon'),
+        tipe: _s(j['tipe'], 'nominal'),
+        nilai: _i(j['nilai']),
+        maksPotongan: _i(j['maks_potongan']),
+        minBelanja: _i(j['min_belanja']),
+        kuota: j['kuota'] == null ? null : _i(j['kuota']),
+        mulai: _s(j['mulai']),
+        berakhir: _s(j['berakhir']),
+        label: _s(j['label']),
+        sisaKuota: j['sisa_kuota'] == null ? null : _i(j['sisa_kuota']),
+        otomatis: j['otomatis'] == true,
+        diklaim: j['diklaim'] == true,
+        terpakai: j['terpakai'] == true,
+        klaimId: j['klaim_id'] == null ? null : _i(j['klaim_id']),
+        usedOrderCode: _s(j['used_order_code']),
+        berlaku: j['berlaku'] != false,
+        potongan: _i(j['potongan']),
+        alasan: _s(j['alasan']),
+        bisa: j['bisa'] == true,
       );
 }
 
@@ -1825,6 +2167,126 @@ class CartGudang {
       items.map((e) => e.gudang).where((g) => g.isNotEmpty).toSet().toList();
 }
 
+// ── Beli Lagi (pola Shopee/Tokopedia) ────────────────────────────────
+
+/// Satu barang yang pernah dibeli, DINILAI ULANG dengan keadaan terkini
+/// (harga tagih, berat, gudang pemenuh, stok) — dari `GET /api/orders/{code}/
+/// beli-lagi` maupun `GET /api/beli-lagi`. Server TIDAK menulis keranjang:
+/// klien yang memasukkan item [bisaDibeli] ke keranjang lokal.
+class BeliLagiItem {
+  final String partNumber;
+  final String name;
+
+  /// Usulan jumlah — sudah DIPANGKAS ke stok tersisa oleh server.
+  final int qty;
+
+  /// Jumlah pada pesanan asal (sebelum dipangkas).
+  final int qtyAsal;
+
+  /// true = [qty] lebih kecil dari [qtyAsal] karena stok tinggal sedikit.
+  final bool qtyDisesuaikan;
+  final int stok;
+
+  /// Harga TERKINI (yang akan ditagih) dan tampilannya ("Rp 600.000").
+  final int harga;
+  final String hargaDisplay;
+
+  /// Harga saat dulu dibeli; [selisihHarga] = harga − hargaLama
+  /// (+ naik / − turun, 0 = sama / tak diketahui).
+  final int hargaLama;
+  final int selisihHarga;
+
+  /// Berat per item (gram).
+  final int berat;
+  final String? foto;
+  final String gudang;
+  final bool bisaDibeli;
+
+  /// 'stok habis' | 'harga belum tersedia' | 'berat belum ditetapkan'
+  final String alasan;
+
+  // ── Khusus riwayat (`/api/beli-lagi`) ──
+  /// Berapa pesanan (lunas) yang memuat part ini.
+  final int kali;
+  final int totalQty;
+  final int qtyTerakhir;
+
+  /// ISO `created_at` pesanan terakhir yang memuat part ini.
+  final String terakhir;
+  final String orderTerakhir;
+
+  const BeliLagiItem({
+    required this.partNumber,
+    this.name = '',
+    this.qty = 1,
+    this.qtyAsal = 1,
+    this.qtyDisesuaikan = false,
+    this.stok = 0,
+    this.harga = 0,
+    this.hargaDisplay = '',
+    this.hargaLama = 0,
+    this.selisihHarga = 0,
+    this.berat = 0,
+    this.foto,
+    this.gudang = '',
+    this.bisaDibeli = false,
+    this.alasan = '',
+    this.kali = 0,
+    this.totalQty = 0,
+    this.qtyTerakhir = 0,
+    this.terakhir = '',
+    this.orderTerakhir = '',
+  });
+
+  factory BeliLagiItem.fromJson(Map<String, dynamic> j) => BeliLagiItem(
+        partNumber: _s(j['part_number']),
+        name: _s(j['name']),
+        qty: _i(j['qty'], 1),
+        qtyAsal: _i(j['qty_asal'], 1),
+        qtyDisesuaikan: _b(j['qty_disesuaikan']),
+        stok: _i(j['stok']),
+        harga: _i(j['harga']),
+        hargaDisplay: _s(j['harga_display']),
+        hargaLama: _i(j['harga_lama']),
+        selisihHarga: _i(j['selisih_harga']),
+        berat: _i(j['berat']),
+        foto: _sOrNull(j['foto']),
+        gudang: _s(j['gudang']),
+        bisaDibeli: _b(j['bisa_dibeli']),
+        alasan: _s(j['alasan']),
+        kali: _i(j['kali']),
+        totalQty: _i(j['total_qty']),
+        qtyTerakhir: _i(j['qty_terakhir']),
+        terakhir: _s(j['terakhir']),
+        orderTerakhir: _s(j['order_terakhir']),
+      );
+
+  /// Nama untuk dibaca pembeli — PN bila nama kosong.
+  String get judul => name.trim().isNotEmpty ? name.trim() : partNumber;
+}
+
+/// Isi satu pesanan untuk tombol "Beli Lagi" (`/api/orders/{code}/beli-lagi`).
+class BeliLagiPesanan {
+  final String orderCode;
+  final int bisa;
+  final int takBisa;
+  final List<BeliLagiItem> items;
+
+  const BeliLagiPesanan({
+    this.orderCode = '',
+    this.bisa = 0,
+    this.takBisa = 0,
+    this.items = const [],
+  });
+
+  factory BeliLagiPesanan.fromJson(Map<String, dynamic> j) => BeliLagiPesanan(
+        orderCode: _s(j['order_code']),
+        bisa: _i(j['bisa']),
+        takBisa: _i(j['tak_bisa']),
+        items: _list(j['items'], BeliLagiItem.fromJson),
+      );
+}
+
 class GeoPlace {
   final double lat;
   final double lon;
@@ -1880,6 +2342,11 @@ class TokoProduct {
   final int stok;
   final String gudang;
 
+  /// Baris kartu ala Shopee: ★ rata-rata · jumlah penilaian · terjual.
+  final double rating;
+  final int ulasan;
+  final int terjual;
+
   const TokoProduct({
     required this.partNumber,
     this.name = '',
@@ -1891,6 +2358,9 @@ class TokoProduct {
     this.ready = false,
     this.stok = 0,
     this.gudang = '',
+    this.rating = 0,
+    this.ulasan = 0,
+    this.terjual = 0,
   });
 
   factory TokoProduct.fromJson(Map<String, dynamic> j) => TokoProduct(
@@ -1904,6 +2374,9 @@ class TokoProduct {
         ready: _b(j['ready']),
         stok: _i(j['stok']),
         gudang: _s(j['gudang']),
+        rating: _d(j['rating']),
+        ulasan: _i(j['ulasan']),
+        terjual: _i(j['terjual']),
       );
 }
 
@@ -3883,5 +4356,627 @@ class RakInfo {
         fotoUrl: fotoUrl ?? this.fotoUrl,
         updatedBy: updatedBy,
         updatedAt: updatedAt,
+      );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Penilaian pembeli ala Shopee/Tokopedia (migrasi 038) — paritas web
+// `frontend/src/lib/api.ts` (Penilaian, ReviewConfig, ProdukUlasan).
+// ══════════════════════════════════════════════════════════════════════
+
+class UlasanProdukRow {
+  final int id;
+  final String partNumber;
+  final String name;
+  final int rating;
+  final List<String> tags;
+  final String komentar;
+  final List<String> foto;
+  final bool anonim;
+  final String? balasan;
+
+  const UlasanProdukRow({
+    required this.id,
+    this.partNumber = '',
+    this.name = '',
+    this.rating = 0,
+    this.tags = const [],
+    this.komentar = '',
+    this.foto = const [],
+    this.anonim = false,
+    this.balasan,
+  });
+
+  factory UlasanProdukRow.fromJson(Map<String, dynamic> j) => UlasanProdukRow(
+        id: _i(j['id']),
+        partNumber: _s(j['part_number']),
+        name: _s(j['name']),
+        rating: _i(j['rating']),
+        tags: _strList(j['tags']),
+        komentar: _s(j['komentar']),
+        foto: _strList(j['foto']),
+        anonim: _b(j['anonim']),
+        balasan: (j['balasan'] == null || '${j['balasan']}'.isEmpty)
+            ? null
+            : '${j['balasan']}',
+      );
+}
+
+class PenilaianLayanan {
+  final int ratingLayanan;
+  final int? ratingKirim; // null = ambil sendiri
+  final bool anonim;
+  final bool diubah;
+
+  const PenilaianLayanan({
+    this.ratingLayanan = 0,
+    this.ratingKirim,
+    this.anonim = false,
+    this.diubah = false,
+  });
+
+  factory PenilaianLayanan.fromJson(Map<String, dynamic> j) => PenilaianLayanan(
+        ratingLayanan: _i(j['rating_layanan']),
+        ratingKirim: j['rating_kirim'] == null ? null : _i(j['rating_kirim']),
+        anonim: _b(j['anonim']),
+        diubah: _b(j['diubah']),
+      );
+}
+
+class Penilaian {
+  final bool aktif;
+  final bool sudah;
+  final bool bisaNilai;
+  final bool bisaUbah;
+  final String? batas;
+  final PenilaianLayanan? layanan;
+  final List<UlasanProdukRow> produk;
+
+  const Penilaian({
+    this.aktif = false,
+    this.sudah = false,
+    this.bisaNilai = false,
+    this.bisaUbah = false,
+    this.batas,
+    this.layanan,
+    this.produk = const [],
+  });
+
+  factory Penilaian.fromJson(Map<String, dynamic> j) => Penilaian(
+        aktif: _b(j['aktif']),
+        sudah: _b(j['sudah']),
+        bisaNilai: _b(j['bisa_nilai']),
+        bisaUbah: _b(j['bisa_ubah']),
+        batas: _sOrNull(j['batas']),
+        layanan: j['layanan'] is Map
+            ? PenilaianLayanan.fromJson((j['layanan'] as Map).cast<String, dynamic>())
+            : null,
+        produk: _list(j['produk'], UlasanProdukRow.fromJson),
+      );
+}
+
+class ReviewConfig {
+  final Map<String, String> label;
+  final List<String> tagPositif;
+  final List<String> tagNegatif;
+  final int maksFoto;
+  final int maksKomentar;
+  final int batasHari;
+
+  const ReviewConfig({
+    this.label = const {},
+    this.tagPositif = const [],
+    this.tagNegatif = const [],
+    this.maksFoto = 5,
+    this.maksKomentar = 1000,
+    this.batasHari = 30,
+  });
+
+  factory ReviewConfig.fromJson(Map<String, dynamic> j) => ReviewConfig(
+        label: _strMap(j['label']),
+        tagPositif: _strList(j['tag_positif']),
+        tagNegatif: _strList(j['tag_negatif']),
+        maksFoto: _i(j['maks_foto'], 5),
+        maksKomentar: _i(j['maks_komentar'], 1000),
+        batasHari: _i(j['batas_hari'], 30),
+      );
+
+  String labelBintang(int n) => label['$n'] ?? '';
+}
+
+class UlasanPublik {
+  final int id;
+  final String nama;
+  final int rating;
+  final List<String> tags;
+  final String komentar;
+  final List<String> foto;
+  final String createdAt;
+  final bool diubah;
+  final String? balasan;
+
+  const UlasanPublik({
+    required this.id,
+    this.nama = '',
+    this.rating = 0,
+    this.tags = const [],
+    this.komentar = '',
+    this.foto = const [],
+    this.createdAt = '',
+    this.diubah = false,
+    this.balasan,
+  });
+
+  factory UlasanPublik.fromJson(Map<String, dynamic> j) => UlasanPublik(
+        id: _i(j['id']),
+        nama: _s(j['nama']),
+        rating: _i(j['rating']),
+        tags: _strList(j['tags']),
+        komentar: _s(j['komentar']),
+        foto: _strList(j['foto']),
+        createdAt: _s(j['created_at']),
+        diubah: _b(j['diubah']),
+        balasan: (j['balasan'] == null || '${j['balasan']}'.isEmpty)
+            ? null
+            : '${j['balasan']}',
+      );
+}
+
+class ProdukUlasan {
+  final double rata;
+  final int jumlah;
+  final Map<String, int> distribusi;
+  final int denganFoto;
+  final int denganKomentar;
+  final List<UlasanPublik> ulasan;
+  final int page;
+  final bool adaLagi;
+
+  const ProdukUlasan({
+    this.rata = 0,
+    this.jumlah = 0,
+    this.distribusi = const {},
+    this.denganFoto = 0,
+    this.denganKomentar = 0,
+    this.ulasan = const [],
+    this.page = 1,
+    this.adaLagi = false,
+  });
+
+  factory ProdukUlasan.fromJson(Map<String, dynamic> j) => ProdukUlasan(
+        rata: _d(j['rata']),
+        jumlah: _i(j['jumlah']),
+        distribusi: (j['distribusi'] as Map?)
+                ?.map((k, v) => MapEntry('$k', _i(v))) ??
+            const {},
+        denganFoto: _i(j['dengan_foto']),
+        denganKomentar: _i(j['dengan_komentar']),
+        ulasan: _list(j['ulasan'], UlasanPublik.fromJson),
+        page: _i(j['page'], 1),
+        adaLagi: _b(j['ada_lagi']),
+      );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Return / pengembalian barang (migrasi 039) — cerminan tipe Retur* di api.ts
+// ══════════════════════════════════════════════════════════════════════
+
+/// Status akhir return — tak ada lagi yang bisa dikerjakan.
+const Set<String> kReturAkhir = {'selesai', 'ditolak', 'dibatalkan'};
+
+String? _kosongNull(dynamic v) =>
+    (v == null || v.toString().trim().isEmpty) ? null : v.toString();
+
+class ReturAlasan {
+  final String kode;
+  final String label;
+  final bool fotoWajib;
+
+  /// Label isian tambahan (mis. "Jenis kerusakan"). '' = tak ada isian.
+  final String detail;
+
+  /// Alasan ini butuh isian Part Number dipesan vs diterima.
+  final bool pn;
+  final bool deskripsiWajib;
+
+  const ReturAlasan({
+    required this.kode,
+    this.label = '',
+    this.fotoWajib = false,
+    this.detail = '',
+    this.pn = false,
+    this.deskripsiWajib = false,
+  });
+
+  factory ReturAlasan.fromJson(Map<String, dynamic> j) => ReturAlasan(
+        kode: _s(j['kode']),
+        label: _s(j['label']),
+        fotoWajib: _b(j['foto_wajib']),
+        detail: _s(j['detail']),
+        pn: _b(j['pn']),
+        deskripsiWajib: _b(j['deskripsi_wajib']),
+      );
+}
+
+class ReturSolusi {
+  final String kode;
+  final String label;
+  final String ket;
+  const ReturSolusi({required this.kode, this.label = '', this.ket = ''});
+
+  factory ReturSolusi.fromJson(Map<String, dynamic> j) => ReturSolusi(
+        kode: _s(j['kode']),
+        label: _s(j['label']),
+        ket: _s(j['ket']),
+      );
+}
+
+class ReturConfig {
+  final List<ReturAlasan> alasan;
+  final List<String> jenisRusak;
+  final List<ReturSolusi> solusi;
+  final Map<String, String> status;
+  final List<String> langkah;
+  final List<String> videoExt;
+  final int batasHari;
+  final int maksVideoMb;
+  final int durasiMinDetik;
+  final int maksFoto;
+
+  const ReturConfig({
+    this.alasan = const [],
+    this.jenisRusak = const [],
+    this.solusi = const [],
+    this.status = const {},
+    this.langkah = const [],
+    this.videoExt = const ['m4v', 'mov', 'mp4'],
+    this.batasHari = 7,
+    this.maksVideoMb = 50,
+    this.durasiMinDetik = 10,
+    this.maksFoto = 8,
+  });
+
+  factory ReturConfig.fromJson(Map<String, dynamic> j) {
+    final ext = _strList(j['video_ext']).map((e) => e.toLowerCase()).toList();
+    return ReturConfig(
+      alasan: _list(j['alasan'], ReturAlasan.fromJson),
+      jenisRusak: _strList(j['jenis_rusak']),
+      solusi: _list(j['solusi'], ReturSolusi.fromJson),
+      status: _strMap(j['status']),
+      langkah: _strList(j['langkah']),
+      videoExt: ext.isEmpty ? const ['m4v', 'mov', 'mp4'] : ext,
+      batasHari: _i(j['batas_hari'], 7),
+      maksVideoMb: _i(j['maks_video_mb'], 50),
+      durasiMinDetik: _i(j['durasi_min_detik'], 10),
+      maksFoto: _i(j['maks_foto'], 8),
+    );
+  }
+}
+
+/// Ringkasan satu pengajuan return (daftar & detail pesanan).
+class ReturRingkas {
+  final String returnCode;
+  final String orderCode;
+  final String username;
+  final String gudang;
+  final String partNumber;
+  final String name;
+  final int qty;
+  final String reason;
+  final String reasonLabel;
+  final String requestedResolution;
+  final String? resolution;
+  final String status;
+  final String statusLabel;
+  final bool perluPeriksa;
+  final int jumlahPeringatan;
+  final String submittedAt;
+  final String updatedAt;
+
+  const ReturRingkas({
+    required this.returnCode,
+    this.orderCode = '',
+    this.username = '',
+    this.gudang = '',
+    this.partNumber = '',
+    this.name = '',
+    this.qty = 0,
+    this.reason = '',
+    this.reasonLabel = '',
+    this.requestedResolution = '',
+    this.resolution,
+    this.status = '',
+    this.statusLabel = '',
+    this.perluPeriksa = false,
+    this.jumlahPeringatan = 0,
+    this.submittedAt = '',
+    this.updatedAt = '',
+  });
+
+  factory ReturRingkas.fromJson(Map<String, dynamic> j) => ReturRingkas(
+        returnCode: _s(j['return_code']),
+        orderCode: _s(j['order_code']),
+        username: _s(j['username']),
+        gudang: _s(j['gudang']),
+        partNumber: _s(j['part_number']),
+        name: _s(j['name']),
+        qty: _i(j['qty']),
+        reason: _s(j['reason']),
+        reasonLabel: _s(j['reason_label'], _s(j['reason'])),
+        requestedResolution: _s(j['requested_resolution']),
+        resolution: _kosongNull(j['resolution']),
+        status: _s(j['status']),
+        statusLabel: _s(j['status_label'], _s(j['status'])),
+        perluPeriksa: _b(j['perlu_periksa']),
+        jumlahPeringatan: _i(j['jumlah_peringatan']),
+        submittedAt: _s(j['submitted_at']),
+        updatedAt: _s(j['updated_at']),
+      );
+
+  /// Sudah di status akhir (selesai / ditolak / dibatalkan).
+  bool get tamat => kReturAkhir.contains(status);
+}
+
+class ReturPesananItem {
+  final String partNumber;
+  final bool bisa;
+  final ReturRingkas? retur;
+  const ReturPesananItem({required this.partNumber, this.bisa = false, this.retur});
+
+  factory ReturPesananItem.fromJson(Map<String, dynamic> j) => ReturPesananItem(
+        partNumber: _s(j['part_number']),
+        bisa: _b(j['bisa']),
+        retur: j['retur'] is Map
+            ? ReturRingkas.fromJson((j['retur'] as Map).cast<String, dynamic>())
+            : null,
+      );
+}
+
+/// Field `retur` di detail pesanan: boleh/tidak per barang + return yang ada.
+class ReturPesanan {
+  final bool aktif;
+  final bool bisa;
+  final String alasanTidak;
+  final String? batas;
+  final int batasHari;
+  final List<ReturPesananItem> items;
+  final List<ReturRingkas> returns;
+
+  const ReturPesanan({
+    this.aktif = false,
+    this.bisa = false,
+    this.alasanTidak = '',
+    this.batas,
+    this.batasHari = 7,
+    this.items = const [],
+    this.returns = const [],
+  });
+
+  factory ReturPesanan.fromJson(Map<String, dynamic> j) => ReturPesanan(
+        aktif: _b(j['aktif']),
+        bisa: _b(j['bisa']),
+        alasanTidak: _s(j['alasan_tidak']),
+        batas: _kosongNull(j['batas']),
+        batasHari: _i(j['batas_hari'], 7),
+        items: _list(j['items'], ReturPesananItem.fromJson),
+        returns: _list(j['returns'], ReturRingkas.fromJson),
+      );
+}
+
+class ReturPeringatan {
+  final String kode;
+  final String level; // warn | info
+  final String pesan;
+  const ReturPeringatan({this.kode = '', this.level = 'info', this.pesan = ''});
+
+  factory ReturPeringatan.fromJson(Map<String, dynamic> j) => ReturPeringatan(
+        kode: _s(j['kode']),
+        level: _s(j['level'], 'info'),
+        pesan: _s(j['pesan']),
+      );
+}
+
+class ReturRiwayat {
+  final String? oldStatus;
+  final String newStatus;
+  final String label;
+  final String changedBy;
+  final String? note;
+  final String createdAt;
+
+  const ReturRiwayat({
+    this.oldStatus,
+    this.newStatus = '',
+    this.label = '',
+    this.changedBy = '',
+    this.note,
+    this.createdAt = '',
+  });
+
+  factory ReturRiwayat.fromJson(Map<String, dynamic> j) => ReturRiwayat(
+        oldStatus: _kosongNull(j['old_status']),
+        newStatus: _s(j['new_status']),
+        label: _s(j['label'], _s(j['new_status'])),
+        changedBy: _s(j['changed_by']),
+        note: _kosongNull(j['note']),
+        createdAt: _s(j['created_at']),
+      );
+}
+
+/// Metadata video unboxing (durasi detik, ukuran byte, waktu file, nama file).
+class ReturVideoMeta {
+  final double? durasi;
+  final int? ukuran;
+  final String? direkamAt;
+  final String? nama;
+  const ReturVideoMeta({this.durasi, this.ukuran, this.direkamAt, this.nama});
+
+  factory ReturVideoMeta.fromJson(Map<String, dynamic> j) => ReturVideoMeta(
+        durasi: _dOrNull(j['durasi']),
+        ukuran: _iOrNull(j['ukuran']),
+        direkamAt: _kosongNull(j['direkam_at']),
+        nama: _kosongNull(j['nama']),
+      );
+}
+
+class ReturDetail extends ReturRingkas {
+  final int id;
+  final double price;
+  final String reasonDetail;
+  final String? pnDipesan;
+  final String? pnDiterima;
+  final String description;
+  final String unboxingVideoUrl;
+  final List<String> extraVideoUrls;
+  final ReturVideoMeta videoMeta;
+  final List<String> evidencePhotoUrls;
+  final List<ReturPeringatan> peringatan;
+  final String? adminNote;
+  final String? rejectionReason;
+  final String? requestNote;
+  final String? returnCourier;
+  final String? returnTrackingNo;
+  final int? refundAmount;
+  final String? replacementTrackingNo;
+  final String? verifiedAt;
+  final String? completedAt;
+  final String solusiLabel;
+  final String requestedLabel;
+  final List<ReturRiwayat> riwayat;
+  final List<String> langkah;
+  final int langkahKe;
+  final bool bisaBatal;
+  final String tujuanGudang;
+  final String tujuanPic;
+
+  const ReturDetail({
+    required super.returnCode,
+    super.orderCode,
+    super.username,
+    super.gudang,
+    super.partNumber,
+    super.name,
+    super.qty,
+    super.reason,
+    super.reasonLabel,
+    super.requestedResolution,
+    super.resolution,
+    super.status,
+    super.statusLabel,
+    super.perluPeriksa,
+    super.jumlahPeringatan,
+    super.submittedAt,
+    super.updatedAt,
+    this.id = 0,
+    this.price = 0,
+    this.reasonDetail = '',
+    this.pnDipesan,
+    this.pnDiterima,
+    this.description = '',
+    this.unboxingVideoUrl = '',
+    this.extraVideoUrls = const [],
+    this.videoMeta = const ReturVideoMeta(),
+    this.evidencePhotoUrls = const [],
+    this.peringatan = const [],
+    this.adminNote,
+    this.rejectionReason,
+    this.requestNote,
+    this.returnCourier,
+    this.returnTrackingNo,
+    this.refundAmount,
+    this.replacementTrackingNo,
+    this.verifiedAt,
+    this.completedAt,
+    this.solusiLabel = '',
+    this.requestedLabel = '',
+    this.riwayat = const [],
+    this.langkah = const [],
+    this.langkahKe = 0,
+    this.bisaBatal = false,
+    this.tujuanGudang = '',
+    this.tujuanPic = '',
+  });
+
+  factory ReturDetail.fromJson(Map<String, dynamic> j) {
+    final r = ReturRingkas.fromJson(j);
+    final tujuan = (j['tujuan_retur'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+    return ReturDetail(
+      returnCode: r.returnCode,
+      orderCode: r.orderCode,
+      username: r.username,
+      gudang: r.gudang,
+      partNumber: r.partNumber,
+      name: r.name,
+      qty: r.qty,
+      reason: r.reason,
+      reasonLabel: r.reasonLabel,
+      requestedResolution: r.requestedResolution,
+      resolution: r.resolution,
+      status: r.status,
+      statusLabel: r.statusLabel,
+      perluPeriksa: r.perluPeriksa,
+      jumlahPeringatan: r.jumlahPeringatan,
+      submittedAt: r.submittedAt,
+      updatedAt: r.updatedAt,
+      id: _i(j['id']),
+      price: _d(j['price']),
+      reasonDetail: _s(j['reason_detail']),
+      pnDipesan: _kosongNull(j['pn_dipesan']),
+      pnDiterima: _kosongNull(j['pn_diterima']),
+      description: _s(j['description']),
+      unboxingVideoUrl: _s(j['unboxing_video_url']),
+      extraVideoUrls: _strList(j['extra_video_urls']),
+      videoMeta: j['video_meta'] is Map
+          ? ReturVideoMeta.fromJson((j['video_meta'] as Map).cast<String, dynamic>())
+          : const ReturVideoMeta(),
+      evidencePhotoUrls: _strList(j['evidence_photo_urls']),
+      peringatan: _list(j['peringatan'], ReturPeringatan.fromJson),
+      adminNote: _kosongNull(j['admin_note']),
+      rejectionReason: _kosongNull(j['rejection_reason']),
+      requestNote: _kosongNull(j['request_note']),
+      returnCourier: _kosongNull(j['return_courier']),
+      returnTrackingNo: _kosongNull(j['return_tracking_no']),
+      refundAmount: _iOrNull(j['refund_amount']),
+      replacementTrackingNo: _kosongNull(j['replacement_tracking_no']),
+      verifiedAt: _kosongNull(j['verified_at']),
+      completedAt: _kosongNull(j['completed_at']),
+      solusiLabel: _s(j['solusi_label']),
+      requestedLabel: _s(j['requested_label']),
+      riwayat: _list(j['riwayat'], ReturRiwayat.fromJson),
+      langkah: _strList(j['langkah']),
+      langkahKe: _i(j['langkah_ke']),
+      bisaBatal: _b(j['bisa_batal']),
+      tujuanGudang: _s(tujuan['gudang']),
+      tujuanPic: _s(tujuan['pic']),
+    );
+  }
+}
+
+/// Satu notifikasi lonceng (tabel user_notifications, migrasi 039).
+class Notifikasi {
+  final int id;
+  final String judul;
+  final String isi;
+  final String? tautan;
+  final bool dibaca;
+  final String createdAt;
+
+  const Notifikasi({
+    required this.id,
+    this.judul = '',
+    this.isi = '',
+    this.tautan,
+    this.dibaca = false,
+    this.createdAt = '',
+  });
+
+  factory Notifikasi.fromJson(Map<String, dynamic> j) => Notifikasi(
+        id: _i(j['id']),
+        judul: _s(j['judul']),
+        isi: _s(j['isi']),
+        tautan: _kosongNull(j['tautan']),
+        dibaca: _b(j['dibaca']),
+        createdAt: _s(j['created_at']),
       );
 }

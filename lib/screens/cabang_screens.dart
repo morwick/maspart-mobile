@@ -15,14 +15,20 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api_service.dart';
+import '../gudang_docs_pdf.dart';
+import '../invoice_pdf.dart';
 import '../app/nav.dart';
 import '../order_ui.dart';
 import '../theme/mas_theme.dart';
 import '../utils.dart';
 import '../widgets/mas_ui.dart';
+import '../widgets/chat_thread.dart';
 import '../widgets/order_chat.dart';
+import '../widgets/penilaian.dart';
+import '../widgets/retur_ui.dart';
 
 // ══════════════════════════════════════════════════════════════════════
 // Helper bersama
@@ -349,7 +355,39 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
   bool _busy = false;
   String? _error;
 
+  /// Centang KERJA per langkah (accurate/ambil/kemas) — pengingat di perangkat
+  /// ini saja, bukan status resmi (paritas web ProsesGudang: localStorage).
+  Map<String, bool> _centang = {};
+
   String get _code => '${widget.args['order_code'] ?? ''}';
+  String get _kunciCentang => 'maspart.proses.$_code';
+
+  Future<void> _muatCentang() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getStringList(_kunciCentang) ?? const [];
+      if (mounted) setState(() => _centang = {for (final k in raw) k: true});
+    } catch (_) {/* penyimpanan gagal → centang hanya di layar ini */}
+  }
+
+  Future<void> _toggle(String k) async {
+    setState(() => _centang = {..._centang, k: !(_centang[k] ?? false)});
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(
+          _kunciCentang, [for (final e in _centang.entries) if (e.value) e.key]);
+    } catch (_) {}
+  }
+
+  Future<void> _dok(Future<void> Function(OrderDetail) buat) async {
+    final o = _order;
+    if (o == null) return;
+    try {
+      await buat(o);
+    } catch (e) {
+      if (mounted) AppNav.of(context).toast('$e'.replaceFirst('Exception: ', ''));
+    }
+  }
 
   @override
   void initState() {
@@ -359,6 +397,7 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
 
   Future<void> _load() async {
     try {
+      if (_centang.isEmpty) unawaited(_muatCentang());
       final o = await ApiService.branchOrder(_code);
       if (!mounted) return;
       setState(() {
@@ -435,9 +474,10 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
                   // di Accurate harus diproses lebih dulu.
                   _alert(
                     m,
-                    'Proses penawaran di Accurate dulu. Begitu ditandai dikirim, '
-                    'tahanan stok aplikasi dilepas dan stok mengikuti Accurate.',
-                    tone: MasPillTone.warn,
+                    'Setor paket ke gerai ${kurir.isEmpty ? 'ekspedisi' : kurir} '
+                    '(jangan ganti layanan: ongkir sudah dibayar pembeli), minta '
+                    'tanda tangan kurir di surat jalan, lalu ketik nomor resi.',
+                    tone: MasPillTone.info,
                   ),
                   const SizedBox(height: 12),
                   Text(
@@ -478,6 +518,18 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
     final next = _nextStatus(o.status);
     if (next == null) return;
 
+    // Tahanan stok aplikasi dilepas saat 'dikirim' → stok ikut Accurate. Kalau
+    // Pengiriman Pesanan belum dibuat di Accurate, barang bisa terjual dua kali.
+    if (next == 'dikirim' && !(_centang['accurate'] ?? false)) {
+      final lanjut = await _confirm(
+        'Langkah Accurate belum dicentang',
+        'Saat pesanan ditandai ${o.pickup ? 'siap diambil' : 'dikirim'}, tahanan '
+            'stok aplikasi dilepas dan stok mengikuti Accurate — kalau Pengiriman '
+            'Pesanan belum dibuat di Accurate, stok bisa terjual dua kali. Lanjutkan?',
+      );
+      if (lanjut != true) return;
+    }
+
     // Pesanan ambil sendiri tak punya kurir & tak akan pernah punya resi —
     // jangan minta nomor yang tak ada.
     if (next == 'dikirim' && !o.pickup) {
@@ -496,14 +548,89 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
     await _setStatus(next);
   }
 
-  Future<void> _batalkan() async {
-    final ok = await _confirm(
-      'Batalkan pesanan',
-      'Batalkan pesanan $_code? Pembeli akan melihat pesanannya dibatalkan '
-          'dan dana yang sudah masuk perlu dikembalikan manual.',
+  /// Pengganti tombol batal: pesanan yang sampai ke gudang sudah LUNAS, jadi
+  /// batal = refund = keputusan admin. Gudang melaporkan kendalanya saja.
+  Future<void> _laporKendala() async {
+    List<(String, String)> opsi;
+    try {
+      opsi = await ApiService.branchKendalaAlasan();
+    } on ApiException catch (e) {
+      if (mounted) AppNav.of(context).toast(e.message);
+      return;
+    }
+    if (opsi.isEmpty || !mounted) return;
+    var alasan = opsi.first.$1;
+    final ctl = TextEditingController();
+    final kirim = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          final m = ctx.mas;
+          return AlertDialog(
+            title: const Text('Laporkan kendala ke admin',
+                style: TextStyle(fontSize: 16)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Pesanan ini sudah dibayar pembeli, jadi gudang tidak bisa '
+                    'membatalkannya. Admin yang memutuskan lanjut atau batal '
+                    '(dan mengurus pengembalian dana).',
+                    style: TextStyle(fontSize: 12.5, color: m.ink600, height: 1.45),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(spacing: 6, runSpacing: 6, children: [
+                    for (final a in opsi)
+                      ChoiceChip(
+                        label: Text(a.$2, style: const TextStyle(fontSize: 12.5)),
+                        selected: alasan == a.$1,
+                        onSelected: (_) => setLocal(() => alasan = a.$1),
+                      ),
+                  ]),
+                  const SizedBox(height: 6),
+                  MasInput(
+                    controller: ctl,
+                    hint: 'Keterangan, mis. stok fisik tinggal 1 dari 4',
+                    height: 40,
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Batal')),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Kirim ke admin')),
+            ],
+          );
+        },
+      ),
     );
-    if (ok != true) return;
-    await _setStatus('batal');
+    final catatan = ctl.text.trim();
+    ctl.dispose();
+    if (kirim != true) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final tersimpan =
+          await ApiService.reportBranchKendala(_code, alasan, catatan);
+      if (mounted) {
+        AppNav.of(context).toast(tersimpan
+            ? 'Terkirim ke admin. Tunggu keputusan admin — jangan kirim dulu.'
+            : 'Terkirim ke admin lewat Telegram (belum tersimpan di pesanan).');
+      }
+      await _load();
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   void _copy(String text, String label) {
@@ -559,6 +686,21 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
           _aksi(m, o),
           const SizedBox(height: 14),
 
+          if (o.status == 'selesai' && o.penilaian != null) ...[
+            PenilaianPesananCard(
+              order: o,
+              peran: PeranPenilaian.gudang,
+              onChange: _load,
+            ),
+            const SizedBox(height: 14),
+          ],
+
+          // Return pada pesanan ini → Return Masuk (terima / periksa).
+          if ((o.retur?.returns.length ?? 0) > 0) ...[
+            ReturPesananCard(order: o, peran: PeranRetur.gudang),
+            const SizedBox(height: 14),
+          ],
+
           OrderChat(
             title: 'Chat dengan Pembeli ${o.username}',
             me: nav.username,
@@ -608,6 +750,14 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
                     const SizedBox(height: 2),
                     Text('${formatRupiah(it.price)} × ${it.qty}',
                         style: TextStyle(fontSize: 11.5, color: m.ink500)),
+                    const SizedBox(height: 2),
+                    Text(it.rak.isEmpty ? 'Rak: belum dicatat' : 'Rak ${it.rak}',
+                        style: it.rak.isEmpty
+                            ? TextStyle(fontSize: 11.5, color: m.ink400)
+                            : masMono(
+                                size: 11.5,
+                                weight: FontWeight.w700,
+                                color: m.brand700)),
                   ],
                 ),
               ),
@@ -627,9 +777,17 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
             const SizedBox(height: 5),
             _sumRow(
               m,
-              'Ongkir${_kurirLabel(o).isNotEmpty ? ' (${_kurirLabel(o)})' : ''}',
-              o.shippingCost > 0 ? formatRupiah(o.shippingCost) : '—',
+              o.pickup
+                  ? 'Ongkir (ambil di toko)'
+                  : 'Ongkir${_kurirLabel(o).isNotEmpty ? ' (${_kurirLabel(o)})' : ''}',
+              o.pickup
+                  ? 'Gratis'
+                  : o.shippingCost > 0
+                      ? formatRupiah(o.shippingCost)
+                      : '—',
             ),
+            // Potongan voucher/poin + kode voucher — paritas web OrderPotongan.
+            OrderPotongan(order: o),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 9),
               child: Divider(height: 1, color: m.ink150),
@@ -785,88 +943,307 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
     );
   }
 
+  /// Panel kerja gudang pemenuh — paritas web `components/ProsesGudang.tsx`:
+  /// 5 langkah dari pesanan lunas sampai selesai + dokumen tiap langkah.
   Widget _aksi(MasColors m, OrderDetail o) {
-    final next = _nextStatus(o.status);
-    final belumBayar =
-        ['menunggu_pembayaran', 'menunggu_verifikasi'].contains(o.status);
+    final lunas = ['diproses', 'dikirim', 'selesai'].contains(o.status);
+    final pickup = o.pickup;
+    final c = _centang;
+
+    Widget body;
+    if (o.status == 'batal') {
+      body = _alert(m,
+          'Pesanan dibatalkan admin. Kembalikan barang yang sudah diambil ke raknya.');
+    } else if (!lunas) {
+      body = _alert(
+        m,
+        'Menunggu pembayaran pembeli. Jangan ambil atau kemas barang dulu — '
+        'langkah proses muncul otomatis setelah lunas.',
+        tone: MasPillTone.info,
+      );
+    } else {
+      final tahap = o.status == 'diproses'
+          ? 4
+          : o.status == 'dikirim'
+              ? 5
+              : 6;
+      final tanpaRak = o.items.where((it) => it.rak.trim().isEmpty).length;
+      final kurir = _kurirLabel(o);
+      final ket = TextStyle(fontSize: 12, color: m.ink600, height: 1.45);
+
+      body = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        _Langkah(
+          no: 1,
+          judul: 'Proses di Accurate',
+          selesai: tahap > 4 || (c['accurate'] ?? false),
+          children: [
+            _penawaranInfo(m, o),
+            Text(
+              '1. Buka Penawaran → jadikan Pesanan Penjualan.\n'
+              '2. Buat Pengiriman Pesanan dari gudang '
+              '${o.gudangFisik.isNotEmpty ? o.gudangFisik : o.gudang} — di sinilah '
+              'stok Accurate terpotong.\n'
+              '3. Buat Faktur Penjualan (pembayaran online sudah lunas).',
+              style: ket,
+            ),
+            if (tahap == 4)
+              _centangBaris(m, 'accurate', 'Sudah diproses di Accurate'),
+          ],
+        ),
+        _Langkah(
+          no: 2,
+          judul: 'Ambil barang dari rak',
+          selesai: tahap > 4 || (c['ambil'] ?? false),
+          children: [
+            Text(
+              'Cetak daftar ambil (urut per rak), ambil & cocokkan PN + qty.'
+              '${tanpaRak > 0 ? ' $tanpaRak barang belum punya lokasi rak.' : ''}',
+              style: ket,
+            ),
+            _tombolDok('📋 Daftar Ambil Barang', () => _dok(downloadDaftarAmbil)),
+            if (tahap == 4)
+              _centangBaris(m, 'ambil', 'Barang lengkap & sudah dicek'),
+          ],
+        ),
+        _Langkah(
+          no: 3,
+          judul: pickup ? 'Siapkan di konter' : 'Kemas paket',
+          selesai: tahap > 4 || (c['kemas'] ?? false),
+          children: [
+            Text(
+              pickup
+                  ? 'Siapkan barang + invoice di konter. Tanda terima '
+                      'ditandatangani pembeli saat mengambil.'
+                  : 'Masukkan surat jalan & invoice ke dalam paket, tempel label '
+                      'paket di luar dus.',
+              style: ket,
+            ),
+            Wrap(spacing: 6, runSpacing: 6, children: [
+              _tombolDok(pickup ? '✍️ Tanda Terima' : '📄 Surat Jalan',
+                  () => _dok(downloadSuratJalan)),
+              if (!pickup)
+                _tombolDok('🏷️ Label Paket', () => _dok(downloadLabelPaket)),
+              _tombolDok('🧾 Invoice', () => _dok(downloadInvoicePdf)),
+            ]),
+            if (tahap == 4)
+              _centangBaris(m, 'kemas',
+                  pickup ? 'Barang siap di konter' : 'Paket sudah dikemas'),
+          ],
+        ),
+        _Langkah(
+          no: 4,
+          judul: pickup ? 'Kabari pembeli' : 'Setor ke ekspedisi & isi resi',
+          selesai: tahap > 4,
+          aktif: tahap == 4,
+          children: [
+            if (tahap == 4) ...[
+              Text(
+                pickup
+                    ? 'Tandai siap diambil — pembeli mendapat kabar. Jangan dikirim.'
+                    : 'Setor paket ke gerai ${kurir.isEmpty ? 'ekspedisi' : kurir}, '
+                        'lalu tandai dikirim dan ketik nomor resinya.',
+                style: ket,
+              ),
+              MasButton(
+                label: _busy
+                    ? 'Memproses…'
+                    : (pickup ? '🏬 Tandai Siap Diambil' : '🚚 Tandai Dikirim'),
+                expand: true,
+                loading: _busy,
+                onTap: _busy ? null : () => _lanjutkan(o),
+              ),
+            ] else
+              Text(
+                pickup
+                    ? 'Pembeli sudah dikabari.'
+                    : 'Resi: ${(o.trackingNo ?? '').isNotEmpty ? o.trackingNo : '— (tanpa resi)'}',
+                style: ket,
+              ),
+          ],
+        ),
+        _Langkah(
+          no: 5,
+          judul: pickup ? 'Serahkan & selesai' : 'Barang diterima',
+          selesai: tahap > 5,
+          aktif: tahap == 5,
+          akhir: true,
+          children: [
+            if (tahap == 5) ...[
+              Text(
+                pickup
+                    ? 'Saat pembeli datang: cocokkan nama dengan pesanan, minta '
+                        'tanda tangan di Tanda Terima, serahkan barang, lalu '
+                        'tandai selesai.'
+                    : 'Pantau resi. Pembeli bisa konfirmasi sendiri; tandai '
+                        'selesai setelah barang terbukti diterima.',
+                style: ket,
+              ),
+              MasButton(
+                label: _busy ? 'Memproses…' : '✓ Tandai Selesai',
+                expand: true,
+                loading: _busy,
+                onTap: _busy ? null : () => _lanjutkan(o),
+              ),
+            ],
+            if (tahap > 5)
+              _alert(
+                  m,
+                  'Pesanan selesai. Simpan surat jalan / tanda terima yang sudah '
+                  'ditandatangani.',
+                  tone: MasPillTone.brand),
+          ],
+        ),
+        // Gudang TIDAK membatalkan: pesanan lunas → batal = refund = admin.
+        if (tahap == 4) ...[
+          if ((o.kendalaNote ?? '').isNotEmpty) ...[
+            _alert(
+              m,
+              '⚠️ Kendala dilaporkan: ${o.kendalaNote}. Menunggu keputusan admin '
+              '(lanjut kirim atau dibatalkan).',
+              tone: MasPillTone.warn,
+            ),
+            const SizedBox(height: 6),
+          ],
+          Center(
+            child: TextButton(
+              onPressed: _busy ? null : _laporKendala,
+              child: Text(
+                  (o.kendalaNote ?? '').isNotEmpty
+                      ? '⚠️ Laporkan kendala lagi'
+                      : '⚠️ Laporkan kendala ke admin',
+                  style: TextStyle(fontSize: 13, color: m.warn600)),
+            ),
+          ),
+        ],
+      ]);
+    }
 
     return MasSectionCard(
       title: 'Proses Pesanan',
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (belumBayar)
-                _alert(
-                  m,
-                  'Menunggu pembayaran pembeli. Siapkan barang, tapi jangan '
-                  'dikirim sebelum lunas.',
-                  tone: MasPillTone.info,
-                ),
+        Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 14), child: body),
+      ],
+    );
+  }
 
-              if (o.status == 'diproses') ...[
-                Text(
-                  o.pickup
-                      ? 'Pembayaran lunas. Siapkan barang di konter, kabari '
-                          'pembeli, lalu tandai siap diambil. Jangan dikirim.'
-                      : 'Pembayaran lunas. Kemas barang, lalu tandai dikirim '
-                          'beserta nomor resi.',
-                  style: TextStyle(fontSize: 12.5, color: m.ink500, height: 1.45),
-                ),
-                const SizedBox(height: 10),
-              ],
+  Widget _penawaranInfo(MasColors m, OrderDetail o) {
+    final st = o.penawaranStatus ?? '';
+    if (st == 'created' && (o.penawaranNumber ?? '').isNotEmpty) {
+      return Row(children: [
+        Text('Penawaran otomatis: ',
+            style: TextStyle(fontSize: 12.5, color: m.ink700)),
+        Text(o.penawaranNumber!,
+            style: masMono(size: 12.5, weight: FontWeight.w700, color: m.ink900)),
+        IconButton(
+          icon: Icon(Icons.copy_rounded, size: 15, color: m.ink500),
+          visualDensity: VisualDensity.compact,
+          onPressed: () => _copy(o.penawaranNumber!, 'No. penawaran'),
+        ),
+      ]);
+    }
+    final alasan = st == 'failed'
+        ? 'gagal dibuat'
+        : st == 'skip'
+            ? 'dilewati'
+            : 'belum tercatat';
+    final note = (o.penawaranNote ?? '').isNotEmpty ? ' — ${o.penawaranNote}' : '';
+    return _alert(
+      m,
+      '⚠️ Penawaran otomatis $alasan$note. Buat Pesanan Penjualan manual di '
+      'Accurate dengan catatan ${o.orderCode}.',
+      tone: MasPillTone.warn,
+    );
+  }
 
-              if (o.status == 'dikirim') ...[
-                Text(
-                  o.pickup
-                      ? 'Menunggu pembeli datang mengambil. Tandai selesai '
-                          'setelah barang diserahkan.'
-                      : o.trackingNo != null && o.trackingNo!.isNotEmpty
-                          ? 'Sudah dikirim · resi ${o.trackingNo}. Tandai selesai '
-                              'setelah barang diterima pembeli.'
-                          : 'Sudah dikirim. Tandai selesai setelah barang diterima '
-                              'pembeli.',
-                  style: TextStyle(fontSize: 12.5, color: m.ink500, height: 1.45),
-                ),
-                const SizedBox(height: 10),
-              ],
+  Widget _centangBaris(MasColors m, String k, String label) => InkWell(
+        onTap: () => _toggle(k),
+        child: Row(children: [
+          Checkbox(
+            value: _centang[k] ?? false,
+            onChanged: (_) => _toggle(k),
+            visualDensity: VisualDensity.compact,
+          ),
+          Flexible(
+            child: Text(label, style: TextStyle(fontSize: 12.5, color: m.ink700)),
+          ),
+        ]),
+      );
 
-              if (next != null)
-                MasButton(
-                  label: _busy
-                      ? 'Memproses…'
-                      : (next == 'dikirim'
-                          ? (o.pickup
-                              ? '🏬 Tandai Siap Diambil'
-                              : '🚚 Tandai Dikirim')
-                          : '✓ Tandai Selesai'),
-                  expand: true,
-                  loading: _busy,
-                  onTap: _busy ? null : () => _lanjutkan(o),
-                ),
+  Widget _tombolDok(String label, VoidCallback onTap) => Align(
+        alignment: Alignment.centerLeft,
+        child: MasButton(label: label, primary: false, height: 34, onTap: onTap),
+      );
+}
 
-              if (o.status == 'diproses') ...[
+/// Satu langkah bernomor dengan garis penghubung ke langkah berikutnya.
+class _Langkah extends StatelessWidget {
+  final int no;
+  final String judul;
+  final bool selesai;
+  final bool aktif;
+  final bool akhir;
+  final List<Widget> children;
+  const _Langkah({
+    required this.no,
+    required this.judul,
+    required this.children,
+    this.selesai = false,
+    this.aktif = false,
+    this.akhir = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final m = context.mas;
+    final nyala = selesai || aktif;
+    return IntrinsicHeight(
+      child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Column(children: [
+          Container(
+            width: 22,
+            height: 22,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: selesai ? m.brand600 : m.paper,
+              border: Border.all(color: nyala ? m.brand600 : m.ink200, width: 2),
+            ),
+            child: Text(selesai ? '✓' : '$no',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: selesai
+                        ? Colors.white
+                        : aktif
+                            ? m.brand700
+                            : m.ink500)),
+          ),
+          if (!akhir)
+            Expanded(
+              child: Container(
+                width: 2,
+                margin: const EdgeInsets.only(top: 2),
+                color: selesai ? m.brand600 : m.ink200,
+              ),
+            ),
+        ]),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(bottom: akhir ? 0 : 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(judul,
+                    style: TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600, color: m.ink900)),
                 const SizedBox(height: 6),
-                Center(
-                  child: TextButton(
-                    onPressed: _busy ? null : _batalkan,
-                    child: Text('Batalkan pesanan',
-                        style: TextStyle(fontSize: 13, color: m.danger600)),
-                  ),
-                ),
+                for (final w in children) ...[w, const SizedBox(height: 6)],
               ],
-
-              if (o.status == 'selesai')
-                _alert(m, 'Pesanan selesai. Terima kasih!',
-                    tone: MasPillTone.brand),
-
-              if (o.status == 'batal') _alert(m, 'Pesanan dibatalkan.'),
-            ],
+            ),
           ),
         ),
-      ],
+      ]),
     );
   }
 }
@@ -1266,15 +1643,15 @@ class _CabangChatScreenState extends State<CabangChatScreen> {
             ),
           ]),
         ),
+        // Tampilan percakapan yang sama dengan chat pembeli (paritas web
+        // cabang/chat → ChatThread). Tanpa usulan pesan: di sisi gudang web
+        // juga tidak memberinya.
         Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: OrderChat(
-              title: 'Pembeli $open',
-              me: nav.username,
-              fetch: () => ApiService.branchChat(open),
-              send: (body) => ApiService.sendBranchChat(open, body),
-            ),
+          child: ChatThreadView(
+            key: ValueKey(open),
+            me: nav.username,
+            fetch: () => ApiService.branchChat(open),
+            send: (body) => ApiService.sendBranchChat(open, body),
           ),
         ),
       ]);

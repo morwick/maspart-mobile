@@ -564,9 +564,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             const SizedBox(height: 5),
             _sumRow(
               m,
-              'Ongkir${o.courier != null && o.courier!.isNotEmpty ? ' (${o.courier!.toUpperCase()}${o.courierService != null && o.courierService!.isNotEmpty ? ' ${o.courierService}' : ''})' : ''}',
+              o.pickup
+                  ? 'Ongkir (ambil di toko)'
+                  : 'Ongkir${o.courier != null && o.courier!.isNotEmpty ? ' (${o.courier!.toUpperCase()}${o.courierService != null && o.courierService!.isNotEmpty ? ' ${o.courierService}' : ''})' : ''}',
               o.shippingCost > 0 ? formatRupiah(o.shippingCost) : '—',
             ),
+            // Potongan voucher/poin + kode voucher — paritas web OrderPotongan.
+            OrderPotongan(order: o),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 9),
               child: Divider(height: 1, color: m.ink150),

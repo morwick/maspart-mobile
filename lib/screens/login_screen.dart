@@ -3,12 +3,14 @@
 // ke dasar layar. Paritas dengan web frontend/src/app/login/page.tsx.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../theme/mas_theme.dart';
 import '../widgets/mas_ui.dart';
 import '../api_service.dart';
 import '../auth_storage.dart';
 import '../app/shell.dart';
+import 'lengkapi_profil_screen.dart';
 
 /// Hijau panel merek dipaku (bukan token): di mode gelap brand700 dibalik jadi
 /// hijau terang dan teks putih di atasnya hilang.
@@ -34,10 +36,18 @@ class _LoginScreenState extends State<LoginScreen> {
   /// dipakai untuk menentukan versi mereka.
   String _version = '';
 
+  /// OAuth Client ID Web dari /api/app/meta. Kosong = login Google belum
+  /// diaktifkan di server → tombolnya tak ditampilkan (sama dengan web).
+  String _googleClientId = '';
+  bool _googleBusy = false;
+
   @override
   void initState() {
     super.initState();
     _restoreLast();
+    ApiService.appMeta().then((meta) {
+      if (mounted) setState(() => _googleClientId = meta.googleClientId);
+    }).catchError((_) {});
     PackageInfo.fromPlatform().then((i) {
       if (mounted) setState(() => _version = 'v${i.version}');
     }).catchError((_) {});
@@ -79,12 +89,11 @@ class _LoginScreenState extends State<LoginScreen> {
     // ApiService.login() yang menyimpan tokennya.
     AuthStorage.persist = _remember;
     try {
-      final token = await ApiService.login(u, p);
-      await AuthStorage.saveToken(token);
+      final res = await ApiService.loginFull(u, p);
       await AuthStorage.rememberUsername(u, _remember);
       if (!mounted) return;
       TextInput.finishAutofillContext(); // tawarkan simpan sandi ke pengelola HP
-      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AppShell()));
+      _masukKe(res.user);
     } on ApiException catch (e) {
       if (!mounted) return;
       HapticFeedback.heavyImpact();
@@ -98,6 +107,70 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() {
         _loading = false;
         _error = 'Gagal terhubung. Periksa koneksi Anda.';
+      });
+    }
+  }
+
+  /// Tujuan setelah login — padanan `landingPath` web: pembeli yang belum
+  /// punya alamat utama → Lengkapi Profil; selain itu ke aplikasi.
+  void _masukKe(UserOut user) {
+    final lengkapi = user.role == 'pembeli' && user.profileComplete == false;
+    Navigator.of(context).pushReplacement(MaterialPageRoute(
+        builder: (_) =>
+            lengkapi ? const LengkapiProfilScreen() : const AppShell()));
+  }
+
+  /// Masuk/daftar dengan akun Google. Akun baru otomatis jadi pembeli lalu
+  /// diarahkan ke Lengkapi Profil (alur yang sama dengan web).
+  Future<void> _masukGoogle() async {
+    if (_loading || _googleBusy || _googleClientId.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _googleBusy = true;
+      _error = null;
+    });
+    AuthStorage.persist = _remember;
+    try {
+      final g = GoogleSignIn(
+          scopes: const ['email'], serverClientId: _googleClientId);
+      // Keluar dulu supaya pemilih akun SELALU tampil — tanpa ini akun Google
+      // terakhir dipakai diam-diam dan pembeli tak bisa ganti akun.
+      try {
+        await g.signOut();
+      } catch (_) {}
+      final akun = await g.signIn();
+      if (akun == null) {
+        // Dibatalkan pembeli.
+        if (mounted) setState(() => _googleBusy = false);
+        return;
+      }
+      final idToken = (await akun.authentication).idToken;
+      if (idToken == null || idToken.isEmpty) {
+        throw const _GoogleGagal(
+            'Google tidak memberi token. Pastikan aplikasi terdaftar di Google Cloud.');
+      }
+      final res = await ApiService.loginGoogle(idToken);
+      if (!mounted) return;
+      _masukKe(res.token.user);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      HapticFeedback.heavyImpact();
+      setState(() {
+        _googleBusy = false;
+        _error = e.message;
+      });
+    } on _GoogleGagal catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _googleBusy = false;
+        _error = e.pesan;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      HapticFeedback.heavyImpact();
+      setState(() {
+        _googleBusy = false;
+        _error = 'Gagal masuk dengan Google: $e';
       });
     }
   }
@@ -185,7 +258,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: TextStyle(
                       fontSize: 22, fontWeight: FontWeight.w600, letterSpacing: -0.4, color: m.ink900)),
               const SizedBox(height: 6),
-              Text('Gunakan akun MasPart yang diberikan admin.',
+              Text(
+                  _googleClientId.isEmpty
+                      ? 'Gunakan akun MasPart yang diberikan admin.'
+                      : 'Staf: gunakan akun MasPart dari admin. Pembeli: masuk atau daftar dengan akun Google.',
                   style: TextStyle(fontSize: 13.5, color: m.ink500)),
               const SizedBox(height: 24),
 
@@ -257,6 +333,49 @@ class _LoginScreenState extends State<LoginScreen> {
 
               MasButton(label: 'Masuk', onTap: _submit, expand: true, height: 52, loading: _loading),
 
+              if (_googleClientId.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Row(children: [
+                  Expanded(child: Divider(color: m.ink200)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Text('atau', style: TextStyle(fontSize: 12, color: m.ink400)),
+                  ),
+                  Expanded(child: Divider(color: m.ink200)),
+                ]),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 50,
+                  child: OutlinedButton(
+                    onPressed: (_loading || _googleBusy) ? null : _masukGoogle,
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: m.paper,
+                      side: BorderSide(color: m.ink300),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    child: _googleBusy
+                        ? SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: m.brand600),
+                          )
+                        : Row(mainAxisSize: MainAxisSize.min, children: [
+                            Text('G',
+                                style: TextStyle(
+                                    fontSize: 18, fontWeight: FontWeight.w800, color: m.info600)),
+                            const SizedBox(width: 10),
+                            Text('Masuk dengan Google',
+                                style: TextStyle(
+                                    fontSize: 15, fontWeight: FontWeight.w600, color: m.ink800)),
+                          ]),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text('Pembeli baru? Masuk dengan Google — akun dibuat otomatis, lalu isi alamat kirim.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: m.ink500)),
+              ],
+
               const Spacer(),
               const SizedBox(height: 20),
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -318,4 +437,9 @@ class _LoginScreenState extends State<LoginScreen> {
       ]),
     );
   }
+}
+
+class _GoogleGagal implements Exception {
+  final String pesan;
+  const _GoogleGagal(this.pesan);
 }
