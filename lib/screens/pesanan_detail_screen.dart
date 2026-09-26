@@ -695,6 +695,14 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                 '${o.status == 'diproses' ? ' setelah gudang mengabari barang siap.' : '.'}',
                 style: TextStyle(fontSize: 12, color: m.ink500),
               ),
+              if (o.status == 'dikirim' && (o.batasAmbilAt?.isNotEmpty ?? false)) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Ambil sebelum ${fmtDate(o.batasAmbilAt)} — lewat tanggal itu admin akan menghubungi Anda.',
+                  style: TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w600, color: m.warn600),
+                ),
+              ],
               if (o.pickupPic != null && o.pickupPic!.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 GestureDetector(

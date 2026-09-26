@@ -73,6 +73,7 @@ class _AlamatFormState extends State<AlamatForm> {
   late bool _isDefault;
   double? _lat;
   double? _lng;
+  bool _cariWilayah = false;
   String? _err;
 
   @override
@@ -101,6 +102,14 @@ class _AlamatFormState extends State<AlamatForm> {
     _isDefault = (a?.isDefault ?? false) || widget.forceDefault;
     _lat = a?.lat;
     _lng = a?.lng;
+    // Alamat lama dari peta yang tersimpan hanya dengan kode pos → lengkapi.
+    if (a != null &&
+        a.kodePos.isNotEmpty &&
+        a.kecamatan.isEmpty &&
+        a.alamat.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _isiWilayahDariPeta(a.alamat, a.kodePos));
+    }
   }
 
   @override
@@ -145,17 +154,46 @@ class _AlamatFormState extends State<AlamatForm> {
       MaterialPageRoute(builder: (_) => const PilihLokasiPeta()),
     );
     if (place == null || !mounted) return;
+    final postal = RegExp(r'^\d{5}$').hasMatch(place.postal) ? place.postal : '';
+    final perluWilayah = _wilayah.kecamatan.isEmpty;
     setState(() {
       _lat = place.lat;
       _lng = place.lon;
       final teks =
           place.displayName.isNotEmpty ? place.displayName : place.address;
       if (_alamat.text.trim().isEmpty && teks.isNotEmpty) _alamat.text = teks;
-      if (_wilayah.kodePos.isEmpty &&
-          RegExp(r'^\d{5}$').hasMatch(place.postal)) {
-        _wilayah = _wilayah.copyWith(kodePos: place.postal);
+      if (_wilayah.kodePos.isEmpty && postal.isNotEmpty) {
+        _wilayah = _wilayah.copyWith(kodePos: postal);
       }
     });
+    if (perluWilayah) {
+      await _isiWilayahDariPeta(
+          place.address.isNotEmpty ? place.address : place.displayName,
+          postal);
+    }
+  }
+
+  /// Titik peta hanya memberi kode pos + teks alamat; kecamatan/kota/provinsi
+  /// dicocokkan ke data RajaOngkir (sumber ongkir) di backend. Tak menimpa
+  /// kecamatan yang sudah dipilih pembeli sementara permintaan berjalan.
+  Future<void> _isiWilayahDariPeta(String teks, String postal) async {
+    if (teks.trim().isEmpty) return;
+    setState(() => _cariWilayah = true);
+    try {
+      final w = await ApiService.wilayahDariPeta(teks, postal);
+      if (!mounted || w == null || w.kodePos.isEmpty) return;
+      if (_wilayah.kecamatan.isNotEmpty) return;
+      setState(() => _wilayah = _WilayahValue(
+            provinsi: w.provinsi,
+            kota: w.kota,
+            kecamatan: w.kecamatan,
+            kodePos: w.kodePos,
+          ));
+    } catch (_) {
+      // biarkan pembeli memilih kecamatan sendiri
+    } finally {
+      if (mounted) setState(() => _cariWilayah = false);
+    }
   }
 
   @override
@@ -199,6 +237,12 @@ class _AlamatFormState extends State<AlamatForm> {
           disabled: busy,
           onChanged: (v) => setState(() => _wilayah = v),
         ),
+        if (_cariWilayah)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text('Mencocokkan kecamatan dari titik peta…',
+                style: TextStyle(fontSize: 11.5, color: m.ink400)),
+          ),
         const SizedBox(height: 12),
         _judul(m, 'Alamat lengkap'),
         MasInput(
@@ -480,11 +524,14 @@ class _WilayahPickerState extends State<_WilayahPicker> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(ringkas.isEmpty ? '—' : ringkas,
+                  Text(
+                      ringkas.isEmpty
+                          ? 'Kecamatan belum dipilih — ketuk Ganti'
+                          : ringkas,
                       style: TextStyle(
                           fontSize: 13.5,
                           fontWeight: FontWeight.w600,
-                          color: m.ink900)),
+                          color: ringkas.isEmpty ? m.warn600 : m.ink900)),
                   const SizedBox(height: 2),
                   Text('Kode pos ${v.kodePos.isEmpty ? '—' : v.kodePos}',
                       style: TextStyle(fontSize: 11.5, color: m.ink500)),

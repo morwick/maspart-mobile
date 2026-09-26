@@ -227,7 +227,7 @@ class _TokoScreenState extends State<TokoScreen> {
 
           if (_home != null && _home!.kategori.isNotEmpty) ...[
             const SizedBox(height: 14),
-            _kategoriChips(m),
+            _kategoriGrid(m),
           ],
 
           if (_error != null) ...[
@@ -388,54 +388,133 @@ class _TokoScreenState extends State<TokoScreen> {
     _loadCatalog();
   }
 
-  Widget _kategoriChips(MasColors m) {
-    Widget chip(String label, String key, {int? count}) {
-      final active = _kategori == key;
-      return Padding(
-        padding: const EdgeInsets.only(right: 8),
-        child: GestureDetector(
-          onTap: () => key.isEmpty
-              ? (_kategori.isEmpty ? null : _setKategori(_kategori))
-              : _setKategori(key),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-            decoration: BoxDecoration(
-              color: active ? m.brand700 : m.paper,
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: active ? m.brand700 : m.ink200),
+  /// Kategori yang punya ilustrasi `assets/kategori/<key>.png` — PNG hasil
+  /// render dari SVG yang sama dengan web (`frontend/public/kategori`).
+  static const Set<String> _ilustrasiKategori = {
+    'filter', 'mesin', 'rem', 'kopling', 'transmisi', 'gardan',
+    'pendingin', 'kelistrikan', 'kabin', 'suspensi', 'kemudi', 'sasis',
+    'bearing', 'baut',
+  };
+
+  /// Blok KATEGORI ala Shopee (sama dengan web /toko): kartu berjudul, petak
+  /// bergambar DUA BARIS yang digeser ke samping. Klik petak = filter; klik
+  /// lagi (atau tombol di judul) = lepas filter.
+  Widget _kategoriGrid(MasColors m) {
+    final items = _home!.kategori;
+    const lebarPetak = 86.0;
+    const tinggiPetak = 104.0;
+
+    Widget petak(TokoKategori k) {
+      final aktif = _kategori == k.key;
+      final gambar =
+          _ilustrasiKategori.contains(k.key) ? k.key : 'mesin';
+      return GestureDetector(
+        onTap: () => _setKategori(k.key),
+        child: Container(
+          width: lebarPetak,
+          height: tinggiPetak,
+          padding: const EdgeInsets.fromLTRB(4, 10, 4, 6),
+          decoration: BoxDecoration(
+            color: aktif ? m.brand50 : m.paper,
+            border: Border(
+              right: BorderSide(color: m.ink100),
+              bottom: BorderSide(
+                  color: aktif ? m.brand700 : m.ink100, width: aktif ? 2 : 1),
             ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text(label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: active ? FontWeight.w700 : FontWeight.w600,
-                    color: active ? Colors.white : m.ink700,
-                  )),
-              if (count != null) ...[
-                const SizedBox(width: 4),
-                Text('(${thousands(count)})',
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      color: active
-                          ? Colors.white.withValues(alpha: 0.7)
-                          : m.ink500,
-                    )),
-              ],
-            ]),
           ),
+          child: Column(children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration:
+                  BoxDecoration(color: m.brand50, shape: BoxShape.circle),
+              alignment: Alignment.center,
+              child: Image.asset('assets/kategori/$gambar.png',
+                  width: 34, height: 34, fit: BoxFit.contain),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              k.label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11,
+                height: 1.2,
+                fontWeight: aktif ? FontWeight.w700 : FontWeight.w500,
+                color: aktif ? m.brand700 : m.ink800,
+              ),
+            ),
+          ]),
         ),
       );
     }
 
-    return SizedBox(
-      height: 34,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        children: [
-          chip('Semua', ''),
-          for (final k in _home!.kategori) chip(k.label, k.key, count: k.count),
-        ],
+    // Kolom berisi dua petak (atas-bawah), mengalir ke samping seperti web.
+    final kolom = <Widget>[];
+    for (var i = 0; i < items.length; i += 2) {
+      kolom.add(Column(children: [
+        petak(items[i]),
+        if (i + 1 < items.length)
+          petak(items[i + 1])
+        else
+          const SizedBox(width: lebarPetak, height: tinggiPetak),
+      ]));
+    }
+
+    final pilihan = items.where((k) => k.key == _kategori);
+    return Container(
+      decoration: BoxDecoration(
+        color: m.paper,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: m.ink150),
       ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: m.ink100)),
+          ),
+          child: Row(children: [
+            Expanded(
+              child: Text('KATEGORI',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
+                    color: m.ink500,
+                  )),
+            ),
+            if (pilihan.isNotEmpty)
+              GestureDetector(
+                onTap: () => _setKategori(_kategori),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: m.brand50,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: m.brand100),
+                  ),
+                  child: Text('${pilihan.first.label} ✕',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: m.brand700,
+                      )),
+                ),
+              ),
+          ]),
+        ),
+        SizedBox(
+          height: tinggiPetak * 2,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: kolom,
+          ),
+        ),
+      ]),
     );
   }
 

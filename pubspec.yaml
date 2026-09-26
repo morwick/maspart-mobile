@@ -91,6 +91,8 @@ flutter:
     - assets/logo.png
     # Gambar banner promo etalase (salinan frontend/public/promo/ web).
     - assets/promo/
+    # Ilustrasi petak KATEGORI etalase (render PNG dari frontend/public/kategori/*.svg).
+    - assets/kategori/
 
   # Font Geist + JetBrains Mono dimuat via paket google_fonts (sesuai desain),
   # jadi tidak perlu deklarasi font bundel di sini.

@@ -66,6 +66,9 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   /// terpisah supaya pembeli tak menyangka beratnya salah hitung.
   int _packingGrams = 0;
   List<ShippingRate> _rates = [];
+  // Jenis pengiriman ala marketplace: pilih kelompok dulu, lalu kurirnya.
+  List<ShippingGroup> _kelompok = [];
+  String? _katPilih;
   ShippingRate? _rate;
   String? _rateErr;
   bool _loadingRates = false;
@@ -257,8 +260,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     _schedulePickup();
   }
 
-  /// Jadwalkan cek Ambil di Toko saja (dipanggil juga saat alamat diketik —
-  /// tanpa ikut mengambil ulang tarif kurir).
+  /// Jadwalkan cek Ambil di Toko saja (tanpa mengambil ulang tarif kurir).
   void _schedulePickup() {
     _pickupDebounce?.cancel();
     if (!mounted) return;
@@ -329,12 +331,15 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         items: [
           for (final i in beli) CartLine(partNumber: i.partNumber, qty: i.qty),
         ],
+        alamat: _addressCtl.text.trim(),
       );
       if (!mounted) return;
       final sorted = [...r.rates]..sort((a, b) => a.price.compareTo(b.price));
       setState(() {
         _rateErr = r.error;
         _rates = r.rates;
+        _kelompok = r.kelompok;
+        _katPilih = null;
         // Termurah jadi default supaya pembeli tak checkout tanpa kurir karena
         // lupa memilih; dia tetap bebas mengganti.
         _rate = sorted.isNotEmpty ? sorted.first : null;
@@ -997,7 +1002,11 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
               hint: 'Jalan, no, RT/RW, kelurahan, kecamatan, kota, provinsi',
               maxLines: 3,
               // Alamat ikut menentukan jarak ke gudang (paritas web).
-              onChanged: (_) => _schedulePickup(),
+              // Alamat ikut menentukan tujuan ongkir bila kode pos tak dikenal
+              // (dicari dari kelurahan/kecamatan) — tarif diambil ulang HANYA saat
+              // cek sebelumnya gagal; selain itu tiap ketikan memakan kuota harian.
+              onChanged: (_) =>
+                  _rateErr != null ? _scheduleOngkir() : _schedulePickup(),
             ),
           ),
           const SizedBox(height: 10),
@@ -1157,6 +1166,22 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
                 : 'Isi kode pos untuk melihat pilihan ekspedisi.',
             style: TextStyle(fontSize: 12.5, color: m.ink500),
           )
+        else if (_kelompok.isNotEmpty)
+          // Ala Shopee/Tokopedia: jenis pengiriman dulu (rentang harga + tanggal
+          // tiba), kurir di dalam jenis yang aktif. Termurah terpilih otomatis.
+          Column(children: [
+            for (final k in _kelompok) ...[
+              _kelompokRow(m, k),
+              if (k.kode == _katAktif)
+                Padding(
+                  padding: const EdgeInsets.only(left: 12),
+                  child: Column(children: [
+                    for (final r in _rates.where((r) => r.kategori == k.kode))
+                      _rateRow(m, r),
+                  ]),
+                ),
+            ],
+          ])
         else
           Column(children: [
             for (final r in _rates) _rateRow(m, r),
@@ -1210,6 +1235,101 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     );
   }
 
+  /// "estimasi 4-6 hari · tarif min. 10 kg" — paritas kartu tarif web.
+  String _infoTarif(ShippingRate r) => [
+        if (r.etd.isNotEmpty) 'estimasi ${r.etd}',
+        if (r.minKg > 0) 'tarif min. ${r.minKg} kg',
+      ].join(' · ');
+
+  /// Jenis aktif: pilihan pembeli; kalau belum memilih ikut kurir terpilih
+  /// (termurah otomatis); kalau belum ada juga, jenis pertama.
+  String? get _katAktif =>
+      _katPilih ??
+      (_rate != null && _rate!.kategori.isNotEmpty ? _rate!.kategori : null) ??
+      (_kelompok.isNotEmpty ? _kelompok.first.kode : null);
+
+  void _pilihKelompok(String kode) {
+    // Seperti Tokopedia: memilih jenis langsung memilih kurir termurah di dalamnya.
+    final isi = _rates.where((r) => r.kategori == kode).toList()
+      ..sort((a, b) => a.price.compareTo(b.price));
+    setState(() {
+      _katPilih = kode;
+      if (isi.isNotEmpty && isi.first.kategori != _rate?.kategori) {
+        _rate = isi.first;
+      }
+    });
+  }
+
+  static const _bulan = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
+    'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des',
+  ];
+
+  /// "29 Sep – 1 Okt" (atau satu tanggal bila sama) dari tanggal ISO server.
+  String _rentangTiba(String a, String b) {
+    String f(String iso) {
+      final d = DateTime.tryParse(iso);
+      return d == null ? iso : '${d.day} ${_bulan[d.month - 1]}';
+    }
+    return (b.isEmpty || a == b) ? f(a) : '${f(a)} – ${f(b)}';
+  }
+
+  Widget _kelompokRow(MasColors m, ShippingGroup k) {
+    final aktif = k.kode == _katAktif;
+    final harga = k.hargaMax > k.hargaMin
+        ? '${formatRupiah(k.hargaMin)} – ${formatRupiah(k.hargaMax)}'
+        : formatRupiah(k.hargaMin);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: GestureDetector(
+        onTap: () => _pilihKelompok(k.kode),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: aktif ? m.brand50 : m.paper,
+            borderRadius: BorderRadius.circular(MasRadii.input),
+            border: Border.all(color: aktif ? m.brand600 : m.ink200),
+          ),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Wrap(
+                    spacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(k.label,
+                          style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                              color: m.ink900)),
+                      if (k.termurah)
+                        const MasPill(
+                            label: 'Termurah', tone: MasPillTone.brand, height: 20),
+                    ],
+                  ),
+                  if (k.tibaMin.isNotEmpty)
+                    Text('Estimasi tiba ${_rentangTiba(k.tibaMin, k.tibaMax)}',
+                        style: TextStyle(fontSize: 12, color: m.ink700)),
+                  Text(k.catatan,
+                      style: TextStyle(fontSize: 11.5, color: m.ink500, height: 1.35)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(harga,
+                style: masMono(
+                    size: 12.5,
+                    weight: FontWeight.w700,
+                    color: aktif ? m.brand700 : m.ink800)),
+          ]),
+        ),
+      ),
+    );
+  }
+
   Widget _rateRow(MasColors m, ShippingRate r) {
     final active = _rate?.courier == r.courier && _rate?.service == r.service;
     return Padding(
@@ -1229,13 +1349,26 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('${r.courierName} · ${r.service}',
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: m.ink900)),
-                  if (r.etd.isNotEmpty)
-                    Text('estimasi ${r.etd}',
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text('${r.courierName} · ${r.service}',
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: m.ink900)),
+                      if (r.termurah)
+                        const MasPill(
+                            label: 'Termurah', tone: MasPillTone.brand, height: 20),
+                      if (r.tercepat)
+                        const MasPill(
+                            label: 'Tercepat', tone: MasPillTone.info, height: 20),
+                    ],
+                  ),
+                  if (_infoTarif(r).isNotEmpty)
+                    Text(_infoTarif(r),
                         style: TextStyle(fontSize: 11.5, color: m.ink500)),
                 ],
               ),

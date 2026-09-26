@@ -1489,6 +1489,9 @@ class OrderDetail extends OrderSummary {
   final double? pickupLon;
   final String? pickupPic;
 
+  /// Batas ambil pesanan Ambil di Toko yang 'siap diambil' (dihitung server).
+  final String? batasAmbilAt;
+
   /// Mis. dibayar setelah order batal → perlu refund.
   final String? paymentNote;
 
@@ -1556,6 +1559,7 @@ class OrderDetail extends OrderSummary {
     this.pickupLat,
     this.pickupLon,
     this.pickupPic,
+    this.batasAmbilAt,
     this.paymentNote,
     this.penawaranStatus,
     this.penawaranNumber,
@@ -1613,6 +1617,7 @@ class OrderDetail extends OrderSummary {
         pickupLat: _dOrNull(j['pickup_lat']),
         pickupLon: _dOrNull(j['pickup_lon']),
         pickupPic: _sOrNull(j['pickup_pic']),
+        batasAmbilAt: _sOrNull(j['batas_ambil_at']),
         paymentNote: _sOrNull(j['payment_note']),
         penawaranStatus: _sOrNull(j['penawaran_status']),
         penawaranNumber: _sOrNull(j['penawaran_number']),
@@ -1796,6 +1801,13 @@ class ShippingRate {
   final String service;
   final double price;
   final String etd;
+  /// 'kargo' = tarif minimal [minKg]; 'reguler' = ditagih per kg.
+  final String jenis;
+  final int minKg;
+  final bool termurah;
+  final bool tercepat;
+  /// Kode kelompok (next_day/reguler/hemat/kargo) — lihat [ShippingGroup].
+  final String kategori;
 
   const ShippingRate({
     required this.courier,
@@ -1803,6 +1815,11 @@ class ShippingRate {
     this.service = '',
     this.price = 0,
     this.etd = '',
+    this.jenis = '',
+    this.minKg = 0,
+    this.termurah = false,
+    this.tercepat = false,
+    this.kategori = '',
   });
 
   factory ShippingRate.fromJson(Map<String, dynamic> j) => ShippingRate(
@@ -1811,6 +1828,46 @@ class ShippingRate {
         service: _s(j['service']),
         price: _d(j['price']),
         etd: _s(j['etd']),
+        jenis: _s(j['jenis']),
+        minKg: _d(j['min_kg']).toInt(),
+        termurah: _b(j['termurah']),
+        tercepat: _b(j['tercepat']),
+        kategori: _s(j['kategori']),
+      );
+}
+
+/// Ringkasan satu jenis pengiriman ala Shopee/Tokopedia (Next Day / Reguler /
+/// Hemat / Kargo) — dihitung server, sama dengan yang tampil di web.
+class ShippingGroup {
+  final String kode;
+  final String label;
+  final String catatan;
+  final double hargaMin;
+  final double hargaMax;
+  final String tibaMin; // ISO yyyy-mm-dd, '' bila kurir tak memberi estimasi
+  final String tibaMax;
+  final bool termurah;
+
+  const ShippingGroup({
+    required this.kode,
+    this.label = '',
+    this.catatan = '',
+    this.hargaMin = 0,
+    this.hargaMax = 0,
+    this.tibaMin = '',
+    this.tibaMax = '',
+    this.termurah = false,
+  });
+
+  factory ShippingGroup.fromJson(Map<String, dynamic> j) => ShippingGroup(
+        kode: _s(j['kode']),
+        label: _s(j['label']),
+        catatan: _s(j['catatan']),
+        hargaMin: _d(j['harga_min']),
+        hargaMax: _d(j['harga_max']),
+        tibaMin: _s(j['tiba_min']),
+        tibaMax: _s(j['tiba_max']),
+        termurah: _b(j['termurah']),
       );
 }
 
@@ -1818,17 +1875,20 @@ class ShippingRates {
   final List<ShippingRate> rates;
   final String? error;
   final bool available;
+  final List<ShippingGroup> kelompok;
 
   const ShippingRates({
     this.rates = const [],
     this.error,
     this.available = false,
+    this.kelompok = const [],
   });
 
   factory ShippingRates.fromJson(Map<String, dynamic> j) => ShippingRates(
         rates: _list(j['rates'], ShippingRate.fromJson),
         error: _sOrNull(j['error']),
         available: _b(j['available']),
+        kelompok: _list(j['kelompok'], ShippingGroup.fromJson),
       );
 }
 

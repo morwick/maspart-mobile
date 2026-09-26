@@ -913,6 +913,17 @@ class ApiService {
     );
   }
 
+  /// Kecamatan/kota/provinsi untuk titik peta (kode pos + alamat geocoder →
+  /// data RajaOngkir). null = tak meyakinkan, pembeli memilih sendiri.
+  static Future<Wilayah?> wilayahDariPeta(String alamat, String postal) async {
+    final data = _Api._obj(await _Api.get('/api/geo/wilayah-peta', query: {
+      'alamat': alamat.length > 500 ? alamat.substring(0, 500) : alamat,
+      'postal': postal,
+    }));
+    final w = data['wilayah'];
+    return w is Map ? Wilayah.fromJson(w.cast<String, dynamic>()) : null;
+  }
+
   /// Beranda toko: kategori, produk terlaris & unggulan untuk lokasi pembeli.
   static Future<TokoHome> tokoHome() async =>
       TokoHome.fromJson(_Api._obj(await _Api.get('/api/buyer/home')));
@@ -977,6 +988,7 @@ class ApiService {
     double value = 0,
     String destPostal = '',
     List<CartLine> items = const [],
+    String alamat = '',
   }) async {
     final data = await _Api.post(
       '/api/shipping/rates',
@@ -985,6 +997,9 @@ class ApiService {
         'value': value,
         'dest_postal': destPostal,
         'items': items.map((e) => e.toJson()).toList(),
+        // Cadangan bila kode pos tak dikenal RajaOngkir (kode pos dari peta
+        // sering beda) — server mencari kelurahan/kecamatan di alamat.
+        'alamat': alamat,
       },
       timeout: _Api._timeoutLong,
     );
