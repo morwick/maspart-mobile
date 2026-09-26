@@ -1,21 +1,21 @@
-// lib/screens/login_screen.dart — mengikuti desain "Login Redesign.dc" (frame 1b,
-// Phone 390×844): pita merek hijau di atas, form di bawahnya, footer menempel
-// ke dasar layar. Paritas dengan web frontend/src/app/login/page.tsx.
+// lib/screens/login_screen.dart — panel merek grafit di atas (medan baut/mur 3D,
+// widgets/login_backdrop.dart), form di bawahnya, footer menempel ke dasar
+// layar. Paritas dengan web frontend/src/app/login/page.tsx.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../theme/mas_theme.dart';
 import '../widgets/mas_ui.dart';
+import '../widgets/login_backdrop.dart';
 import '../api_service.dart';
 import '../auth_storage.dart';
 import '../app/shell.dart';
 import 'lengkapi_profil_screen.dart';
 
-/// Hijau panel merek dipaku (bukan token): di mode gelap brand700 dibalik jadi
-/// hijau terang dan teks putih di atasnya hilang.
-const _panelGreen = Color(0xFF026A0E);
-const _panelBlob = Color(0xFF028912);
+/// Hijau merek pada huruf "M" logo, dipaku (bukan token): di mode gelap brand700
+/// dibalik jadi hijau terang.
+const _brandGreen = Color(0xFF026A0E);
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -194,47 +194,42 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Widget _hero(BuildContext context) {
     final top = MediaQuery.of(context).padding.top;
-    return ClipRect(
-      child: Stack(children: [
-        Positioned(
-          right: -90,
-          top: -120,
-          child: Container(
-            width: 300,
-            height: 300,
-            decoration: const BoxDecoration(color: _panelBlob, shape: BoxShape.circle),
-          ),
-        ),
-        Container(
-          width: double.infinity,
-          padding: EdgeInsets.fromLTRB(24, top + 28, 24, 30),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Container(
-                width: 32,
-                height: 32,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(9)),
-                child: Text('M', style: masMono(size: 15, weight: FontWeight.w700, color: _panelGreen)),
-              ),
-              const SizedBox(width: 10),
-              const Text('MasPart',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: Colors.white)),
+    // Panel gelap → ikon status bar terang.
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: ClipRect(
+        child: Stack(children: [
+          const Positioned.fill(child: LoginBackdrop()),
+          Padding(
+            padding: EdgeInsets.fromLTRB(24, top + 28, 24, 30),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(9)),
+                  child: Text('M', style: masMono(size: 16, weight: FontWeight.w700, color: _brandGreen)),
+                ),
+                const SizedBox(width: 10),
+                const Text('MasPart',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 17, color: Colors.white)),
+              ]),
+              const SizedBox(height: 24),
+              const Text('Satu tempat untuk\nsemua part.',
+                  style: TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w600,
+                      height: 1.12,
+                      letterSpacing: -0.65,
+                      color: Colors.white)),
+              const SizedBox(height: 8),
+              Text('Sinotruk HOWO · mesin Weichai · alat berat Shantui',
+                  style: TextStyle(fontSize: 13.5, height: 1.5, color: Colors.white.withValues(alpha: 0.8))),
             ]),
-            const SizedBox(height: 24),
-            const Text('Satu tempat untuk\nsemua part.',
-                style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w600,
-                    height: 1.15,
-                    letterSpacing: -0.5,
-                    color: Colors.white)),
-            const SizedBox(height: 8),
-            Text('Cari part, cek stok & harga, pesan dan lacak sampai cabang.',
-                style: TextStyle(fontSize: 13.5, height: 1.5, color: Colors.white.withValues(alpha: 0.8))),
-          ]),
-        ),
-      ]),
+          ),
+        ]),
+      ),
     );
   }
 
