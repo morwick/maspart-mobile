@@ -797,10 +797,15 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
         ],
         const SizedBox(height: 14),
         _specCard(m),
-        const SizedBox(height: 14),
-        _explodedCard(m),
-        const SizedBox(height: 14),
-        _tigaCard(m),
+        // Exploded view & model 3D EPC khusus staf internal — e-commerce
+        // (pembeli) tak menampilkannya (keputusan pemilik 2026-09-27; server
+        // juga menolak pembeli).
+        if (!isBuyer) ...[
+          const SizedBox(height: 14),
+          _explodedCard(m),
+          const SizedBox(height: 14),
+          _tigaCard(m),
+        ],
         // Semua unit yang memakai PN ini (web: "Ditemukan di N unit"). Sebelum
         // katalog terjawab, tampilkan dulu unit dari argumen navigasi supaya
         // bagian ini tidak berkedip muncul-hilang.
