@@ -1129,7 +1129,7 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
   Widget _penawaranInfo(MasColors m, OrderDetail o) {
     final st = o.penawaranStatus ?? '';
     if (st == 'created' && (o.penawaranNumber ?? '').isNotEmpty) {
-      return Row(children: [
+      final baris = Row(children: [
         Text('Penawaran otomatis: ',
             style: TextStyle(fontSize: 12.5, color: m.ink700)),
         Text(o.penawaranNumber!,
@@ -1139,6 +1139,13 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
           visualDensity: VisualDensity.compact,
           onPressed: () => _copy(o.penawaranNumber!, 'No. penawaran'),
         ),
+      ]);
+      // Catatan pada penawaran yang BERHASIL = potongan voucher/poin yang belum
+      // masuk dokumen → admin wajib mengisinya saat memproses ke faktur.
+      if ((o.penawaranNote ?? '').isEmpty) return baris;
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        baris,
+        _alert(m, '⚠️ ${o.penawaranNote}', tone: MasPillTone.warn),
       ]);
     }
     final alasan = st == 'failed'
