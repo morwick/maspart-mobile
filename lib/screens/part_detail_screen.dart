@@ -745,8 +745,10 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
                   const SizedBox(height: 2),
                   Text(name, style: TextStyle(fontSize: 13.5, color: m.ink600)),
                 ],
-                // Baris ala Shopee: "4,8 ★★★★★ | 12 Penilaian".
-                if (_jumlahUlasan > 0) ...[
+                // Baris ala Shopee: "4,8 ★★★★★ | 12 Penilaian". Penilaian =
+                // urusan PENJUALAN — hanya tampil di tampilan pembeli, bukan
+                // di layar kerja internal (permintaan pemilik 2026-09-27).
+                if (isBuyer && _jumlahUlasan > 0) ...[
                   const SizedBox(height: 4),
                   RatingRingkas(rata: _rataUlasan, jumlah: _jumlahUlasan),
                 ],
@@ -819,7 +821,10 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
         if (pn.isNotEmpty) ...[
           const SizedBox(height: 16),
           _CekUnitCard(pn: pn),
-          // Penilaian pembeli ala Shopee — rata-rata, sebaran, filter, ulasan.
+        ],
+        // Penilaian pembeli ala Shopee — rata-rata, sebaran, filter, ulasan.
+        // Hanya di tampilan pembeli (penjualan), sama dengan baris ★ di atas.
+        if (pn.isNotEmpty && isBuyer) ...[
           const SizedBox(height: 16),
           UlasanProdukSection(
             key: ValueKey('ulasan-$pn'),
