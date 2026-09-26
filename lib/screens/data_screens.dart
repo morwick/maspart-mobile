@@ -1450,11 +1450,6 @@ const _kolomBatch = <({String key, String label, String desc})>[
     label: 'Harga Jual Accurate',
     desc: 'Harga jual dari Accurate'
   ),
-  (
-    key: 'harga_daftar',
-    label: 'Harga (Daftar)',
-    desc: 'Dari daftar harga internal'
-  ),
   (key: 'kecocokan', label: 'Kecocokan', desc: 'File katalog lokal yang cocok'),
   (
     key: 'exploded',
@@ -1469,7 +1464,7 @@ const _maksPnExploded = 25;
 
 /// Kolom harga hanya untuk akun berizin — backend juga menegakkan ini, tapi
 /// menyembunyikannya di sini mencegah user menunggu proses panjang lalu ditolak.
-const _kolomHarga = {'harga_sims', 'harga_accurate', 'harga_daftar'};
+const _kolomHarga = {'harga_sims', 'harga_accurate'};
 const _kolomDefault = {'nama', 'foto', 'stok'};
 
 class BatchScreen extends StatefulWidget {

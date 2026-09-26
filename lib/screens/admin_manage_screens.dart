@@ -1841,12 +1841,6 @@ const _datasets = <({String kind, String label, String file, String catatan})>[
     catatan: 'Memicu rebuild indeks stok.',
   ),
   (
-    kind: 'harga',
-    label: 'Harga',
-    file: 'harga.xlsx',
-    catatan: 'Memicu rebuild indeks harga.',
-  ),
-  (
     kind: 'populasi',
     label: 'Populasi Unit',
     file: 'populasi.xlsx',

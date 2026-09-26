@@ -1812,7 +1812,7 @@ class ApiService {
   // Admin: upload dataset & katalog
   // ────────────────────────────────────────────────────────────────────
 
-  /// [kind] = 'stok' | 'harga' | 'populasi'.
+  /// [kind] = 'stok' | 'populasi'.
   static Future<({bool ok, int size})> uploadDataset({
     required String kind,
     required Uint8List bytes,

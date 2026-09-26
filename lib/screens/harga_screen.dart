@@ -127,7 +127,7 @@ class _HargaScreenState extends State<HargaScreen> {
       if (!_listSearched)
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text('Ketik untuk menampilkan daftar harga part.', style: TextStyle(fontSize: 12, color: m.ink500)),
+          child: Text('Ketik untuk menampilkan harga jual part (Accurate).', style: TextStyle(fontSize: 12, color: m.ink500)),
         )
       else if (_listLoading)
         const MasSkeleton(height: 200)
