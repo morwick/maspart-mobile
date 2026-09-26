@@ -4,4 +4,13 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- DEBUG SAJA: renderer Skia, bukan Impeller. Emulator di laptop pengembang
+         memakai GLES SwiftShader yang crash (glWaitSync 0x501) oleh Impeller —
+         termasuk saat app dibuka Android dari notifikasi, di luar `flutter run
+         no-enable-impeller`. Build RILIS tak terpengaruh (tetap Impeller). -->
+    <application>
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
+    </application>
 </manifest>
