@@ -115,9 +115,11 @@ class _LoginScreenState extends State<LoginScreen> {
   /// punya alamat utama → Lengkapi Profil; selain itu ke aplikasi.
   void _masukKe(UserOut user) {
     final lengkapi = user.role == 'pembeli' && user.profileComplete == false;
+    AuthStorage.saveRole(user.role);
     Navigator.of(context).pushReplacement(MaterialPageRoute(
-        builder: (_) =>
-            lengkapi ? const LengkapiProfilScreen() : const AppShell()));
+        builder: (_) => lengkapi
+            ? const LengkapiProfilScreen()
+            : AppShell(role: user.role)));
   }
 
   /// Masuk/daftar dengan akun Google. Akun baru otomatis jadi pembeli lalu

@@ -51,7 +51,12 @@ const String _kAppConfigKey = 'maspart_app_config';
 
 class AppShell extends StatefulWidget {
   final MasScreen initial;
-  const AppShell({super.key, this.initial = MasScreen.dashboard});
+
+  /// Peran yang sudah diketahui pemanggil (hasil login / cache sesi lalu).
+  /// Dipakai untuk tampilan AWAL supaya pembeli langsung melihat etalase,
+  /// bukan beranda staf selama /me & izin dimuat.
+  final String? role;
+  const AppShell({super.key, this.initial = MasScreen.dashboard, this.role});
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -111,6 +116,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    final r = widget.role;
+    if (r != null && r.isNotEmpty) {
+      _role = r;
+      _screen = _homeScreen(_sections);
+    }
     WidgetsBinding.instance.addObserver(this);
     _cart.addListener(_onCartChanged);
     Push.tautanTertunda.addListener(_bukaTautanPush);
@@ -143,6 +153,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         _branch = p.branch?.trim();
         _gudangKelola = p.gudangKelola;
       });
+      AuthStorage.saveRole(_role);
       _applyHomeAndGuard();
     } catch (_) {
       /* jaringan mati / server lama → pertahankan izin yang sudah ada */
@@ -247,6 +258,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         _branch = p.branch?.trim();
         _gudangKelola = p.gudangKelola;
       });
+      AuthStorage.saveRole(_role);
       _applyHomeAndGuard();
     } on ApiException {
       /* endpoint tak tersedia → biarkan default aman (semua item ber-permKey) */

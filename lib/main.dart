@@ -144,16 +144,21 @@ class _MasScrollBehavior extends MaterialScrollBehavior {
 /// Gerbang awal: token tersimpan → shell; jika tidak → login.
 class _RootGate extends StatelessWidget {
   const _RootGate();
+
+  /// Token + peran sesi lalu (petunjuk tampilan awal shell).
+  static Future<(String?, String?)> _sesi() async =>
+      (await AuthStorage.getToken(), await AuthStorage.lastRole());
+
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<String?>(
-      future: AuthStorage.getToken(),
+    return FutureBuilder<(String?, String?)>(
+      future: _sesi(),
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
           return const MasSplash();
         }
-        final token = snap.data;
-        if (token != null && token.isNotEmpty) return const AppShell();
+        final (token, role) = snap.data ?? (null, null);
+        if (token != null && token.isNotEmpty) return AppShell(role: role);
         return const LoginScreen();
       },
     );

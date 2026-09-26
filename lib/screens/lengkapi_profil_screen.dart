@@ -67,7 +67,7 @@ class _LengkapiProfilScreenState extends State<LengkapiProfilScreen> {
   }
 
   void _keToko() => Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const AppShell()));
+      MaterialPageRoute(builder: (_) => const AppShell(role: 'pembeli')));
 
   Future<void> _keLogin() async {
     await AuthStorage.clearToken();

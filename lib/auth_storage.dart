@@ -45,6 +45,34 @@ class AuthStorage {
   static Future<void> clearToken() async {
     _memory = null;
     await _storage.delete(key: AppConfig.tokenStorageKey);
+    await saveRole(null);
+  }
+
+  // ── Peran terakhir ────────────────────────────────────────────────
+  // Shell baru tahu peran setelah /me & izin selesai dimuat. Tanpa peran awal
+  // ia sempat menggambar beranda STAF beberapa detik sebelum pindah ke etalase
+  // pembeli. Peran ini hanya petunjuk tampilan awal — izin sesungguhnya tetap
+  // dari server dan menimpanya begitu termuat.
+  static const _roleKey = 'maspart_last_role';
+
+  static Future<void> saveRole(String? role) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (role == null || role.isEmpty) {
+        await prefs.remove(_roleKey);
+      } else {
+        await prefs.setString(_roleKey, role);
+      }
+    } catch (_) {/* tak fatal: shell tetap memuat peran dari server */}
+  }
+
+  static Future<String?> lastRole() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_roleKey);
+    } catch (_) {
+      return null;
+    }
   }
 
   // ── Kenyamanan login: ingat username (BUKAN password) ────────────────
