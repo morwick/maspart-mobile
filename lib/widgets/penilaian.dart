@@ -128,6 +128,10 @@ class BintangInput extends StatelessWidget {
 /// Kembalian: true bila penilaian tersimpan.
 Future<bool> showNilaiSheet(BuildContext context, OrderDetail order,
     {Penilaian? penilaian}) async {
+  // Diambil DI SINI, bukan di dalam sheet: bottom sheet adalah route baru di
+  // atas AppShell, jadi AppNav.of(context) dari dalamnya gagal (assert) dan
+  // sheet tampil "Bagian ini gagal ditampilkan".
+  final username = AppNav.of(context).username;
   final hasil = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
@@ -135,7 +139,7 @@ Future<bool> showNilaiSheet(BuildContext context, OrderDetail order,
     backgroundColor: context.mas.paper,
     shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-    builder: (_) => _NilaiSheet(order: order, penilaian: penilaian),
+    builder: (_) => _NilaiSheet(order: order, penilaian: penilaian, username: username),
   );
   return hasil == true;
 }
@@ -154,7 +158,8 @@ class _Draf {
 class _NilaiSheet extends StatefulWidget {
   final OrderDetail order;
   final Penilaian? penilaian;
-  const _NilaiSheet({required this.order, this.penilaian});
+  final String username;
+  const _NilaiSheet({required this.order, this.penilaian, required this.username});
 
   @override
   State<_NilaiSheet> createState() => _NilaiSheetState();
@@ -289,7 +294,7 @@ class _NilaiSheetState extends State<_NilaiSheet> {
   @override
   Widget build(BuildContext context) {
     final m = context.mas;
-    final username = AppNav.of(context).username;
+    final username = widget.username;
     final label = TextStyle(fontSize: 13, color: m.ink700);
     final labelBintang = TextStyle(
         fontSize: 13, fontWeight: FontWeight.w600, color: _bintangTeks(m));
