@@ -1,0 +1,219 @@
+<!doctype html>
+<!--
+  Viewer 3D model EPC (.pvz PTC Creo View) untuk aplikasi — paritas
+  frontend/src/components/Viewer3D.tsx di web.
+
+  Dimuat lewat WebView.loadHtmlString(baseUrl: <origin engine>) sehingga
+  /viewer3d/* (thingview.js, glue, .wasm ±12,8 MB) terambil dari server web
+  seperti di browser. Byte MODEL tidak diambil halaman ini: Flutter
+  mengunduhnya lewat proxy ber-auth lalu mengirimnya ke sini dalam potongan
+  base64 (__pvzMulai / __pvzPotong / __pvzSelesai) — token login tak pernah
+  masuk ke WebView. Engine mengambil model lewat XHR-nya sendiri, jadi URL
+  palsu /__mas3d/* dibelokkan ke Blob di patch XHR di bawah.
+
+  Kabar ke Flutter lewat JavaScriptChannel `Mas3D` (JSON {t: ...}).
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #f5f7fa; }
+  #host { position: fixed; inset: 0; touch-action: none; }
+  #host canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="host"></div>
+<script>
+(function () {
+  "use strict";
+  var ENGINE_PATH = "/viewer3d/";
+  var WASM_URL = ENGINE_PATH + "libthingview_wasm.wasm";
+  var WASM_PERKIRAAN = 12861659;
+  var WASM_CACHE = "viewer3d-engine-v1";
+  var STALL_MS = 45000;
+  var INIT_MS = 120000;
+  var MODEL_URL = location.origin + "/__mas3d/model.pvz";
+
+  function kabar(o) {
+    try { Mas3D.postMessage(JSON.stringify(o)); } catch (e) { /* channel belum siap */ }
+  }
+  function gagal(pesan) { kabar({ t: "gagal", m: String(pesan || "Galat tak dikenal").slice(0, 300) }); }
+
+  window.addEventListener("error", function (ev) {
+    if (ev && ev.filename && ev.filename.indexOf("/viewer3d/") >= 0) {
+      gagal("Engine 3D gagal jalan: " + (ev.message || "galat tak dikenal"));
+    }
+  }, true);
+
+  // ── Byte model dari Flutter → Blob; XHR engine ke /__mas3d/* dibelokkan ke sana.
+  var potongan = [];
+  var blobUrl = "";
+  var modelSiap = null;          // resolve(blobUrl) saat __pvzSelesai
+  var modelJanji = new Promise(function (r) { modelSiap = r; });
+
+  window.__pvzMulai = function () { potongan = []; };
+  window.__pvzPotong = function (b64) {
+    var bin = atob(b64), n = bin.length, u = new Uint8Array(n);
+    for (var i = 0; i < n; i++) u[i] = bin.charCodeAt(i);
+    potongan.push(u);
+  };
+  window.__pvzSelesai = function () {
+    var blob = new Blob(potongan, { type: "application/octet-stream" });
+    potongan = [];
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    blobUrl = URL.createObjectURL(blob);
+    modelSiap(blobUrl);
+  };
+
+  var proto = XMLHttpRequest.prototype;
+  var asliOpen = proto.open;
+  proto.open = function (method, url) {
+    var args = Array.prototype.slice.call(arguments);
+    if (blobUrl && String(url).indexOf("/__mas3d/") >= 0) args[1] = blobUrl;
+    return asliOpen.apply(this, args);
+  };
+  if (window.fetch) {
+    var asliFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      var u = typeof input === "string" ? input : (input && input.url) || "";
+      if (blobUrl && u.indexOf("/__mas3d/") >= 0) return asliFetch(blobUrl, init);
+      return asliFetch(input, init);
+    };
+  }
+
+  // ── Engine .wasm: Cache Storage → unduh sendiri berprogres (sama dgn web).
+  function dariCache() {
+    if (typeof caches === "undefined") return Promise.resolve(null);
+    return caches.open(WASM_CACHE).then(function (c) { return c.match(WASM_URL); })
+      .then(function (r) { return r ? r.arrayBuffer() : null; })
+      .then(function (b) { return b && b.byteLength > 1000000 ? b : null; })
+      .catch(function () { return null; });
+  }
+  function simpanKeCache(buf, etag) {
+    if (typeof caches === "undefined") return;
+    caches.open(WASM_CACHE).then(function (c) {
+      return c.put(WASM_URL, new Response(buf, { headers: { "Content-Type": "application/wasm", ETag: etag || "" } }));
+    }).catch(function () {});
+  }
+  function unduhWasm() {
+    var ctrl = new AbortController();
+    var terakhir = Date.now();
+    var jaga = setInterval(function () { if (Date.now() - terakhir > STALL_MS) ctrl.abort(); }, 5000);
+    return fetch(WASM_URL, { signal: ctrl.signal }).then(function (res) {
+      if (!res.ok) throw new Error("Engine 3D tak bisa diunduh (HTTP " + res.status + ").");
+      var etag = res.headers.get("etag") || "";
+      if (!res.body) return res.arrayBuffer().then(function (b) { simpanKeCache(b, etag); return b; });
+      var reader = res.body.getReader(), bagian = [], n = 0;
+      function baca() {
+        return reader.read().then(function (x) {
+          if (x.done) return;
+          bagian.push(x.value); n += x.value.byteLength; terakhir = Date.now();
+          kabar({ t: "engine", b: n, total: Math.max(WASM_PERKIRAAN, n) });
+          return baca();
+        });
+      }
+      return baca().then(function () {
+        var out = new Uint8Array(n), off = 0;
+        for (var i = 0; i < bagian.length; i++) { out.set(bagian[i], off); off += bagian[i].byteLength; }
+        simpanKeCache(out.buffer, etag);
+        return out.buffer;
+      });
+    }).catch(function (e) {
+      if (ctrl.signal.aborted) throw new Error("Unduhan engine 3D mandek " + (STALL_MS / 1000) + " detik — koneksi putus?");
+      throw e;
+    }).finally(function () { clearInterval(jaga); });
+  }
+  function ambilWasm() {
+    return dariCache().then(function (b) {
+      if (b) { kabar({ t: "engine", b: b.byteLength, total: b.byteLength }); return b; }
+      return unduhWasm();
+    });
+  }
+  function muatScript() {
+    return new Promise(function (ok, no) {
+      var s = document.createElement("script");
+      s.src = ENGINE_PATH + "thingview.js";
+      s.onload = function () { window.ThingView ? ok() : no(new Error("thingview.js tak mendaftarkan engine.")); };
+      s.onerror = function () { no(new Error("Gagal memuat engine 3D (" + ENGINE_PATH + "thingview.js).")); };
+      document.head.appendChild(s);
+    });
+  }
+  function siapkan(TV) {
+    return new Promise(function (ok, no) {
+      var t = setTimeout(function () { no(new Error("Engine 3D tak selesai disiapkan (kompilasi WASM terlalu lama).")); }, INIT_MS);
+      if (window.Module) window.Module.onAbort = function (w) { clearTimeout(t); no(new Error("Engine 3D berhenti: " + String(w).slice(0, 200))); };
+      TV.init(ENGINE_PATH, function () { clearTimeout(t); ok(); });
+    });
+  }
+
+  // Sentuhan: TIDAK perlu diterjemahkan — engine mendaftarkan handler touch
+  // Emscripten sendiri (1 jari = putar, cubit = zoom; terbukti di emulator).
+  // Shim touch→mouse sempat dipasang dan justru menggandakan tiap gerakan.
+
+  // ── Alur utama ────────────────────────────────────────────────────────
+  var sesi = null;
+  window.__zoomSemua = function () {
+    try { sesi.ZoomView(window.Module.ZoomMode.ZOOM_ALL, 0); } catch (e) {}
+  };
+
+  window.__mulai = function (opts) {
+    opts = opts || {};
+    var host = document.getElementById("host");
+    var bg = opts.bg || "#f5f7fa";
+    document.body.style.background = bg;
+    Promise.all([ambilWasm(), muatScript()]).then(function (r) {
+      var TV = window.ThingView;
+      if (window.Module && !window.Module.wasmBinary) window.Module.wasmBinary = r[0];
+      kabar({ t: "siapkan" });
+      return siapkan(TV).then(function () { return TV; });
+    }).then(function (TV) {
+      kabar({ t: "engineSiap" });
+      return modelJanji.then(function () { return TV; });
+    }).then(function (TV) {
+      var M = window.Module;
+      kabar({ t: "model" });
+      sesi = TV.CreateSession("host");
+      try { sesi.ShowProgress(true); } catch (e) {}
+      try { sesi.SetSelectionFilter(M.SelectionFilter.PART, M.SelectionList.PRIMARYSELECTION); } catch (e) {}
+      // SS4X merender 2× lebar & 2× tinggi kanvas. Kanvas engine = layar FISIK
+      // (dpr ikut), jadi di HP ±1080×2100 → tekstur 2160×4200 melampaui
+      // MAX_TEXTURE_SIZE 4096 yang umum di GPU HP: texImage2D gagal dan layar
+      // HITAM total (terbukti di emulator). SS4X hanya bila memang muat.
+      try {
+        var cv = host.querySelector("canvas");
+        var g = cv && (cv.getContext("webgl2") || cv.getContext("webgl"));
+        var maks = g ? g.getParameter(g.MAX_TEXTURE_SIZE) : 0;
+        var muat = cv && maks && Math.max(cv.width, cv.height) * 2 <= maks;
+        sesi.SetAntialiasingMode(muat ? M.AntialiasingMode.SS4X : M.AntialiasingMode.NONE);
+      } catch (e) {}
+      // ⚠️ Engine membaca warna sebagai RGBA (0xRRGGBBAA) — alpha wajib 0xff.
+      try { sesi.SetBackgroundColor(parseInt(bg.slice(1) + "ff", 16)); } catch (e) {}
+      var model = sesi.MakeModel();
+      model.LoadFromURLWithCallback(MODEL_URL, true, true, false, function (ok) {
+        if (!ok) { gagal("Model 3D gagal dibaca engine."); return; }
+        window.__zoomSemua();
+        kabar({ t: "siap" });
+      });
+    }).catch(function (e) { gagal(e && e.message ? e.message : e); });
+  };
+
+  // ThingView membuat kanvas sekali seukuran wadah — ikuti perubahan ukuran
+  // (rotasi layar) supaya gambar tak buram/terpotong. Ukuran FISIK (× dpr),
+  // sama dengan yang dipakai engine saat membuat kanvas (1081×2115 untuk
+  // wadah 412×806 @2,625) — ukuran CSS saja membuat gambar buram.
+  window.addEventListener("resize", function () {
+    var host = document.getElementById("host");
+    var c = host.querySelector("canvas");
+    if (!c) return;
+    var dpr = window.devicePixelRatio || 1;
+    var w = Math.round(host.clientWidth * dpr), h = Math.round(host.clientHeight * dpr);
+    if (w > 0 && h > 0 && (c.width !== w || c.height !== h)) { c.width = w; c.height = h; }
+  });
+
+  kabar({ t: "halaman" });
+})();
+</script>
+</body>
+</html>

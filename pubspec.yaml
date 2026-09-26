@@ -41,6 +41,9 @@ dependencies:
   flutter_markdown: ^0.7.7+1
   markdown: ^7.3.1
   webview_flutter: ^4.14.1
+  # Langsung (bukan transitif) utk AndroidWebViewController.enableDebugging —
+  # DevTools WebView viewer 3D di build debug.
+  webview_flutter_android: ^4.13.0
   flutter_map: ^8.3.1
   latlong2: ^0.10.1
   shared_preferences: ^2.5.5
@@ -100,6 +103,8 @@ flutter:
     - assets/promo/
     # Ilustrasi petak KATEGORI etalase (render PNG dari frontend/public/kategori/*.svg).
     - assets/kategori/
+    # Halaman pembungkus viewer 3D (engine ThingView dimuat dari server web).
+    - assets/viewer3d/
 
   # Font Geist + JetBrains Mono dimuat via paket google_fonts (sesuai desain),
   # jadi tidak perlu deklarasi font bundel di sini.

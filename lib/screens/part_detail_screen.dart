@@ -15,6 +15,7 @@ import '../utils.dart';
 import '../api_service.dart';
 import '../app/nav.dart';
 import '../cart.dart';
+import 'viewer_3d_screen.dart';
 
 /// Nomor rangka terakhir yang dipakai — pembeli umumnya punya 1-2 unit saja,
 /// jadi lebih baik diingat daripada diketik ulang tiap membuka part.
@@ -364,6 +365,44 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
         _weichaiErr = e is ApiException ? e.message : 'Gagal menghubungi portal Weichai.';
       });
     }
+  }
+
+  // Model 3D (.pvz EPC) — sama dengan exploded: HANYA saat diminta, karena
+  // pencarian figure pertama menembak EPC. Engine WASM ±13 MB dimuat viewer.
+  Part3d? _tiga;
+  bool _tigaBusy = false;
+  String? _tigaErr;
+
+  Future<void> _lihat3d() async {
+    final ada = _tiga;
+    if (ada != null) {
+      if (ada.found) _buka3d(ada);
+      return;
+    }
+    if (_tigaBusy || _pn.isEmpty) return;
+    setState(() {
+      _tigaBusy = true;
+      _tigaErr = null;
+    });
+    try {
+      final d = await ApiService.part3d(_pn);
+      if (!mounted) return;
+      setState(() {
+        _tiga = d;
+        _tigaBusy = false;
+      });
+      if (d.found) _buka3d(d);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _tigaBusy = false;
+        _tigaErr = e is ApiException ? e.message : 'Gagal mencari model 3D.';
+      });
+    }
+  }
+
+  void _buka3d(Part3d d) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => Viewer3DScreen(info: d)));
   }
 
   Future<void> _loadExploded() async {
@@ -758,6 +797,8 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
         _specCard(m),
         const SizedBox(height: 14),
         _explodedCard(m),
+        const SizedBox(height: 14),
+        _tigaCard(m),
         // Semua unit yang memakai PN ini (web: "Ditemukan di N unit"). Sebelum
         // katalog terjawab, tampilkan dulu unit dari argumen navigasi supaya
         // bagian ini tidak berkedip muncul-hilang.
@@ -1683,6 +1724,71 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: anak),
           ),
       ],
+    );
+  }
+
+  // ── Model 3D (CAD resmi EPC) ────────────────────────────────────────
+  Widget _tigaCard(MasColors m) {
+    final d = _tiga;
+    final Widget isi;
+    if (_tigaErr != null) {
+      isi = _alertBox(m, _tigaErr!);
+    } else if (d != null && !d.found) {
+      isi = _alertBox(
+          m,
+          'Model 3D tidak tersedia untuk part ini di EPC'
+          '${d.jumlahFigure != null ? ' (${d.jumlahFigure} figure diperiksa, semuanya hanya gambar 2D)' : ''}.');
+    } else {
+      isi = Row(children: [
+        Container(
+          width: 44,
+          height: 44,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+              color: m.brand50, borderRadius: BorderRadius.circular(10)),
+          child: Icon(Icons.view_in_ar_rounded, size: 24, color: m.brand700),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            _tigaBusy
+                ? 'Mencari model 3D di EPC…'
+                : d != null
+                    ? 'Figure: ${d.figureNama ?? d.figurePn ?? '-'}'
+                    : 'Putar & perbesar model CAD resmi EPC yang memuat part ini.',
+            style: TextStyle(fontSize: 12, height: 1.5, color: m.ink600),
+          ),
+        ),
+        const SizedBox(width: 10),
+        FilledButton.icon(
+          onPressed: _tigaBusy ? null : _lihat3d,
+          style: FilledButton.styleFrom(
+            backgroundColor: m.brand600,
+            // Eksplisit: foreground bawaan FilledButton di tema gelap ikut
+            // warna primer → label hijau di atas hijau, nyaris tak terbaca.
+            foregroundColor: Colors.white,
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+          ),
+          icon: _tigaBusy
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.threed_rotation_rounded, size: 16),
+          label: Text(d != null ? 'Buka 3D' : 'Lihat 3D',
+              style: const TextStyle(fontSize: 12.5)),
+        ),
+      ]);
+    }
+    return MasSectionCard(
+      title: 'Model 3D',
+      trailing: Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        const MasPill(label: 'CAD resmi EPC', tone: MasPillTone.neutral, height: 20),
+        if (d != null && d.found && d.balon != null)
+          MasPill(label: 'balon ${d.balon}', tone: MasPillTone.neutral, height: 20),
+      ]),
+      children: [Padding(padding: const EdgeInsets.all(14), child: isi)],
     );
   }
 

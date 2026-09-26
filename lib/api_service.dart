@@ -606,6 +606,19 @@ class ApiService {
     return PartExplodedFigure.fromJson(_Api._obj(data));
   }
 
+  /// Nama file model 3D (.pvz) figure EPC yang memuat sebuah PN. ON-DEMAND
+  /// (tombol) — panggilan pertama menembak EPC, jadi pakai timeout panjang.
+  static Future<Part3d> part3d(String pn) async {
+    final data = await _Api.get('/api/parts/epc-3d',
+        query: {'pn': pn}, timeout: _Api._timeoutLong);
+    return Part3d.fromJson(_Api._obj(data));
+  }
+
+  /// Byte satu file EPC (.pvz) lewat proxy ber-auth. Diambil DI SINI (bukan
+  /// oleh WebView) supaya token login tak pernah masuk ke halaman web viewer.
+  static Future<Uint8List> epcFile(String name) =>
+      _Api.bytes('/api/parts/epc-file', query: {'name': name});
+
   /// Stok satu part dari INDEKS Accurate (agregat + rincian per gudang).
   /// Server tak pernah menembak Accurate live per-PN — indeks ditarik 3×
   /// sehari pada jam WIB tetap 07/12/19 lalu dipersist ke disk.

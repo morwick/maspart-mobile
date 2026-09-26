@@ -837,6 +837,55 @@ class PartExplodedFigure {
   }
 }
 
+/// Model 3D (.pvz PTC Creo View) figure EPC yang memuat sebuah PN — tanpa
+/// nomor rangka, lintas model. Kembar [PartExplodedFigure] untuk 3D; cerminan
+/// `Part3d` di web (frontend/src/lib/api.ts).
+class Part3d {
+  final bool found;
+  final String partNumber;
+
+  /// Nama file .pvz — byte-nya diambil lewat [ApiService.epcFile].
+  final List<String> d3s;
+  final String? balon;
+  final String? figurePn;
+  final String? figureNama;
+  final String? namaItem;
+  final String? sumberModel;
+  final int? jumlahModelPemakai;
+  final int? jumlahFigure;
+
+  const Part3d({
+    this.found = false,
+    this.partNumber = '',
+    this.d3s = const [],
+    this.balon,
+    this.figurePn,
+    this.figureNama,
+    this.namaItem,
+    this.sumberModel,
+    this.jumlahModelPemakai,
+    this.jumlahFigure,
+  });
+
+  factory Part3d.fromJson(Map<String, dynamic> j) {
+    final d3s = (j['d3s'] is List)
+        ? (j['d3s'] as List).map((e) => '$e').where((e) => e.isNotEmpty).toList()
+        : <String>[];
+    return Part3d(
+      found: j['found'] == true && d3s.isNotEmpty,
+      partNumber: _s(j['part_number']),
+      d3s: d3s,
+      balon: _sOrNull(j['balon']),
+      figurePn: _sOrNull(j['figure_pn']),
+      figureNama: _sOrNull(j['figure_nama']),
+      namaItem: _sOrNull(j['nama_item']),
+      sumberModel: _sOrNull(j['sumber_model']),
+      jumlahModelPemakai: _iOrNull(j['jumlah_model_pemakai']),
+      jumlahFigure: _iOrNull(j['jumlah_figure']),
+    );
+  }
+}
+
 class PartSpecResponse {
   final String partNumber;
   final PartSpec spec;
