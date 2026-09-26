@@ -1442,9 +1442,12 @@ class OrderSummary {
       );
 }
 
-/// Detail pesanan. Perhatikan `tax` = komponen PPN 12% yang SUDAH TERMASUK di
-/// dalam `subtotal` (inklusif, mengikuti Accurate) — bukan tambahan di atasnya.
-/// Dan `fulfillGudang` = gudang FISIK pengirim, beda dari `gudang` (cabang
+/// Detail pesanan. Perhatikan `tax` = PPN 12% (DPP 11/12) yang DITAMBAHKAN di
+/// atas harga barang setelah voucher diskon & poin (aturan sekarang, ikut
+/// Accurate). Pesanan lama (2026-07-12 s/d 2026-09-26) menyimpan `tax` sebagai
+/// komponen yang SUDAH TERMASUK di `subtotal` (inklusif), dan pesanan sangat
+/// lama `tax`-nya kosong — bedakan dengan `ppnDitambahkan` di order_ui.dart,
+/// jangan tebak dari tanggal. Dan `fulfillGudang` = gudang FISIK pengirim, beda dari `gudang` (cabang
 /// pemroses) — ongkir dihitung dari gudang pemenuh ini.
 class OrderDetail extends OrderSummary {
   final String? note;
@@ -1452,6 +1455,9 @@ class OrderDetail extends OrderSummary {
   final double? gudangLon;
   final String? gudangPic;
   final double subtotal;
+
+  /// PPN pesanan — ditambahkan (aturan baru) atau komponen inklusif (pesanan
+  /// lama); lihat doc kelas. Null = pesanan pra-migrasi 014.
   final double? tax;
   final double shippingCost;
 
@@ -1491,6 +1497,13 @@ class OrderDetail extends OrderSummary {
 
   /// Batas ambil pesanan Ambil di Toko yang 'siap diambil' (dihitung server).
   final String? batasAmbilAt;
+
+  /// Bukti serah terima Ambil di Toko (migrasi 043): foto orang yang mengambil
+  /// barang, nama pengambil (opsional) & waktu diambil — diisi gudang saat
+  /// barang diserahkan, sekaligus menandai pesanan selesai.
+  final String? pickupProofUrl;
+  final String? pickedUpBy;
+  final String? pickedUpAt;
 
   /// Mis. dibayar setelah order batal → perlu refund.
   final String? paymentNote;
@@ -1560,6 +1573,9 @@ class OrderDetail extends OrderSummary {
     this.pickupLon,
     this.pickupPic,
     this.batasAmbilAt,
+    this.pickupProofUrl,
+    this.pickedUpBy,
+    this.pickedUpAt,
     this.paymentNote,
     this.penawaranStatus,
     this.penawaranNumber,
@@ -1618,6 +1634,9 @@ class OrderDetail extends OrderSummary {
         pickupLon: _dOrNull(j['pickup_lon']),
         pickupPic: _sOrNull(j['pickup_pic']),
         batasAmbilAt: _sOrNull(j['batas_ambil_at']),
+        pickupProofUrl: _sOrNull(j['pickup_proof_url']),
+        pickedUpBy: _sOrNull(j['picked_up_by']),
+        pickedUpAt: _sOrNull(j['picked_up_at']),
         paymentNote: _sOrNull(j['payment_note']),
         penawaranStatus: _sOrNull(j['penawaran_status']),
         penawaranNumber: _sOrNull(j['penawaran_number']),

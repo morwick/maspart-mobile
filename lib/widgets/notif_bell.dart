@@ -58,24 +58,6 @@ class _NotifBellState extends State<NotifBell> {
     } catch (_) {/* lonceng tak boleh mengganggu halaman */}
   }
 
-  /// Tautan web → layar aplikasi. null = tak dikenali (item tetap bisa dibaca).
-  (MasScreen, Map<String, dynamic>)? _tujuan(String? tautan) {
-    final t = (tautan ?? '').trim();
-    if (t.isEmpty) return null;
-    final seg = Uri.tryParse(t)?.pathSegments.where((s) => s.isNotEmpty).toList() ?? const [];
-    if (seg.length >= 2 && seg[0] == 'retur') {
-      return (MasScreen.returDetail, {'return_code': seg[1]});
-    }
-    if (seg.length >= 3 && seg[0] == 'cabang' && seg[1] == 'retur') {
-      return (MasScreen.cabangReturDetail, {'return_code': seg[2]});
-    }
-    if (seg.length >= 2 && seg[0] == 'pesanan') {
-      return (MasScreen.pesananDetail, {'order_code': seg[1]});
-    }
-    if (seg.length == 1 && seg[0] == 'retur') return (MasScreen.returSaya, {});
-    return null;
-  }
-
   Future<void> _buka() async {
     HapticFeedback.selectionClick();
     final nav = AppNav.of(context);
@@ -125,7 +107,7 @@ class _NotifBellState extends State<NotifBell> {
                   separatorBuilder: (_, _) => Divider(height: 1, color: m.ink100),
                   itemBuilder: (_, i) {
                     final x = _list[i];
-                    final tujuan = _tujuan(x.tautan);
+                    final tujuan = tujuanTautan(x.tautan);
                     return Material(
                       color: x.dibaca ? m.paper : m.brand50,
                       child: InkWell(

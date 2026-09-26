@@ -607,8 +607,6 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     return (lokal != null && lokal > 0) ? formatRupiah(lokal) : '—';
   }
 
-  bool get _hargaLive => (_acc?.harga ?? 0) > 0;
-
   /// Berat satuan (gram): katalog dulu, lalu spesifikasi SIMS.
   int get _beratGram {
     final lokal = asInt(_part['berat']);
@@ -822,7 +820,6 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
         Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
           MasEyebrow('Harga'),
-          if (_hargaLive) const MasPill(label: 'Accurate', tone: MasPillTone.brand, height: 18),
         ]),
         const SizedBox(height: 8),
         Text(_hargaStr, style: masMono(size: 17, weight: FontWeight.w600, color: m.brand700)),
@@ -968,7 +965,6 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
           Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
             MasEyebrow('Harga'),
-            const MasPill(label: 'Accurate', tone: MasPillTone.brand, height: 18),
           ]),
           const SizedBox(height: 8),
           Text(aktif != null ? _hargaVarian(aktif) : (_rentangHarga ?? '—'),
@@ -1137,7 +1133,6 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
               Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
                 MasEyebrow('Harga'),
-                if (_hargaLive) const MasPill(label: 'Accurate', tone: MasPillTone.brand, height: 18),
               ]),
               const SizedBox(height: 8),
               Text(_hargaStr, style: masMono(size: 17, weight: FontWeight.w600, color: m.brand700)),
@@ -1805,14 +1800,13 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
 
     bool ada(String label) => rows.any((r) => r.$1 == label);
 
-    final model = modelFromFile(item['file'] as String?);
+    // ⛔ 'Unit / Model' (nama file katalog) & 'Sumber' (nama sheet katalog, sering
+    // berbahasa Mandarin) SENGAJA tidak ditampilkan — data internal katalog, tak
+    // berarti bagi pembaca; web juga tak menampilkannya (paritas).
     final merek = '${item['merek'] ?? item['brand'] ?? ''}';
     final satuan = '${item['satuan'] ?? ''}';
-    final sheet = '${item['sheet'] ?? ''}';
-    if (model.isNotEmpty) rows.add(('Unit / Model', model));
     if (merek.isNotEmpty && !ada('Merek')) rows.add(('Merek', merek));
     if (satuan.isNotEmpty && !ada('Satuan')) rows.add(('Satuan', satuan));
-    if (sheet.isNotEmpty) rows.add(('Sumber', sheet));
 
     return rows;
   }

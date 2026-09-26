@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "81977282447",
+    "project_id": "maspart-b2c5e",
+    "storage_bucket": "maspart-b2c5e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:81977282447:android:d30ad39166e740864d45fa",
+        "android_client_info": {
+          "package_name": "com.example.maspart_mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBDrQABlh2LH_H8OgzI3AXgTkSdb6o8EGA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

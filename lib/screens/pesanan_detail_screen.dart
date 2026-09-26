@@ -431,9 +431,10 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
   }
 
   Widget _items(MasColors m, OrderDetail o) {
-    // PPN inklusif: pakai `tax` dari server bila ada, kalau tidak hitung sendiri
-    // dengan rumus yang sama persis (floor(subtotal × 12 / 112)).
-    final ppn = o.tax?.round() ?? ppnOf(o.subtotal);
+    // PPN sadar aturan: pesanan baru → PPN DITAMBAHKAN (baris biasa); pesanan
+    // lama ber-PPN inklusif → tetap abu-abu "Termasuk PPN 12%". Total selalu
+    // `o.total` tersimpan, tak pernah dihitung ulang.
+    final ppn = barisPpn(o);
 
     return MasSectionCard(
       title: o.orderCode,
@@ -480,8 +481,14 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
           child: Column(children: [
             _sumRow(m, 'Subtotal', formatRupiah(o.subtotal)),
+            // Aturan baru — urutan ala Accurate: potongan barang (voucher &
+            // poin) dulu, lalu PPN atas barang setelah potongan, lalu ongkir &
+            // potongannya. Pesanan lama tetap tata letak semula.
+            if (ppn.ditambahkan)
+              OrderPotongan(order: o, bagian: PotonganBagian.barang),
             const SizedBox(height: 5),
-            _sumRow(m, 'Termasuk PPN 12%', formatRupiah(ppn), muted: true),
+            _sumRow(m, ppn.label, formatRupiah(ppn.nilai),
+                muted: !ppn.ditambahkan),
             const SizedBox(height: 5),
             _sumRow(
               m,
@@ -495,7 +502,12 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                       : '—',
             ),
             // Potongan voucher/poin + kode voucher — paritas web OrderPotongan.
-            OrderPotongan(order: o),
+            // Aturan baru: tinggal potongan ongkir (potongan barang di atas PPN).
+            OrderPotongan(
+                order: o,
+                bagian: ppn.ditambahkan
+                    ? PotonganBagian.ongkir
+                    : PotonganBagian.semua),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 9),
               child: Divider(height: 1, color: m.ink150),
@@ -703,6 +715,14 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                       fontSize: 12, fontWeight: FontWeight.w600, color: m.warn600),
                 ),
               ],
+              if (o.status == 'dikirim') ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Gudang menandai selesai saat barang diserahkan — petugas akan '
+                  'memotret pengambil sebagai bukti serah terima.',
+                  style: TextStyle(fontSize: 12, color: m.ink500, height: 1.4),
+                ),
+              ],
               if (o.pickupPic != null && o.pickupPic!.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 GestureDetector(
@@ -732,6 +752,10 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                           fontWeight: FontWeight.w600,
                           color: m.brand700)),
                 ),
+              ],
+              if ((o.pickupProofUrl ?? '').isNotEmpty) ...[
+                const SizedBox(height: 12),
+                BuktiSerahTerima(order: o),
               ],
             ],
           ),
@@ -965,12 +989,12 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                 _alert(m, o.paymentNote!, tone: MasPillTone.warn),
               ],
 
-              if (o.status == 'dikirim') ...[
+              // Ambil di Toko tak dikonfirmasi pembeli: gudang yang menandai
+              // selesai sambil memotret pengambil (bukti serah terima).
+              if (o.status == 'dikirim' && !o.pickup) ...[
                 const SizedBox(height: 10),
                 MasButton(
-                  label: _busy == 'confirm'
-                      ? 'Memproses…'
-                      : (o.pickup ? '✓ Barang Sudah Diambil' : '✓ Pesanan Diterima'),
+                  label: _busy == 'confirm' ? 'Memproses…' : '✓ Pesanan Diterima',
                   expand: true,
                   loading: _busy == 'confirm',
                   onTap: _busy != null ? null : _doConfirm,

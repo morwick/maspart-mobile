@@ -3,24 +3,80 @@
 // `frontend/src/lib/order-ui.ts`. Angka di sini HARUS sama dengan backend,
 // kalau tidak, tagihan ke pembeli tak akan cocok dengan dokumen Accurate.
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'models.dart';
 import 'theme/mas_theme.dart';
 import 'utils.dart';
 import 'widgets/mas_ui.dart';
 
-/// PPN 12% **INKLUSIF** — harga jual Accurate SUDAH mengandung PPN, jadi pajak
-/// TIDAK ditambahkan di atas subtotal. Contoh dari Accurate: Sub Total 80.000 →
-/// PPN 12% 8.571 → Total tetap 80.000.
+/// PPN 12% **DITAMBAHKAN** di atas harga barang — harga katalog/Accurate BELUM
+/// termasuk PPN. Bukti: penawaran Accurate asli milik pemilik — Sub Total
+/// 5.400.000 → PPN (12%) 594.000 → Total 5.994.000, yaitu 12% × DPP 11/12 =
+/// efektif 11%. Aturan (harus SAMA PERSIS dengan backend `orders.create_order`):
+///   neto  = subtotal − voucher diskon − potongan poin   (potongan SEBELUM pajak)
+///   PPN   = floor(neto × 11 / 100)
+///   total = neto + PPN + ongkir − potongan ongkir       (ongkir TIDAK kena PPN)
 ///
-/// Harus sama dengan backend (`orders.ppn_included`).
+/// Catatan sejarah: sejak 2026-07-12 aplikasi sempat menganggap harga INKLUSIF
+/// (PPN = x × 12/112, total = barang + ongkir). Dasarnya penawaran yang dibuat
+/// aplikasi SENDIRI dengan inclusiveTax=true — bukan bukti harga jual
+/// sebenarnya. Pesanan dari masa itu tetap tampil apa adanya (lihat
+/// [ppnDitambahkan]); totalnya SELALU dibaca dari `o.total`, tak dihitung ulang.
 const double kPpnRate = 0.12;
 
-/// Komponen PPN yang sudah terkandung di dalam [subtotal].
-int ppnOf(num subtotal) => (subtotal * 12 ~/ 112);
+/// PPN 12% (DPP 11/12) yang DITAMBAHKAN di atas [neto] (barang setelah voucher
+/// diskon & potongan poin). Pembulatan integer ke bawah.
+int ppnOf(num neto) => neto <= 0 ? 0 : neto * 11 ~/ 100;
 
-/// Total tagihan = barang (sudah termasuk PPN) + ongkir. PPN bukan tambahan.
-num totalOf(num subtotal, [num ongkir = 0]) => subtotal + ongkir;
+/// Total tagihan = neto + PPN + ongkir − potongan ongkir. [neto] = barang
+/// setelah voucher diskon & potongan poin.
+num totalOf(num neto, [num ongkir = 0, num potonganOngkir = 0]) {
+  final n = neto < 0 ? 0 : neto;
+  return n + ppnOf(n) + ongkir - potonganOngkir;
+}
+
+/// LEGACY — komponen PPN yang terkandung di harga INKLUSIF (rumus lama 12/112).
+/// Hanya untuk menampilkan pesanan lama yang kolom `tax`-nya kosong.
+int ppnInklusifLama(num amount) => amount <= 0 ? 0 : amount * 12 ~/ 112;
+
+/// Harga barang pesanan setelah voucher diskon & potongan poin (dasar PPN).
+num netoOf(OrderDetail o) {
+  final n = o.subtotal - o.voucherDiscount - o.pointDiscount;
+  return n < 0 ? 0 : n;
+}
+
+/// true = pesanan aturan BARU: PPN ditambahkan di atas barang (total tersimpan
+/// = neto + PPN + ongkir − potongan ongkir). false = pesanan lama (harga
+/// dianggap inklusif, PPN hanya komponen) → tampil "Termasuk PPN 12%" seperti
+/// dulu. Dibaca dari angka yang TERSIMPAN (tak ada kolom penanda aturan) —
+/// sama dengan backend `orders.ppn_ditambahkan`. Dibulatkan karena kolom uang
+/// datang sebagai double.
+bool ppnDitambahkan(OrderDetail o) {
+  final tax = (o.tax ?? 0).round();
+  if (tax <= 0) return false;
+  final ongkir = o.shippingCost - o.shippingDiscount;
+  return o.total.round() ==
+      netoOf(o).round() + tax + (ongkir < 0 ? 0 : ongkir).round();
+}
+
+/// Baris PPN di ringkasan pesanan, sadar aturan. `ditambahkan` false = pesanan
+/// lama → tampilkan abu-abu sebagai komponen ("Termasuk PPN 12%"), persis
+/// tampilan lama.
+({String label, int nilai, bool ditambahkan}) barisPpn(OrderDetail o) {
+  if (ppnDitambahkan(o)) {
+    return (
+      label: 'PPN 12% (DPP 11/12)',
+      nilai: o.tax!.round(),
+      ditambahkan: true,
+    );
+  }
+  return (
+    label: 'Termasuk PPN 12%',
+    nilai: o.tax?.round() ?? ppnInklusifLama(o.subtotal),
+    ditambahkan: false,
+  );
+}
 
 /// Label + warna pill tiap status pesanan.
 const Map<String, (String, MasPillTone)> kOrderStatus = {
@@ -148,24 +204,38 @@ const Color kWarnaVoucherOngkir = Color(0xFF0B7D6E);
 /// Cerminan `components/OrderPotongan.tsx` — dipakai detail pesanan pembeli,
 /// admin, dan cabang. Tanpa baris ini Subtotal + Ongkir ≠ Total dan orang
 /// mengira sistem salah hitung.
+///
+/// [bagian] memecah tampilan mengikuti urutan Accurate untuk pesanan aturan
+/// PPN baru ([ppnDitambahkan]): [PotonganBagian.barang] (voucher diskon + poin)
+/// tampil SEBELUM baris PPN, [PotonganBagian.ongkir] (voucher gratis ongkir +
+/// kode voucher) setelah baris Ongkir. Default [PotonganBagian.semua] = tata
+/// letak lama (pesanan lama).
+enum PotonganBagian { semua, barang, ongkir }
+
 class OrderPotongan extends StatelessWidget {
   final OrderDetail order;
-  const OrderPotongan({super.key, required this.order});
+  final PotonganBagian bagian;
+  const OrderPotongan(
+      {super.key, required this.order, this.bagian = PotonganBagian.semua});
 
   @override
   Widget build(BuildContext context) {
     final m = context.mas;
     final o = order;
+    final semua = bagian == PotonganBagian.semua;
+    final barang = semua || bagian == PotonganBagian.barang;
+    final ongkir = semua || bagian == PotonganBagian.ongkir;
     final baris = <(String, num, Color)>[
-      if (o.voucherDiscount > 0)
+      if (barang && o.voucherDiscount > 0)
         ('Voucher diskon', o.voucherDiscount, kWarnaVoucherDiskon),
-      if (o.shippingDiscount > 0)
+      if (ongkir && o.shippingDiscount > 0)
         ('Voucher gratis ongkir', o.shippingDiscount, kWarnaVoucherOngkir),
-      if (o.pointDiscount > 0)
+      if (barang && o.pointDiscount > 0)
         ('Potongan poin (${thousands(o.pointRedeemed)})', o.pointDiscount,
             m.brand700),
     ];
-    final kode = (o.voucherCodes ?? '').trim();
+    // Kode voucher (bisa voucher barang maupun ongkir) selalu paling akhir.
+    final kode = ongkir ? (o.voucherCodes ?? '').trim() : '';
     if (baris.isEmpty && kode.isEmpty) return const SizedBox.shrink();
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       for (final (label, n, warna) in baris)
@@ -186,6 +256,81 @@ class OrderPotongan extends StatelessWidget {
               'Kode voucher: ${kode.split(',').map((e) => e.trim()).join(', ')}',
               style: TextStyle(fontSize: 11.5, color: m.ink400)),
         ),
+    ]);
+  }
+}
+
+/// Bukti serah terima pesanan Ambil di Toko (migrasi 043): foto orang yang
+/// mengambil barang + nama & waktu ambil. Dipakai TIGA layar (pembeli, gudang,
+/// admin) — bukti yang sama dibaca bila ada sengketa "barang belum diambil".
+/// Kosong (SizedBox) bila pesanan belum punya foto serah terima.
+class BuktiSerahTerima extends StatelessWidget {
+  final OrderDetail order;
+  const BuktiSerahTerima({super.key, required this.order});
+
+  void _buka(BuildContext context, String url) {
+    Navigator.of(context).push(PageRouteBuilder(
+      opaque: false,
+      barrierColor: Colors.black.withValues(alpha: 0.92),
+      pageBuilder: (ctx, _, _) => Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.black54,
+          foregroundColor: Colors.white,
+          title: const Text('Bukti serah terima'),
+        ),
+        body: Center(
+          child: InteractiveViewer(
+            minScale: 0.8,
+            maxScale: 6,
+            child: CachedNetworkImage(imageUrl: url, fit: BoxFit.contain),
+          ),
+        ),
+      ),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final url = (order.pickupProofUrl ?? '').trim();
+    if (url.isEmpty) return const SizedBox.shrink();
+    final m = context.mas;
+    final nama = (order.pickedUpBy ?? '').trim();
+    final kapan = order.pickedUpAt ?? '';
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('Bukti Serah Terima',
+          style: TextStyle(
+              fontSize: 12.5, fontWeight: FontWeight.w600, color: m.ink800)),
+      const SizedBox(height: 6),
+      GestureDetector(
+        onTap: () => _buka(context, url),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(MasRadii.card),
+          child: Container(
+            width: double.infinity,
+            height: 180,
+            color: m.ink100,
+            child: CachedNetworkImage(
+              imageUrl: url,
+              fit: BoxFit.cover,
+              placeholder: (_, _) => Center(
+                child: CircularProgressIndicator(
+                    strokeWidth: 2.2, color: m.brand600),
+              ),
+              errorWidget: (_, _, _) =>
+                  const Center(child: HatchBox(label: 'foto gagal dimuat')),
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(height: 6),
+      Text(
+        'Diambil oleh ${nama.isNotEmpty ? nama : '(nama tidak dicatat)'}'
+        '${kapan.isNotEmpty ? ' · ${fmtDate(kapan)}' : ''}',
+        style: TextStyle(fontSize: 12, color: m.ink600, height: 1.4),
+      ),
+      Text('Ketuk foto untuk memperbesar.',
+          style: TextStyle(fontSize: 11, color: m.ink400)),
     ]);
   }
 }

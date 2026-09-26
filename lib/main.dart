@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'theme/mas_theme.dart';
 import 'auth_storage.dart';
+import 'push.dart';
 import 'app/shell.dart';
 import 'screens/login_screen.dart';
 
@@ -24,6 +25,9 @@ Future<void> main() async {
   // terang → gelap saat aplikasi dibuka.
   final theme = ThemeController();
   await theme.load();
+
+  // Push notifikasi sistem (FCM). Tanpa google-services.json → tidur diam-diam.
+  await Push.init();
 
   // Satu widget yang gagal dibangun tak boleh memunculkan kotak merah "RED
   // SCREEN OF DEATH" berisi jejak tumpukan di layar pengguna lapangan.

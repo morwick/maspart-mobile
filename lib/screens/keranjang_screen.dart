@@ -10,8 +10,9 @@
 // 2. SATU PESANAN = SATU GUDANG. Kurir tak bisa mengirim satu paket dari dua
 //    kota. Keranjang boleh lintas gudang, tapi checkout hanya untuk gudang
 //    terpilih; sisanya TETAP di keranjang untuk pesanan berikutnya.
-// 3. PPN 12% INKLUSIF. Harga Accurate sudah mengandung PPN → total = barang +
-//    ongkir. PPN hanya ditampilkan sebagai komponen, bukan tambahan.
+// 3. PPN 12% (DPP 11/12) DITAMBAHKAN. Harga katalog BELUM termasuk PPN →
+//    total = neto + PPN + ongkir − potongan ongkir, dengan neto = barang −
+//    voucher diskon − potongan poin. Ongkir tidak kena PPN (lihat order_ui).
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -694,14 +695,16 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     final blokir = _blokir;
     final beli = _itemsBeli;
     final subtotal = _subtotal;
-    // PPN INKLUSIF dihitung dari harga barang SETELAH potongan poin — sama
-    // dengan backend (orders.create_order); kalau tidak, angkanya berbeda
-    // antara layar dan faktur.
+    // PPN dihitung dari harga barang SETELAH voucher diskon & potongan poin,
+    // lalu DITAMBAHKAN — sama dengan backend (orders.create_order); kalau
+    // tidak, angka yang dilihat pembeli berbeda dengan yang ditagih. Minimal
+    // belanja voucher & plafon poin tetap memakai harga sebelum pajak
+    // (`subtotal`).
     _jadwalVoucher();
     final barangBersih = subtotal - _vDiskon - _potongan;
-    final ppn = ppnOf(barangBersih < 0 ? 0 : barangBersih);
-    final totalKotor =
-        totalOf(subtotal, _ongkir) - _vDiskon - _potongan - _vOngkir;
+    final neto = barangBersih < 0 ? 0 : barangBersih;
+    final ppn = ppnOf(neto);
+    final totalKotor = totalOf(neto, _ongkir, _vOngkir);
     // Total tak pernah negatif (paritas web `Math.max(0, …)`).
     final total = totalKotor < 0 ? 0 : totalKotor;
 
@@ -1489,22 +1492,6 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     return MasCard(
       child: Column(children: [
         _sumRow(m, 'Subtotal barang', formatRupiah(subtotal)),
-        const SizedBox(height: 6),
-        // PPN ditampilkan sebagai KOMPONEN, bukan tambahan — sama dengan
-        // dokumen Accurate.
-        _sumRow(m, 'Termasuk PPN 12%', formatRupiah(ppn), muted: true),
-        const SizedBox(height: 6),
-        _sumRow(
-          m,
-          _ambilSendiri
-              ? 'Ongkir (ambil sendiri)'
-              : 'Ongkir${_rate != null ? ' (${_rate!.courierName})' : ''}',
-          _ambilSendiri
-              ? 'Gratis'
-              : _rate != null
-                  ? formatRupiah(_rate!.price)
-                  : '—',
-        ),
         const SizedBox(height: 10),
         _barisVoucher(m),
         if (_vDiskon > 0) ...[
@@ -1512,12 +1499,6 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           _sumRow(m, 'Voucher diskon (${_vPilih['diskon']})',
               '−${formatRupiah(_vDiskon)}',
               color: _kWarnaDiskon),
-        ],
-        if (_vOngkir > 0) ...[
-          const SizedBox(height: 6),
-          _sumRow(m, 'Gratis ongkir (${_vPilih['ongkir']})',
-              '−${formatRupiah(_vOngkir)}',
-              color: _kWarnaOngkir),
         ],
         // Tukar poin — hanya muncul bila server memang menawarkan (fitur aktif,
         // penukaran dibuka, saldo & keranjang cukup).
@@ -1571,6 +1552,29 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           _sumRow(m, 'Potongan poin (${thousands(_poinPakai)})',
               '−${formatRupiah(_potongan)}',
               color: _kWarnaPoin),
+        ],
+        // Urutan ala Accurate: potongan barang (voucher diskon & poin) di atas,
+        // lalu PPN DITAMBAHKAN atas barang setelah potongan, lalu ongkir & voucher
+        // ongkir. Ongkir tidak kena PPN.
+        const SizedBox(height: 6),
+        _sumRow(m, 'PPN 12% (DPP 11/12)', formatRupiah(ppn)),
+        const SizedBox(height: 6),
+        _sumRow(
+          m,
+          _ambilSendiri
+              ? 'Ongkir (ambil sendiri)'
+              : 'Ongkir${_rate != null ? ' (${_rate!.courierName})' : ''}',
+          _ambilSendiri
+              ? 'Gratis'
+              : _rate != null
+                  ? formatRupiah(_rate!.price)
+                  : '—',
+        ),
+        if (_vOngkir > 0) ...[
+          const SizedBox(height: 6),
+          _sumRow(m, 'Gratis ongkir (${_vPilih['ongkir']})',
+              '−${formatRupiah(_vOngkir)}',
+              color: _kWarnaOngkir),
         ],
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),

@@ -437,7 +437,7 @@ class _VoucherScreenState extends State<VoucherScreen> {
   Widget _ketentuan(MasColors m) {
     const aturan = [
       'Per pesanan bisa memakai 1 voucher Gratis Ongkir dan 1 voucher Diskon sekaligus.',
-      'Minimal belanja dihitung dari harga barang, belum termasuk ongkir.',
+      'Minimal belanja dihitung dari harga barang, belum termasuk PPN & ongkir.',
       'Voucher Gratis Ongkir tidak berlaku untuk Ambil di Toko.',
       'Voucher yang sudah diklaim tetap tersimpan sampai masa berlakunya habis.',
       'Pesanan dibatalkan? Voucher kembali ke Voucher Saya selama masih berlaku.',

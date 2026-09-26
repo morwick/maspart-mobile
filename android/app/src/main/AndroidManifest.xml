@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Akses jaringan (wajib agar release APK bisa hit API backend). -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Android 13+: izin menampilkan notifikasi sistem (push status pesanan).
+         Diminta saat login lewat lib/push.dart. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="Maspart"
         android:name="${applicationName}"
@@ -29,6 +32,16 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Push FCM: kanal & ikon bawaan untuk notifikasi yang ditampilkan
+             sistem saat aplikasi di latar belakang/tertutup. Kanal "pesanan"
+             dibuat oleh lib/push.dart. Ikon = logo putih transparan (siluet),
+             karena ikon notifikasi Android hanya memakai kanal alfa. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="pesanan" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_launcher_foreground" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

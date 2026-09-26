@@ -209,12 +209,21 @@ class _Api {
 
   static Future<dynamic> delete(
     String path, {
+    Object? body,
     Map<String, dynamic>? query,
+    Duration? timeout,
   }) async {
     final token = await _token();
     final r = await http
-        .delete(_uri(path, query), headers: {'Authorization': 'Bearer $token'})
-        .timeout(_timeout);
+        .delete(
+          _uri(path, query),
+          headers: {
+            'Authorization': 'Bearer $token',
+            if (body != null) 'Content-Type': 'application/json',
+          },
+          body: body == null ? null : jsonEncode(body),
+        )
+        .timeout(timeout ?? _timeout);
     return _decode(r);
   }
 
@@ -402,9 +411,17 @@ class ApiService {
       MyPermissions.fromJson(_Api._obj(await _Api.get('/api/auth/permissions')));
 
   /// Metadata aplikasi: versi APK terbaru (notifikasi update) + config
-  /// server-driven. Endpoint publik `/api/app/meta`.
-  static Future<AppMeta> appMeta() async =>
-      AppMeta.fromJson(_Api._obj(await _Api.get('/api/app/meta')));
+  /// server-driven. Endpoint publik `/api/app/meta` — dipanggil juga dari layar
+  /// login (belum ada token), jadi TIDAK lewat `_Api.get` yang mewajibkan token;
+  /// token tetap dikirim bila ada.
+  static Future<AppMeta> appMeta() async {
+    final token = await AuthStorage.getToken();
+    final r = await http
+        .get(_Api._uri('/api/app/meta'),
+            headers: token == null ? null : {'Authorization': 'Bearer $token'})
+        .timeout(_Api._timeout);
+    return AppMeta.fromJson(_Api._obj(await _Api._decode(r)));
+  }
 
   // ────────────────────────────────────────────────────────────────────
   // Gambar part
@@ -1430,6 +1447,22 @@ class ApiService {
   static Future<void> bacaNotifikasi([List<int> ids = const []]) =>
       _Api.post('/api/notifikasi/baca', body: {'ids': ids});
 
+  /// Daftarkan token FCM perangkat ini untuk push notifikasi sistem.
+  /// `aktif` false = server belum siap (Firebase/migrasi belum ada) — bukan galat.
+  static Future<bool> daftarPerangkat(String token, [String platform = 'android']) async {
+    final data = _Api._obj(await _Api.post('/api/notifikasi/perangkat',
+        body: {'token': token, 'platform': platform},
+        timeout: const Duration(seconds: 15)));
+    return data['aktif'] == true;
+  }
+
+  /// Lepas token FCM saat logout (dipanggil SEBELUM token sesi dibuang) —
+  /// timeout pendek: logout tak boleh tertahan jaringan lambat.
+  static Future<void> lepasPerangkat(String token) => _Api.delete(
+      '/api/notifikasi/perangkat',
+      body: {'token': token},
+      timeout: const Duration(seconds: 4));
+
   /// Unggah bukti retur (video/foto) DENGAN progres — padanan
   /// `uploadBuktiRetur` (XHR) di web. Isi file dialirkan dari [stream] (mis.
   /// `XFile.openRead()`), bukan dibaca utuh ke RAM: video bisa puluhan MB.
@@ -1601,6 +1634,26 @@ class ApiService {
         '/api/branch/orders/${Uri.encodeComponent(code)}/status',
         body: {'status': status, 'tracking_no': ?trackingNo},
       );
+
+  /// Serah terima pesanan Ambil di Toko: unggah foto orang yang mengambil
+  /// barang (+ nama opsional) → pesanan langsung 'selesai'. Kembalian = URL
+  /// publik foto. 503 = migrasi 043 belum jalan (pakai jalur status lama).
+  static Future<String> serahTerimaPickup(
+    String code, {
+    required Uint8List bytes,
+    required String filename,
+    String? nama,
+  }) async {
+    // Server membatasi nama 80 karakter — potong di sini daripada ditolak 400.
+    var n = nama?.trim() ?? '';
+    if (n.length > 80) n = n.substring(0, 80);
+    final data = _Api._obj(await _Api.multipart(
+      '/api/branch/orders/${Uri.encodeComponent(code)}/serah-terima',
+      files: [(field: 'file', bytes: bytes, filename: filename)],
+      fields: {if (n.isNotEmpty) 'nama': n},
+    ));
+    return '${data['url'] ?? ''}';
+  }
 
   /// Pilihan alasan kendala: [(key, label)] — satu sumber dengan web.
   static Future<List<(String, String)>> branchKendalaAlasan() async {

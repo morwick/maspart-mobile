@@ -481,6 +481,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           _pengirim(m, o),
           const SizedBox(height: 14),
 
+          // Ambil di Toko yang sudah diserahkan: foto pengambil dari gudang —
+          // rujukan admin bila pembeli mengaku belum mengambil barang.
+          if (o.pickup && (o.pickupProofUrl ?? '').isNotEmpty) ...[
+            MasSectionCard(
+              title: '🏬 Serah Terima',
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+                  child: BuktiSerahTerima(order: o),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+          ],
+
           if (o.trackingNo != null && o.trackingNo!.isNotEmpty) ...[
             _pengiriman(m, o),
             const SizedBox(height: 14),
@@ -509,10 +524,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 
   Widget _items(MasColors m, OrderDetail o) {
-    // PPN 12% INKLUSIF: `subtotal` SUDAH mengandung PPN (ikut Accurate), jadi
-    // pajak ditampilkan sebagai KOMPONEN dan TIDAK ditambahkan ke total.
-    // Total = subtotal + ongkir.
-    final ppn = o.tax?.round() ?? ppnOf(o.subtotal);
+    // PPN sadar aturan: pesanan baru → PPN 12% (DPP 11/12) DITAMBAHKAN di atas
+    // barang; pesanan lama ber-PPN inklusif → tetap abu-abu "Termasuk PPN 12%".
+    // Total selalu `o.total` tersimpan, tak pernah dihitung ulang.
+    final ppn = barisPpn(o);
 
     return MasSectionCard(
       title: o.orderCode,
@@ -559,8 +574,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
           child: Column(children: [
             _sumRow(m, 'Subtotal', formatRupiah(o.subtotal)),
+            // Aturan baru — urutan ala Accurate: potongan barang (voucher &
+            // poin) dulu, lalu PPN atas barang setelah potongan, lalu ongkir &
+            // potongannya. Pesanan lama tetap tata letak semula.
+            if (ppn.ditambahkan)
+              OrderPotongan(order: o, bagian: PotonganBagian.barang),
             const SizedBox(height: 5),
-            _sumRow(m, 'Termasuk PPN 12%', formatRupiah(ppn), muted: true),
+            _sumRow(m, ppn.label, formatRupiah(ppn.nilai),
+                muted: !ppn.ditambahkan),
             const SizedBox(height: 5),
             _sumRow(
               m,
@@ -570,7 +591,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               o.shippingCost > 0 ? formatRupiah(o.shippingCost) : '—',
             ),
             // Potongan voucher/poin + kode voucher — paritas web OrderPotongan.
-            OrderPotongan(order: o),
+            // Aturan baru: tinggal potongan ongkir (potongan barang di atas PPN).
+            OrderPotongan(
+                order: o,
+                bagian: ppn.ditambahkan
+                    ? PotonganBagian.ongkir
+                    : PotonganBagian.semua),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 9),
               child: Divider(height: 1, color: m.ink150),

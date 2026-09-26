@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../api_service.dart';
 import '../auth_storage.dart';
 import '../cart.dart';
+import '../push.dart';
 import '../theme/mas_theme.dart';
 import '../utils.dart';
 import '../widgets/notif_bell.dart';
@@ -81,6 +82,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   List<String> _gudangKelola = const [];
   bool _navigated = false;
 
+  /// Sesi (profil + izin) sudah dimuat → tautan push boleh dibuka. Sebelum itu
+  /// tautannya ditahan di [Push.tautanTertunda], supaya beranda & guard izin
+  /// tak menimpa layar tujuan push.
+  bool _sesiSiap = false;
+
   // Config server-driven + notifikasi update.
   Map<String, dynamic> _appConfig = const {};
   bool _updateAvailable = false; // versi baru tersedia (banner)
@@ -107,6 +113,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _cart.addListener(_onCartChanged);
+    Push.tautanTertunda.addListener(_bukaTautanPush);
     _loadCachedConfig();
     _loadSession();
     PackageInfo.fromPlatform().then((i) {
@@ -202,6 +209,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _cart.removeListener(_onCartChanged);
+    Push.tautanTertunda.removeListener(_bukaTautanPush);
     super.dispose();
   }
 
@@ -242,7 +250,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _applyHomeAndGuard();
     } on ApiException {
       /* endpoint tak tersedia → biarkan default aman (semua item ber-permKey) */
+    } finally {
+      if (mounted) {
+        _sesiSiap = true;
+        _bukaTautanPush(); // push yang diketuk sebelum shell/login siap
+        Push.daftarkan(); // no-op bila push tidur; tak pernah melempar
+      }
     }
+  }
+
+  /// Buka layar tujuan push yang diketuk (tautan web → layar, pemetaan yang
+  /// sama dengan lonceng notifikasi).
+  void _bukaTautanPush() {
+    if (!_sesiSiap || !mounted) return;
+    final tujuan = tujuanTautan(Push.ambilTautan());
+    if (tujuan != null) _go(tujuan.$1, part: tujuan.$2);
   }
 
   MasScreen _homeScreen(List<NavSection> secs) {
@@ -344,6 +366,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Future<void> _logout() async {
+    await Push.lepas(); // lepas token push di server (butuh token sesi)
     await ApiService.logout(); // audit log: LOGOUT (sebelum token dibuang)
     await AuthStorage.clearToken();
     if (!mounted) return;
@@ -521,9 +544,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // disembunyikan: ia akan naik menempel di atas papan ketik dan memakan
     // ruang jawaban tanpa gunanya.
     final keyboardUp = MediaQuery.viewInsetsOf(context).bottom > 0;
-    final tabs = updateWall || keyboardUp || kNoBottomBar.contains(_screen)
+    final navTabs = updateWall || kNoBottomBar.contains(_screen)
         ? const <NavTab>[]
         : buildBottomTabs(role: _role, accessible: access);
+    final tabs = keyboardUp ? const <NavTab>[] : navTabs;
+    // Tab "Menu" di bilah bawah sudah membuka drawer yang sama — tombol ☰ di
+    // header hanya untuk layar tanpa bilah bawah. Sengaja pakai navTabs, bukan
+    // tabs: kalau ikut keyboardUp, ☰ muncul-hilang tiap kali mengetik.
+    final headerMenu = navTabs.isEmpty;
 
     return PopScope(
       // Shell memakai riwayat internal, bukan Navigator: tanpa canPop:false
@@ -595,7 +623,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       _Header(
                         title: title.$1,
                         subtitle: title.$2,
-                        onMenu: () => _scaffoldKey.currentState?.openDrawer(),
+                        // Belanja = beranda pembeli: header menampilkan merek.
+                        // Judul "Belanja Part" + jumlah produk sudah ada di
+                        // halamannya sendiri (toko_screen _judul).
+                        brand: _screen == MasScreen.toko,
+                        onMenu: headerMenu
+                            ? () => _scaffoldKey.currentState?.openDrawer()
+                            : null,
                         // Pintasan keranjang hanya berarti untuk pembeli.
                         cartCount: isBuyer ? _cart.count : 0,
                         onCart: isBuyer ? () => _go(MasScreen.keranjang) : null,
@@ -718,18 +752,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 class _Header extends StatelessWidget {
   final String title;
   final String subtitle;
-  final VoidCallback onMenu;
+  /// null = tanpa tombol ☰ (drawer dibuka dari tab "Menu" di bilah bawah).
+  final VoidCallback? onMenu;
   final int cartCount;
   final VoidCallback? onCart;
   final bool showNotif;
+  /// true = logo MasPart menggantikan judul & subjudul.
+  final bool brand;
 
   const _Header({
     required this.title,
     required this.subtitle,
-    required this.onMenu,
+    this.onMenu,
     this.cartCount = 0,
     this.onCart,
     this.showNotif = false,
+    this.brand = false,
   });
 
   @override
@@ -745,10 +783,13 @@ class _Header extends StatelessWidget {
         border: Border(bottom: BorderSide(color: m.ink150)),
       ),
       child: Row(children: [
-        _iconButton(context, Icons.menu_rounded, onMenu, tooltip: 'Menu'),
-        const SizedBox(width: 10),
+        if (onMenu != null) ...[
+          _iconButton(context, Icons.menu_rounded, onMenu!, tooltip: 'Menu'),
+          const SizedBox(width: 10),
+        ] else
+          const SizedBox(width: 4),
         Expanded(
-          child: Column(
+          child: brand ? _logo(m) : Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -791,6 +832,31 @@ class _Header extends StatelessWidget {
         ),
       ]),
     );
+  }
+
+  /// Logo "M" + nama merek — gaya sama dengan kepala drawer & layar login.
+  Widget _logo(MasColors m) {
+    return Row(children: [
+      Container(
+        width: 30,
+        height: 30,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(color: m.brand600, borderRadius: BorderRadius.circular(8)),
+        child: Text('M', style: masMono(size: 14, weight: FontWeight.w700, color: Colors.white)),
+      ),
+      const SizedBox(width: 9),
+      Flexible(
+        child: Text('MasPart',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: m.ink900,
+              letterSpacing: -0.3,
+            )),
+      ),
+    ]);
   }
 
   Widget _cartButton(BuildContext context) {

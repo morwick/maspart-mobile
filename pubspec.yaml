@@ -55,6 +55,13 @@ dependencies:
   # Login/daftar pembeli via Google (paritas web). serverClientId = Client ID
   # Web dari /api/app/meta supaya ID token lolos verifikasi backend.
   google_sign_in: ^6.2.2
+  # Notifikasi sistem (push) via Firebase Cloud Messaging. Tanpa
+  # android/app/google-services.json fiturnya tidur — aplikasi tetap jalan.
+  firebase_core: ^4.15.0
+  firebase_messaging: ^16.7.0
+  # Menampilkan push saat aplikasi sedang terbuka (FCM tak menampilkannya
+  # sendiri di latar depan) + membuat kanal "pesanan".
+  flutter_local_notifications: ^22.3.1
 
 dev_dependencies:
   flutter_test:

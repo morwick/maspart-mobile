@@ -341,6 +341,37 @@ Set<MasScreen> accessibleScreens(List<NavSection> sections) => {
       ..._kChildScreens,
     };
 
+/// Tautan web notifikasi (`/pesanan/PO-XXXX?nilai=1`, `/retur/RT-…`) → layar
+/// aplikasi + argumennya. Dipakai lonceng notifikasi DAN ketukan push sistem
+/// (lib/push.dart), supaya keduanya membuka layar yang sama. null = tautan tak
+/// dikenali (notifikasinya tetap bisa dibaca, hanya tak membuka apa pun).
+(MasScreen, Map<String, dynamic>)? tujuanTautan(String? tautan) {
+  final t = (tautan ?? '').trim();
+  if (t.isEmpty) return null;
+  final uri = Uri.tryParse(t);
+  final seg = uri?.pathSegments.where((s) => s.isNotEmpty).toList() ?? const [];
+  if (seg.length >= 2 && seg[0] == 'retur') {
+    return (MasScreen.returDetail, {'return_code': seg[1]});
+  }
+  if (seg.length >= 3 && seg[0] == 'cabang' && seg[1] == 'retur') {
+    return (MasScreen.cabangReturDetail, {'return_code': seg[2]});
+  }
+  if (seg.length >= 3 && seg[0] == 'cabang' && seg[1] == 'pesanan') {
+    return (MasScreen.cabangPesananDetail, {'order_code': seg[2]});
+  }
+  if (seg.length >= 3 && seg[0] == 'admin' && seg[1] == 'orders') {
+    return (MasScreen.orderDetail, {'order_code': seg[2]});
+  }
+  if (seg.length >= 2 && seg[0] == 'pesanan') {
+    // `?nilai=1` (pesanan selesai) → langsung tawarkan penilaian, sama seperti
+    // tombol "⭐ Nilai" di daftar pesanan.
+    final nilai = uri?.queryParameters['nilai'] == '1';
+    return (MasScreen.pesananDetail, {'order_code': seg[1], if (nilai) 'nilai': true});
+  }
+  if (seg.length == 1 && seg[0] == 'retur') return (MasScreen.returSaya, {});
+  return null;
+}
+
 /// Aksi navigasi yang dipublikasikan shell ke seluruh layar anak.
 class AppNav extends InheritedWidget {
   final MasScreen screen;

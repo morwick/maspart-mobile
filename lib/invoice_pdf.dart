@@ -5,7 +5,10 @@
 // dibuat sepenuhnya di sisi klien (paket `pdf`, murni Dart — tanpa plugin
 // native), disimpan ke folder sementara, lalu dibuka dengan penampil sistem.
 //
-// PPN 12% INKLUSIF: sudah terkandung di subtotal (ikut Accurate), bukan tambahan.
+// PPN sadar aturan (lihat `ppnDitambahkan` di order_ui.dart): pesanan baru →
+// PPN 12% (DPP 11/12) DITAMBAHKAN di atas barang (ikut Accurate); pesanan lama
+// ber-PPN inklusif → tetap "Subtotal Produk (termasuk PPN)" seperti dulu.
+// TOTAL selalu `o.total` tersimpan, tak pernah dihitung ulang.
 
 import 'dart:io';
 import 'package:open_filex/open_filex.dart';
@@ -48,7 +51,7 @@ String _courierLabel(OrderDetail o) {
 /// Bangun byte PDF invoice dari [o]. Dipisah agar bisa diuji tanpa I/O.
 Future<List<int>> buildInvoicePdf(OrderDetail o) async {
   final doc = pw.Document();
-  final ppn = (o.tax?.round()) ?? ppnOf(o.subtotal);
+  final ppn = barisPpn(o);
 
   const brand = PdfColor.fromInt(0xFF028912);
   const ink900 = PdfColor.fromInt(0xFF11201A);
@@ -224,8 +227,23 @@ Future<List<int>> buildInvoicePdf(OrderDetail o) async {
             child: pw.SizedBox(
               width: 260,
               child: pw.Column(children: [
-                totalRow('Subtotal Produk (termasuk PPN)', formatRupiah(o.subtotal)),
-                if (ppn > 0) totalRow('— di dalamnya PPN 12%', formatRupiah(ppn)),
+                if (ppn.ditambahkan) ...[
+                  // Urutan ala Accurate: potongan barang (voucher & poin) dulu,
+                  // lalu PPN atas barang setelah potongan, lalu ongkir & voucher
+                  // ongkir. Minus pakai '-' biasa (lihat catatan di bawah).
+                  totalRow('Subtotal Produk', formatRupiah(o.subtotal)),
+                  if (o.voucherDiscount > 0)
+                    totalRow('Voucher Diskon', '-${formatRupiah(o.voucherDiscount)}'),
+                  if (o.pointDiscount > 0)
+                    totalRow('Potongan Poin (${thousands(o.pointRedeemed)} poin)',
+                        '-${formatRupiah(o.pointDiscount)}'),
+                  totalRow('PPN 12% (DPP 11/12)', formatRupiah(ppn.nilai)),
+                ] else ...[
+                  // Pesanan lama (PPN inklusif) — label lama dipertahankan.
+                  totalRow('Subtotal Produk (termasuk PPN)', formatRupiah(o.subtotal)),
+                  if (ppn.nilai > 0)
+                    totalRow('— di dalamnya PPN 12%', formatRupiah(ppn.nilai)),
+                ],
                 totalRow(
                     'Ongkos Kirim${o.pickup ? ' (ambil sendiri)' : (o.courier ?? '').isNotEmpty ? ' (${_courierLabel(o)})' : ''}',
                     o.pickup
@@ -236,12 +254,13 @@ Future<List<int>> buildInvoicePdf(OrderDetail o) async {
                 // Potongan (migrasi 034/035) — tanpa ini Subtotal + Ongkir ≠
                 // Total di PDF. Paritas web pesanan/[code]/invoice. Minus pakai '-' biasa:
                 // font bawaan PDF (Helvetica, WinAnsi) tak punya glyph U+2212.
-                if (o.voucherDiscount > 0)
+                // Pesanan lama: potongan barang tetap di bawah ongkir (tata letak semula).
+                if (!ppn.ditambahkan && o.voucherDiscount > 0)
                   totalRow('Voucher Diskon', '-${formatRupiah(o.voucherDiscount)}'),
                 if (o.shippingDiscount > 0)
                   totalRow('Voucher Gratis Ongkir',
                       '-${formatRupiah(o.shippingDiscount)}'),
-                if (o.pointDiscount > 0)
+                if (!ppn.ditambahkan && o.pointDiscount > 0)
                   totalRow('Potongan Poin (${thousands(o.pointRedeemed)} poin)',
                       '-${formatRupiah(o.pointDiscount)}'),
                 if ((o.voucherCodes ?? '').trim().isNotEmpty)

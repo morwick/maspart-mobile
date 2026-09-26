@@ -7,6 +7,15 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Push notifikasi (Firebase Cloud Messaging) — opsional, pola sama dengan
+// key.properties di bawah: selama android/app/google-services.json belum
+// ditaruh, plugin Google Services TIDAK diterapkan, build tetap lolos dan
+// fitur push tidur (Firebase.initializeApp gagal diam-diam di lib/push.dart).
+// Begitu file itu ada, cukup build ulang — push langsung aktif.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 // Kunci penandatanganan RILIS — opsional & TIDAK ikut ke git.
 //
 // Selama `android/key.properties` belum dibuat, APK rilis tetap ditandatangani
@@ -38,6 +47,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // Wajib untuk flutter_local_notifications (API java.time di Android lama).
+        isCoreLibraryDesugaringEnabled = true
     }
 
     defaultConfig {
@@ -83,4 +94,8 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 }

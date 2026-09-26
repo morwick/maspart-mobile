@@ -15,6 +15,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api_service.dart';
@@ -108,7 +109,6 @@ class _CabangPesananScreenState extends State<CabangPesananScreen> {
   int _tab = 2;
   final _searchCtrl = TextEditingController();
   String _q = '';
-  String? _busyCode; // kode pesanan yang statusnya sedang diubah
 
   @override
   void initState() {
@@ -120,22 +120,6 @@ class _CabangPesananScreenState extends State<CabangPesananScreen> {
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
-  }
-
-  /// Ubah status cepat dari daftar (Kirim/Selesai) — persis web `quickStatus`.
-  Future<void> _quickStatus(String code, String status) async {
-    setState(() {
-      _busyCode = code;
-      _error = null;
-    });
-    try {
-      await ApiService.setBranchOrderStatus(code, status);
-      await _load();
-    } on ApiException catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    } finally {
-      if (mounted) setState(() => _busyCode = null);
-    }
   }
 
   Future<void> _load() async {
@@ -292,21 +276,20 @@ class _CabangPesananScreenState extends State<CabangPesananScreen> {
         ),
       );
 
-  /// Aksi cepat dari daftar — Kirim (diproses→dikirim) / Selesai
-  /// (dikirim→selesai) / Detail. Persis web `cabang/pesanan`.
+  /// Aksi dari daftar — HANYA membuka detail ("Proses" bila perlu dikirim).
+  ///
+  /// ⛔ Jangan ubah status langsung dari daftar. Kirim/Selesai hanya lewat
+  /// langkah di layar detail: centang Accurate (lepas tahanan stok), ambil rak,
+  /// kemas/siapkan di konter, isi resi — atau "Siap Diambil" untuk Ambil di
+  /// Toko. Tombol cepat Kirim/Selesai dulu melompati semuanya. Paritas web
+  /// `cabang/pesanan`.
   Widget _aksiCepat(MasColors m, AppNav nav, OrderSummary o) {
-    final busy = _busyCode == o.orderCode;
+    void buka() => nav.go(MasScreen.cabangPesananDetail,
+        part: {'order_code': o.orderCode});
     if (o.status == 'diproses') {
-      return _aksiBtn(m, busy ? '…' : 'Kirim', primary: true,
-          onTap: busy ? null : () => _quickStatus(o.orderCode, 'dikirim'));
+      return _aksiBtn(m, 'Proses →', primary: true, onTap: buka);
     }
-    if (o.status == 'dikirim') {
-      return _aksiBtn(m, busy ? '…' : 'Selesai', primary: false,
-          onTap: busy ? null : () => _quickStatus(o.orderCode, 'selesai'));
-    }
-    return _aksiBtn(m, 'Detail', primary: false,
-        onTap: () => nav.go(MasScreen.cabangPesananDetail,
-            part: {'order_code': o.orderCode}));
+    return _aksiBtn(m, 'Detail', primary: false, onTap: buka);
   }
 
   Widget _aksiBtn(MasColors m, String label,
@@ -359,6 +342,17 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
   /// ini saja, bukan status resmi (paritas web ProsesGudang: localStorage).
   Map<String, bool> _centang = {};
 
+  /// Serah terima Ambil di Toko (seperti Shopee): foto pengambil WAJIB, nama
+  /// opsional. Foto baru diunggah saat "Serahkan & Selesai" ditekan.
+  Uint8List? _stFoto;
+  String _stFotoNama = '';
+  final _stNamaCtl = TextEditingController();
+  String? _stErr;
+
+  /// Server membalas 503 (migrasi 043 belum jalan) → tampilkan jalur lama
+  /// "Tandai Selesai tanpa foto".
+  bool _stNonaktif = false;
+
   String get _code => '${widget.args['order_code'] ?? ''}';
   String get _kunciCentang => 'maspart.proses.$_code';
 
@@ -393,6 +387,12 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _stNamaCtl.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -546,6 +546,189 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
     );
     if (ok != true) return;
     await _setStatus(next);
+  }
+
+  // ── Serah terima Ambil di Toko ──────────────────────────────────────
+
+  Future<void> _stPilihFoto(ImageSource source) async {
+    try {
+      final x = await ImagePicker().pickImage(
+        source: source,
+        // Cukup untuk mengenali wajah & barang; hemat kuota data seluler gudang.
+        imageQuality: 85,
+        maxWidth: 1600,
+      );
+      if (x == null) return;
+      final bytes = await x.readAsBytes();
+      if (!mounted) return;
+      setState(() {
+        _stFoto = bytes;
+        _stFotoNama = x.name.isEmpty ? 'serah-terima.jpg' : x.name;
+        _stErr = null;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _stErr = 'Tidak dapat mengakses kamera/galeri.');
+    }
+  }
+
+  void _stSheetFoto() {
+    final m = context.mas;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: m.paper,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 12),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+                color: m.ink200, borderRadius: BorderRadius.circular(2)),
+          ),
+          const SizedBox(height: 8),
+          // Kamera lebih dulu: pengambil berdiri di depan konter saat itu juga.
+          ListTile(
+            leading: Icon(Icons.photo_camera_outlined, color: m.brand600),
+            title: const Text('Ambil dari kamera'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _stPilihFoto(ImageSource.camera);
+            },
+          ),
+          ListTile(
+            leading: Icon(Icons.photo_library_outlined, color: m.brand600),
+            title: const Text('Pilih dari galeri'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _stPilihFoto(ImageSource.gallery);
+            },
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+
+  /// Unggah foto serah terima → server langsung menandai pesanan selesai.
+  Future<void> _serahTerima() async {
+    final foto = _stFoto;
+    if (foto == null) return;
+    final ok = await _confirm(
+      'Serahkan & Selesai',
+      'Barang pesanan $_code sudah diserahkan ke pengambil? Foto disimpan '
+          'sebagai bukti serah terima dan pesanan ditandai selesai.',
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _busy = true;
+      _stErr = null;
+      _error = null;
+    });
+    try {
+      await ApiService.serahTerimaPickup(
+        _code,
+        bytes: foto,
+        filename: _stFotoNama,
+        nama: _stNamaCtl.text,
+      );
+      if (!mounted) return;
+      setState(() {
+        _stFoto = null;
+        _stFotoNama = '';
+      });
+      _stNamaCtl.clear();
+      AppNav.of(context).toast('Serah terima tersimpan — pesanan selesai.');
+      await _load();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _stErr = e.message;
+        // 503 = migrasi 043 belum jalan → buka jalur lama tanpa foto.
+        if (e.statusCode == 503) _stNonaktif = true;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() => _stErr =
+            'Gagal mengunggah foto. Periksa koneksi lalu coba lagi.');
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Isi langkah 5 pesanan Ambil di Toko: foto pengambil (wajib) + nama
+  /// (opsional) → "Serahkan & Selesai".
+  List<Widget> _serahTerimaForm(MasColors m, OrderDetail o) {
+    final foto = _stFoto;
+    return [
+      if (foto == null)
+        MasButton(
+          label: '📷 Foto Pengambil',
+          primary: false,
+          expand: true,
+          onTap: _busy ? null : _stSheetFoto,
+        )
+      else
+        GestureDetector(
+          onTap: _busy ? null : _stSheetFoto,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(MasRadii.card),
+            child: Stack(children: [
+              Container(
+                width: double.infinity,
+                height: 180,
+                color: m.ink100,
+                child: Image.memory(foto, fit: BoxFit.cover),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  color: Colors.black54,
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: const Text('Ketuk untuk foto ulang',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, color: Colors.white)),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      Text(
+        'Foto orang yang mengambil barang beserta barangnya — bukti serah '
+        'terima bila ada sengketa.',
+        style: TextStyle(fontSize: 11.5, color: m.ink500, height: 1.4),
+      ),
+      MasInput(
+        controller: _stNamaCtl,
+        hint: 'Nama pengambil (opsional)',
+        height: 40,
+        textCapitalization: TextCapitalization.words,
+        enabled: !_busy,
+      ),
+      if (_stErr != null)
+        _alert(m, _stErr!,
+            tone: _stNonaktif ? MasPillTone.warn : MasPillTone.danger),
+      MasButton(
+        label: _busy ? 'Memproses…' : '✓ Serahkan & Selesai',
+        expand: true,
+        loading: _busy,
+        onTap: _busy || foto == null || _stNonaktif ? null : _serahTerima,
+      ),
+      // Server belum siap menyimpan foto → jalur lama tetap bisa dipakai.
+      if (_stNonaktif)
+        Center(
+          child: TextButton(
+            onPressed: _busy ? null : () => _lanjutkan(o),
+            child: Text('Tandai Selesai tanpa foto',
+                style: TextStyle(fontSize: 13, color: m.ink700)),
+          ),
+        ),
+    ];
   }
 
   /// Pengganti tombol batal: pesanan yang sampai ke gudang sudah LUNAS, jadi
@@ -713,10 +896,10 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
   }
 
   Widget _items(MasColors m, OrderDetail o) {
-    // PPN 12% INKLUSIF: `subtotal` SUDAH mengandung pajak (ikut Accurate), jadi
-    // PPN cuma dipecah sebagai komponen — JANGAN dijumlahkan ke subtotal.
-    // Total = subtotal + ongkir.
-    final ppn = o.tax?.round() ?? ppnOf(o.subtotal);
+    // PPN sadar aturan: pesanan baru → PPN 12% (DPP 11/12) DITAMBAHKAN di atas
+    // barang; pesanan lama ber-PPN inklusif → tetap abu-abu "Termasuk PPN 12%".
+    // Total selalu `o.total` tersimpan, tak pernah dihitung ulang.
+    final ppn = barisPpn(o);
     final jumlahItem = o.items.fold<int>(0, (n, it) => n + it.qty);
 
     return MasSectionCard(
@@ -772,8 +955,14 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
           child: Column(children: [
             _sumRow(m, 'Subtotal', formatRupiah(o.subtotal)),
+            // Aturan baru — urutan ala Accurate: potongan barang (voucher &
+            // poin) dulu, lalu PPN atas barang setelah potongan, lalu ongkir &
+            // potongannya. Pesanan lama tetap tata letak semula.
+            if (ppn.ditambahkan)
+              OrderPotongan(order: o, bagian: PotonganBagian.barang),
             const SizedBox(height: 5),
-            _sumRow(m, 'Termasuk PPN 12%', formatRupiah(ppn), muted: true),
+            _sumRow(m, ppn.label, formatRupiah(ppn.nilai),
+                muted: !ppn.ditambahkan),
             const SizedBox(height: 5),
             _sumRow(
               m,
@@ -787,7 +976,12 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
                       : '—',
             ),
             // Potongan voucher/poin + kode voucher — paritas web OrderPotongan.
-            OrderPotongan(order: o),
+            // Aturan baru: tinggal potongan ongkir (potongan barang di atas PPN).
+            OrderPotongan(
+                order: o,
+                bagian: ppn.ditambahkan
+                    ? PotonganBagian.ongkir
+                    : PotonganBagian.semua),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 9),
               child: Divider(height: 1, color: m.ink150),
@@ -1073,24 +1267,32 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
                 pickup
                     ? 'Saat pembeli datang: cocokkan nama dengan pesanan, minta '
                         'tanda tangan di Tanda Terima, serahkan barang, lalu '
-                        'tandai selesai.'
+                        'foto pengambil sebagai bukti serah terima.'
                     : 'Pantau resi. Pembeli bisa konfirmasi sendiri; tandai '
                         'selesai setelah barang terbukti diterima.',
                 style: ket,
               ),
-              MasButton(
-                label: _busy ? 'Memproses…' : '✓ Tandai Selesai',
-                expand: true,
-                loading: _busy,
-                onTap: _busy ? null : () => _lanjutkan(o),
-              ),
+              // Ambil di Toko: selesai HANYA lewat foto serah terima (pembeli
+              // tak bisa konfirmasi sendiri) — jalur kurir tetap seperti semula.
+              if (pickup)
+                ..._serahTerimaForm(m, o)
+              else
+                MasButton(
+                  label: _busy ? 'Memproses…' : '✓ Tandai Selesai',
+                  expand: true,
+                  loading: _busy,
+                  onTap: _busy ? null : () => _lanjutkan(o),
+                ),
             ],
-            if (tahap > 5)
+            if (tahap > 5) ...[
+              if (pickup && (o.pickupProofUrl ?? '').isNotEmpty)
+                BuktiSerahTerima(order: o),
               _alert(
                   m,
                   'Pesanan selesai. Simpan surat jalan / tanda terima yang sudah '
                   'ditandatangani.',
                   tone: MasPillTone.brand),
+            ],
           ],
         ),
         // Gudang TIDAK membatalkan: pesanan lunas → batal = refund = admin.
