@@ -842,10 +842,15 @@ class PartSpecResponse {
   final PartSpec spec;
   final int beratGram;
 
+  /// Berat per pcs yang DIPAKAI menghitung ongkir = max(berat asli, volumetrik
+  /// dimensi ÷6000), sama dengan keranjang/checkout. 0 = server lama / tak tahu.
+  final int beratOngkirGram;
+
   const PartSpecResponse({
     this.partNumber = '',
     this.spec = const PartSpec(),
     this.beratGram = 0,
+    this.beratOngkirGram = 0,
   });
 
   factory PartSpecResponse.fromJson(Map<String, dynamic> j) => PartSpecResponse(
@@ -853,6 +858,7 @@ class PartSpecResponse {
         spec: PartSpec.fromJson(
             (j['spec'] as Map?)?.cast<String, dynamic>() ?? const {}),
         beratGram: _i(j['berat_gram']),
+        beratOngkirGram: _i(j['berat_ongkir_gram']),
       );
 }
 

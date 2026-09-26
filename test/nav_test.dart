@@ -32,11 +32,13 @@ void main() {
 
     test('pembeli → alur belanja, bukan menu staf', () {
       final tabs = buildBottomTabs(role: 'pembeli', accessible: access(role: 'pembeli'));
+      // 'Cari' dicabut dari menu pembeli 2026-09-23 (kotak cari etalase Belanja
+      // sudah jadi pencarian pembeli) — slot keempat kini Chat.
       expect(tabs.map((t) => t.screen).toList(), [
         MasScreen.toko,
-        MasScreen.search,
         MasScreen.asisten,
         MasScreen.pesanan,
+        MasScreen.chat,
       ]);
     });
 

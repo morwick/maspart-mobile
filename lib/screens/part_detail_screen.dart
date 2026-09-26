@@ -613,6 +613,17 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     return lokal > 0 ? lokal : (_spec?.beratGram ?? 0);
   }
 
+  /// Berat per pcs yang ditagih kurir (max berat asli, volumetrik) — hanya
+  /// bila LEBIH BESAR dari berat asli; 0 = sama / tak diketahui.
+  int get _beratOngkirLebih {
+    final o = _spec?.beratOngkirGram ?? 0;
+    return o > _beratGram ? o : 0;
+  }
+
+  static String _kg(int gram) =>
+      '${(gram / 1000).toStringAsFixed(gram < 10000 ? 1 : 0).replaceAll('.', ',')} kg';
+
+
   int _qtyDiKeranjang(String pn) {
     for (final i in _cart.items) {
       if (i.partNumber == pn) return i.qty;
@@ -1210,6 +1221,16 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
           if (berat > 0)
             Text('${thousands(berat)} g / pcs', style: TextStyle(fontSize: 11.5, color: m.ink500)),
         ]),
+        // Barang besar-ringan: ongkir ikut ukuran kemasan, bukan beratnya.
+        // Disebut di sini supaya ongkir di keranjang tak terasa "dicurangi".
+        if (_beratOngkirLebih > 0) ...[
+          const SizedBox(height: 4),
+          Text(
+            'Ongkir dihitung ±${_kg(_beratOngkirLebih)} / pcs (ukuran kemasan '
+            'lebih menentukan daripada beratnya).',
+            style: TextStyle(fontSize: 11.5, color: m.ink500, height: 1.35),
+          ),
+        ],
         const SizedBox(height: 10),
         aksi,
         // Ikut web: pembeli bisa langsung menanyakan ketersediaan ke gudang.
@@ -1597,10 +1618,10 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
 
     if (d == null && !_explodedBusy && _explodedErr == null) {
       anak.add(Text(
-        'Gambar rakitan resmi EPC yang memuat part ini, tanpa perlu nomor rangka. '
-        'Tidak dimuat otomatis karena pencarian pertamanya bisa memakan 1-2 menit '
-        '(terukur 94 detik untuk part yang dipakai belasan ribu model). Sesudah itu '
-        'tersimpan di server 24 jam, jadi pembukaan berikutnya seketika.',
+        // Tak dimuat otomatis: pencarian pertama di EPC bisa 1-2 menit (terukur
+        // 94 dtk utk part yang dipakai belasan ribu model); lalu di-cache 24 jam.
+        'Gambar rakitan resmi (EPC) yang memuat part ini. Tekan Tampilkan — '
+        'pembukaan pertama bisa memakan 1–2 menit.',
         style: TextStyle(fontSize: 12, height: 1.5, color: m.ink500),
       ));
     }
@@ -1653,7 +1674,15 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
                 style: const TextStyle(fontSize: 12)),
           ),
       ]),
-      children: anak,
+      // Kartu seksi tak memberi jarak dalam sendiri (kartu lain membungkus
+      // isinya dgn Padding 14) — tanpa ini teks menempel ke tepi kartu.
+      children: [
+        if (anak.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: anak),
+          ),
+      ],
     );
   }
 
@@ -1790,6 +1819,9 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
       final bk = s.beratKirimKg;
       final bb = s.beratBersihKg;
       if (bk != null) rows.add(('Berat (kirim)', '$bk kg'));
+      if (_beratOngkirLebih > 0) {
+        rows.add(('Berat hitung ongkir', '${_kg(_beratOngkirLebih)} (volumetrik)'));
+      }
       if (bb != null && bb != bk) rows.add(('Berat (bersih)', '$bb kg'));
       if ((s.dimensiCm ?? '').isNotEmpty) rows.add(('Dimensi (P×L×T)', '${s.dimensiCm} cm'));
       if ((s.satuan ?? '').isNotEmpty) rows.add(('Satuan', s.satuan!));

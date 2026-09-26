@@ -29,7 +29,9 @@ bool invoiceTersedia(OrderDetail o) => _paid.contains(o.status);
 String _payLabel(OrderDetail o) {
   if (o.paymentMethod == 'manual') return 'Transfer Manual';
   final ch = (o.paymentChannel ?? '').toLowerCase();
-  if (ch.isEmpty) return '—';
+  if (ch.isEmpty) return '-';
+  // 'snap' = halaman Midtrans; metodenya (VA/QRIS/kartu) dipilih di sana.
+  if (ch == 'snap') return 'Pembayaran Online (Midtrans)';
   if (ch == 'qris') return 'QRIS';
   if (ch.startsWith('va_')) return 'Virtual Account ${ch.substring(3).toUpperCase()}';
   return ch.toUpperCase();
@@ -40,10 +42,10 @@ String _courierLabel(OrderDetail o) {
   // berbunyi sama dengan invoice web).
   if (o.pickup) {
     final g = (o.pickupGudang ?? '').trim();
-    return 'AMBIL DI TOKO${g.isEmpty ? '' : ' — Gudang $g'}';
+    return 'AMBIL DI TOKO${g.isEmpty ? '' : ' - Gudang $g'}';
   }
   final c = (o.courier ?? '').trim();
-  if (c.isEmpty) return '—';
+  if (c.isEmpty) return '-';
   final s = (o.courierService ?? '').trim();
   return c.toUpperCase() + (s.isEmpty ? '' : ' $s');
 }
@@ -124,9 +126,12 @@ Future<List<int>> buildInvoicePdf(OrderDetail o) async {
                   padding: const pw.EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: pw.BoxDecoration(
                     color: const PdfColor.fromInt(0xFFE6F4E9),
-                    borderRadius: pw.BorderRadius.circular(999),
+                    // ⛔ JANGAN circular(999): paket `pdf` tak membatasi radius ke
+                    // setengah tinggi kotak → busur raksasa menutupi kepala invoice.
+                    borderRadius: pw.BorderRadius.circular(6),
                   ),
-                  child: pw.Text('● LUNAS',
+                  // Tanpa '●': Helvetica bawaan PDF (WinAnsi) tak punya glyph-nya.
+                  child: pw.Text('LUNAS',
                       style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: brand)),
                 ),
               ]),
@@ -141,7 +146,7 @@ Future<List<int>> buildInvoicePdf(OrderDetail o) async {
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
               kv('Tanggal Pesanan', fmtDate(o.createdAt)),
-              kv('Tanggal Bayar', o.paidAt != null ? fmtDate(o.paidAt) : '—'),
+              kv('Tanggal Bayar', o.paidAt != null ? fmtDate(o.paidAt) : '-'),
               kv('Metode Pembayaran', _payLabel(o)),
             ],
           ),
@@ -156,7 +161,7 @@ Future<List<int>> buildInvoicePdf(OrderDetail o) async {
                   pw.Text('DIKIRIM DARI',
                       style: const pw.TextStyle(fontSize: 8, color: ink400)),
                   pw.SizedBox(height: 3),
-                  pw.Text('Gudang ${o.gudang.isEmpty ? '—' : o.gudang}',
+                  pw.Text('Gudang ${o.gudang.isEmpty ? '-' : o.gudang}',
                       style: pw.TextStyle(fontSize: 10.5, fontWeight: pw.FontWeight.bold)),
                   if ((o.gudangPic ?? '').isNotEmpty)
                     pw.Text('PIC: ${o.gudangPic}', style: const pw.TextStyle(fontSize: 9, color: ink600)),
@@ -170,7 +175,7 @@ Future<List<int>> buildInvoicePdf(OrderDetail o) async {
                   pw.Text(
                       (o.recipientName ?? '').isNotEmpty
                           ? o.recipientName!
-                          : (o.username.isNotEmpty ? o.username : '—'),
+                          : (o.username.isNotEmpty ? o.username : '-'),
                       style: pw.TextStyle(fontSize: 10.5, fontWeight: pw.FontWeight.bold)),
                   if ((o.recipientPhone ?? '').isNotEmpty)
                     pw.Text(o.recipientPhone!, style: const pw.TextStyle(fontSize: 9, color: ink600)),
@@ -242,7 +247,7 @@ Future<List<int>> buildInvoicePdf(OrderDetail o) async {
                   // Pesanan lama (PPN inklusif) — label lama dipertahankan.
                   totalRow('Subtotal Produk (termasuk PPN)', formatRupiah(o.subtotal)),
                   if (ppn.nilai > 0)
-                    totalRow('— di dalamnya PPN 12%', formatRupiah(ppn.nilai)),
+                    totalRow('  di dalamnya PPN 12%', formatRupiah(ppn.nilai)),
                 ],
                 totalRow(
                     'Ongkos Kirim${o.pickup ? ' (ambil sendiri)' : (o.courier ?? '').isNotEmpty ? ' (${_courierLabel(o)})' : ''}',
@@ -250,7 +255,7 @@ Future<List<int>> buildInvoicePdf(OrderDetail o) async {
                         ? 'Gratis'
                         : o.shippingCost > 0
                             ? formatRupiah(o.shippingCost)
-                            : '—'),
+                            : '-'),
                 // Potongan (migrasi 034/035) — tanpa ini Subtotal + Ongkir ≠
                 // Total di PDF. Paritas web pesanan/[code]/invoice. Minus pakai '-' biasa:
                 // font bawaan PDF (Helvetica, WinAnsi) tak punya glyph U+2212.

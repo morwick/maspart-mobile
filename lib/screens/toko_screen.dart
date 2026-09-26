@@ -218,14 +218,19 @@ class _TokoScreenState extends State<TokoScreen> {
 
           // Banner promo + strip flash sale — urutan sama dengan web /toko
           // (di atas chip kategori). Keduanya mengatur jarak atasnya sendiri.
-          const PromoBanner(),
-          FlashSale(
-            items: _flashItems,
-            onOpen: (p) => nav.go(MasScreen.part,
-                part: {'part_number': p.partNumber, 'part_name': p.name}),
-          ),
+          // Saat MENCARI, banner/flash sale/kategori disembunyikan: di layar HP
+          // ketiganya mendorong hasil pencarian jauh ke bawah sehingga pembeli
+          // mengira pencariannya tak menghasilkan apa-apa (uji 2026-09-27).
+          if (_q.isEmpty) ...[
+            const PromoBanner(),
+            FlashSale(
+              items: _flashItems,
+              onOpen: (p) => nav.go(MasScreen.part,
+                  part: {'part_number': p.partNumber, 'part_name': p.name}),
+            ),
+          ],
 
-          if (_home != null && _home!.kategori.isNotEmpty) ...[
+          if (_q.isEmpty && _home != null && _home!.kategori.isNotEmpty) ...[
             const SizedBox(height: 14),
             _kategoriGrid(m),
           ],

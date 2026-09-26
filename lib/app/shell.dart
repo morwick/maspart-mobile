@@ -359,6 +359,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ..showSnackBar(SnackBar(
         content: Text(message),
         duration: const Duration(seconds: 3),
+        // Flutter kini membuat SnackBar ber-action MENETAP (persist default =
+        // action != null) — tanpa ini toast "masuk keranjang → Lihat" tak
+        // pernah hilang dan ikut menutupi tombol "Check status" Midtrans.
+        persist: false,
         action: (actionLabel == null || onAction == null)
             ? null
             : SnackBarAction(label: actionLabel, onPressed: onAction),
