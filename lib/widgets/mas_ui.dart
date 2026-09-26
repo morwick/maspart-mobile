@@ -127,9 +127,12 @@ class MasKeyValue extends StatelessWidget {
       child: Row(children: [
         Expanded(child: Text(label, style: TextStyle(fontSize: 13, color: m.ink600))),
         const SizedBox(width: 12),
-        // Flexible: nilai panjang (mis. nama varian unit lengkap) MEMBUNGKUS,
-        // bukan meluber jadi garis overflow kuning-hitam.
-        Flexible(
+        // Expanded (bukan Flexible): nilai panjang (mis. nama varian unit
+        // lengkap) MEMBUNGKUS, bukan meluber jadi garis overflow kuning-hitam.
+        // Dengan Flexible nilai pendek menciut lalu mulai dari TENGAH baris,
+        // sedangkan nilai panjang rata kanan — satu kartu tampak dua kolom
+        // yang tak lurus (terlihat di kartu tabel jawaban asisten).
+        Expanded(
           child: mono
               ? Text(value,
                   textAlign: TextAlign.right,

@@ -67,7 +67,7 @@ const Map<MasScreen, (String, String)> kScreenTitles = {
   MasScreen.dashboard: ('Dashboard', ''),
   MasScreen.search: ('Cari Part', 'Cari berdasarkan kode atau nama part'),
   MasScreen.part: ('Detail Part', ''),
-  MasScreen.asisten: ('Asisten AI', 'DeepSeek + tool katalog, EPC & stok'),
+  MasScreen.asisten: ('Asisten AI', 'Tanya part, stok, harga & pesanan'),
   MasScreen.foto: ('Cari by Foto', 'Cari part mirip via foto (DINOv2 + SIMS)'),
   MasScreen.harga: ('Harga', 'List, cari & batch harga sparepart'),
   MasScreen.compare: ('Bandingkan 2 Part', 'Analisis interchange via foto SIMS + nama'),

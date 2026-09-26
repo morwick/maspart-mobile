@@ -224,6 +224,9 @@ class _AsistenScreenState extends State<AsistenScreen> {
   bool _busy = false;
   String? _error;
 
+  /// Saat giliran berjalan dimulai — untuk penghitung detik di indikator.
+  DateTime? _mulai;
+
   /// DRAF jawaban yang sedang mengalir (opt-in `stream_tokens`) — teks MENTAH
   /// dari model yang BELUM lewat guard. Kosong = tak ada draf (gelembung
   /// menunggu menampilkan langkah seperti dulu). Sengaja hidup di luar `_msgs`:
@@ -602,6 +605,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
       _msgs.add(_Msg('user', body, _now()));
       _ctrl.clear();
       _busy = true;
+      _mulai = DateTime.now();
       _error = null;
       _retry = null;
       _steps.clear();
@@ -729,6 +733,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
       _ctrl.clear();
       _pendingSheet = null;
       _busy = true;
+      _mulai = DateTime.now();
       _error = null;
       _steps.clear();         // STATUS langkah: giliran ber-lampiran pun hidup
       _drafBersih();
@@ -812,54 +817,72 @@ class _AsistenScreenState extends State<AsistenScreen> {
   }
 
   // ── Foto lapangan (nomor rangka / layar kode kesalahan) ─────────────
-  /// Pilih sumber foto (kamera di lapangan / galeri), lalu baca isinya.
-  void _pilihFoto() {
+  /// Satu tombol "+" untuk semua lampiran: foto (kamera/galeri) dan Excel.
+  /// Dulu dua tombol kotak terpisah (kamera + klip) memakan ±96 dp di samping
+  /// kolom ketik — di HP 360-411 dp hint-nya sampai patah dua baris.
+  void _pilihLampiran() {
     final m = context.mas;
+    Widget judul(String t) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 2),
+          child: Text(t,
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: .4,
+                  color: m.ink500)),
+        );
+    Widget opsi(IconData ic, String t, String sub, VoidCallback? onTap) =>
+        ListTile(
+          enabled: onTap != null,
+          leading: Container(
+            width: 38, height: 38,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+                color: m.brand50, borderRadius: BorderRadius.circular(10)),
+            child: Icon(ic, size: 20, color: m.brand700),
+          ),
+          title: Text(t,
+              style: TextStyle(
+                  fontSize: 14, fontWeight: FontWeight.w500, color: m.ink900)),
+          subtitle: Text(sub, style: TextStyle(fontSize: 11.5, color: m.ink500)),
+          onTap: onTap == null
+              ? null
+              : () {
+                  Navigator.pop(context);
+                  onTap();
+                },
+        );
     showModalBottomSheet(
       context: context,
       backgroundColor: m.paper,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const SizedBox(height: 12),
-          Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                  color: m.ink200, borderRadius: BorderRadius.circular(2))),
-          const SizedBox(height: 6),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
-            child: Text('Kirim foto',
-                style: TextStyle(
-                    fontSize: 13.5, fontWeight: FontWeight.w700, color: m.ink900)),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(
-                'Nomor rangka (17 karakter) atau layar panel yang menampilkan '
-                'kode kesalahan. Ambil dekat, tegak lurus, tanpa pantulan.',
-                style: TextStyle(fontSize: 11.5, color: m.ink500)),
-          ),
-          ListTile(
-            leading: Icon(Icons.photo_camera_outlined, color: m.brand600),
-            title: const Text('Ambil dari kamera'),
-            onTap: () {
-              Navigator.pop(ctx);
-              _bacaFoto(ImageSource.camera);
-            },
-          ),
-          ListTile(
-            leading: Icon(Icons.photo_library_outlined, color: m.brand600),
-            title: const Text('Pilih dari galeri'),
-            onTap: () {
-              Navigator.pop(ctx);
-              _bacaFoto(ImageSource.gallery);
-            },
-          ),
-          const SizedBox(height: 8),
-        ]),
+        child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 10),
+              Center(
+                child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                        color: m.ink200, borderRadius: BorderRadius.circular(2))),
+              ),
+              judul('FOTO — DIBACA OTOMATIS'),
+              opsi(
+                  Icons.photo_camera_outlined,
+                  'Ambil dari kamera',
+                  'Nomor rangka atau layar kode kesalahan. Ambil dekat, tanpa pantulan.',
+                  _ocrBusy ? null : () => _bacaFoto(ImageSource.camera)),
+              opsi(Icons.photo_library_outlined, 'Pilih dari galeri',
+                  'Foto yang sudah tersimpan', _ocrBusy ? null : () => _bacaFoto(ImageSource.gallery)),
+              judul('FILE'),
+              opsi(Icons.table_chart_outlined, 'Lampirkan Excel',
+                  '.xlsx / .xlsm — asisten bisa isi stok, nama part, harga', _pickSheet),
+              const SizedBox(height: 8),
+            ]),
       ),
     );
   }
@@ -1171,7 +1194,8 @@ class _AsistenScreenState extends State<AsistenScreen> {
     final dot = _statusLoading ? m.ink400 : (locked ? m.warn600 : m.brand600);
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+      padding: const EdgeInsets.fromLTRB(16, 3, 8, 3),
+      constraints: const BoxConstraints(minHeight: 36),
       decoration: BoxDecoration(
         color: m.paper,
         border: Border(bottom: BorderSide(color: m.ink150)),
@@ -1187,13 +1211,18 @@ class _AsistenScreenState extends State<AsistenScreen> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 11.5, color: m.ink500)),
         ),
+        // Ramping (tinggi 30 dp): bilah ini menumpuk di bawah judul layar, dan
+        // tiap dp di sini diambil dari ruang baca jawaban.
         if (_msgs.isNotEmpty)
           TextButton.icon(
             onPressed: _busy ? null : _konfirmasiChatBaru,
-            icon: Icon(Icons.refresh_rounded, size: 15, color: m.ink600),
+            icon: Icon(Icons.edit_square, size: 14, color: m.brand700),
             label: Text('Chat Baru',
-                style: TextStyle(fontSize: 12.5, color: m.ink600)),
+                style: TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w600, color: m.brand700)),
             style: TextButton.styleFrom(
+              minimumSize: const Size(0, 30),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               visualDensity: VisualDensity.compact,
               padding: const EdgeInsets.symmetric(horizontal: 8),
             ),
@@ -1309,11 +1338,50 @@ class _AsistenScreenState extends State<AsistenScreen> {
                     border: Border.all(color: m.ink200),
                     boxShadow: m.shadow1,
                   ),
-                  child: Text(s, style: TextStyle(fontSize: 13, color: m.ink800)),
+                  child: Row(children: [
+                    Expanded(
+                        child: Text(s, style: TextStyle(fontSize: 13, color: m.ink800))),
+                    const SizedBox(width: 8),
+                    Icon(Icons.north_east_rounded, size: 14, color: m.ink400),
+                  ]),
                 ),
               ),
             ),
           ),
+        // Petunjuk VIN (paritas web): jawaban part paling tepat bila unitnya
+        // dikunci lewat nomor rangka — dan nomor itu boleh dikirim lewat FOTO.
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: m.brand50,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(Icons.info_outline_rounded, size: 15, color: m.brand700),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text.rich(
+                TextSpan(children: [
+                  const TextSpan(text: 'Sebutkan '),
+                  const TextSpan(
+                      text: 'nomor rangka (VIN)',
+                      style: TextStyle(fontWeight: FontWeight.w700)),
+                  const TextSpan(
+                      text: ' agar jawaban part persis untuk unit Anda — '
+                          'bisa diketik atau difoto lewat tombol '),
+                  WidgetSpan(
+                    alignment: PlaceholderAlignment.middle,
+                    child: Icon(Icons.add_circle_outline_rounded,
+                        size: 14, color: m.brand700),
+                  ),
+                  const TextSpan(text: '.'),
+                ]),
+                style: TextStyle(fontSize: 12, height: 1.45, color: m.ink700),
+              ),
+            ),
+          ]),
+        ),
       ],
     );
   }
@@ -1350,8 +1418,10 @@ class _AsistenScreenState extends State<AsistenScreen> {
                 ),
                 boxShadow: m.shadow1,
               ),
-              child: SelectableText(msg.content,
-                  style: const TextStyle(fontSize: 14, height: 1.5, color: Colors.white)),
+              child: SelectionArea(
+                child: Text(msg.content,
+                    style: const TextStyle(fontSize: 14, height: 1.5, color: Colors.white)),
+              ),
             ),
             const SizedBox(height: 3),
             Text(msg.at, style: TextStyle(fontSize: 10.5, color: m.ink400)),
@@ -1359,26 +1429,19 @@ class _AsistenScreenState extends State<AsistenScreen> {
         ),
       );
     }
+    // Jawaban asisten FULL-BLEED: tanpa avatar per-pesan & tanpa gelembung —
+    // paritas web di HP (≤640px, lihat .chat-bubble-ai di globals.css). Dulu
+    // avatar 30 + gelembung ber-padding memakan ±70 dp lebar, sehingga kartu
+    // tabel di dalamnya (kartu di dalam kartu) jadi sempit & teksnya patah-patah.
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        _avatar(30),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: m.paper,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(4), topRight: Radius.circular(14),
-                  bottomLeft: Radius.circular(14), bottomRight: Radius.circular(14),
-                ),
-                border: Border.all(color: m.ink150),
-                boxShadow: m.shadow1,
-              ),
-              child: MasMarkdown(data: msg.content, selectable: true),
-            ),
+      margin: const EdgeInsets.only(bottom: 18),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            // SelectionArea (bukan `selectable` MarkdownBody): dulu tiap paragraf
+            // jadi SelectableText terpisah dan nilai di kartu tabel (Text biasa)
+            // tak bisa diseleksi sama sekali — PN/stok/harga di kartu justru
+            // yang paling sering ingin disalin. Kini satu area: tekan lama di
+            // mana saja, seret melintasi paragraf & kartu, lalu Salin.
+            SelectionArea(child: MasMarkdown(data: msg.content)),
             if (msg.sheet != null) ...[
               const SizedBox(height: 8),
               _SheetCard(s: msg.sheet!),
@@ -1402,20 +1465,23 @@ class _AsistenScreenState extends State<AsistenScreen> {
               const SizedBox(height: 8),
               _AiExcelCard(exp: exp),
             ],
-            const SizedBox(height: 5),
+            const SizedBox(height: 8),
             _SourceRow(at: msg.at, tools: msg.tools),
-            const SizedBox(height: 2),
-            Row(children: [
-              _FeedbackRow(
-                rating: msg.rating,
-                onUp: () => _sendFeedback(index, 'up'),
-                onDown: () => _askNoteThenDown(index),
+            const SizedBox(height: 4),
+            // Expanded WAJIB: _FeedbackRow berupa Wrap — di dalam Row tanpa
+            // batas lebar ia tak bisa membungkus dan meluber (garis overflow
+            // kuning-hitam, tombol Salin terpotong di layar 360-411 dp).
+            Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+              Expanded(
+                child: _FeedbackRow(
+                  rating: msg.rating,
+                  onUp: () => _sendFeedback(index, 'up'),
+                  onDown: () => _askNoteThenDown(index),
+                ),
               ),
-              const Spacer(),
+              const SizedBox(width: 6),
               _copyBtn(m, msg.content),
             ]),
-          ]),
-        ),
       ]),
     );
   }
@@ -1425,16 +1491,16 @@ class _AsistenScreenState extends State<AsistenScreen> {
         message: 'Salin jawaban',
         child: InkWell(
           onTap: () {
-            Clipboard.setData(ClipboardData(text: text));
+            Clipboard.setData(ClipboardData(text: _teksPolos(text)));
             AppNav.of(context).toast('Jawaban disalin');
           },
           borderRadius: BorderRadius.circular(6),
           child: Padding(
-            padding: const EdgeInsets.all(4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.copy_rounded, size: 13, color: m.ink400),
+              Icon(Icons.copy_rounded, size: 14, color: m.ink500),
               const SizedBox(width: 4),
-              Text('Salin', style: TextStyle(fontSize: 10.5, color: m.ink400)),
+              Text('Salin', style: TextStyle(fontSize: 11, color: m.ink500)),
             ]),
           ),
         ),
@@ -1444,87 +1510,61 @@ class _AsistenScreenState extends State<AsistenScreen> {
   // dipakai bersama layar riwayat Q&A admin (yang dulu tak punya properti tabel
   // sama sekali). Semua render jawaban asisten kini lewat `MasMarkdown`.
 
+  /// Tiga titik berkedip — dipakai indikator menunggu & draf.
+  Widget _titik(MasColors m) => SizedBox(
+        width: 26, height: 8,
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          for (int i = 0; i < 3; i++) ...[
+            _Dot(delay: i * 0.15, color: m.brand600),
+            if (i < 2) const SizedBox(width: 4),
+          ],
+        ]),
+      );
+
   Widget _typing(MasColors m) {
-    // Draf token sudah mengalir → tampilkan ISI jawabannya, bukan lagi daftar
+    // Draf token sudah mengalir → tampilkan ISI jawabannya, bukan lagi status
     // langkah. Begitu server membuang draf (`reset`), `_draf` kosong lagi dan
-    // tampilan kembali ke langkah di bawah ini.
+    // tampilan kembali ke status di bawah ini.
     if (_draf.isNotEmpty) return _drafBubble(m);
-    // Saat streaming: tampilkan langkah live — ✓ untuk yang selesai, ⏳ untuk
-    // yang sedang berjalan (langkah terakhir). Persis web.
-    if (_steps.isNotEmpty) {
-      return Container(
-        margin: const EdgeInsets.only(bottom: 14),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _avatar(30),
-          const SizedBox(width: 10),
-          Flexible(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: m.paper,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(4), topRight: Radius.circular(14),
-                  bottomLeft: Radius.circular(14), bottomRight: Radius.circular(14),
-                ),
-                border: Border.all(color: m.ink150),
-                boxShadow: m.shadow1,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (int i = 0; i < _steps.length; i++)
-                    Padding(
-                      padding: EdgeInsets.only(bottom: i < _steps.length - 1 ? 4 : 0),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Text(i == _steps.length - 1 ? '⏳' : '✓',
-                            style: const TextStyle(fontSize: 12)),
-                        const SizedBox(width: 7),
-                        Flexible(
-                          child: Text(_steps[i],
-                              style: TextStyle(
-                                  fontSize: 13,
-                                  color: i == _steps.length - 1 ? m.ink800 : m.ink400)),
-                        ),
-                      ]),
-                    ),
-                ],
-              ),
-            ),
+    // SATU baris saja — teksnya berganti mengikuti langkah terakhir, tidak
+    // menumpuk ke bawah (paritas web, permintaan pemilik 2026-07-31). Dulu
+    // daftar ✓/⏳ bertambah panjang tiap langkah & mendorong layar terus.
+    final label = _steps.isEmpty ? 'Memproses pertanyaan…' : _steps.last;
+    return Semantics(
+      liveRegion: true,
+      label: label,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: m.paper,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: m.ink150),
+            boxShadow: m.shadow1,
           ),
-        ]),
-      );
-    }
-    return Container(
-        margin: const EdgeInsets.only(bottom: 14),
-        child: Row(children: [
-          _avatar(30),
-          const SizedBox(width: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-            decoration: BoxDecoration(
-              color: m.paper,
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(4), topRight: Radius.circular(14),
-                bottomLeft: Radius.circular(14), bottomRight: Radius.circular(14),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            _titik(m),
+            const SizedBox(width: 8),
+            Flexible(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: Text(label,
+                    key: ValueKey(label),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12.5, color: m.ink800)),
               ),
-              border: Border.all(color: m.ink150),
             ),
-            child: SizedBox(
-              width: 18, height: 8,
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                for (int i = 0; i < 3; i++) ...[
-                  _Dot(delay: i * 0.15, color: m.ink400),
-                  if (i < 2) const SizedBox(width: 4),
-                ],
-              ]),
-            ),
-          ),
-        ]),
-      );
+            _Elapsed(since: _mulai, color: m.ink500),
+          ]),
+        ),
+      ),
+    );
   }
 
-  /// Gelembung DRAF: jawaban mentah yang masih mengalir dan belum lewat guard.
+  /// DRAF: jawaban mentah yang masih mengalir dan belum lewat guard.
   /// Dirender dengan markdown yang SAMA seperti jawaban final — tabel separuh
   /// jadi memang berkedip sesaat — tapi diredupkan + diberi titik mengetik agar
   /// jelas ini belum final. Tanpa footer (sumber/salin/👍👎) dan tanpa teks
@@ -1533,51 +1573,20 @@ class _AsistenScreenState extends State<AsistenScreen> {
   Widget _drafBubble(MasColors m) {
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        _avatar(30),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Opacity(
-                  opacity: 0.8,
-                  child: Container(
-                    width: double.infinity,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: m.paper,
-                      borderRadius: const BorderRadius.only(
-                        topLeft: Radius.circular(4), topRight: Radius.circular(14),
-                        bottomLeft: Radius.circular(14),
-                        bottomRight: Radius.circular(14),
-                      ),
-                      border: Border.all(color: m.ink150),
-                      boxShadow: m.shadow1,
-                    ),
-                    child: MasMarkdown(data: _draf),
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Row(children: [
-                  SizedBox(
-                    width: 18, height: 8,
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      for (int i = 0; i < 3; i++) ...[
-                        _Dot(delay: i * 0.15, color: m.ink400),
-                        if (i < 2) const SizedBox(width: 4),
-                      ],
-                    ]),
-                  ),
-                  const SizedBox(width: 8),
-                  Text('Menulis jawaban…',
-                      style: TextStyle(fontSize: 10.5, color: m.ink400)),
-                ]),
-              ]),
-        ),
-      ]),
+      child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Opacity(opacity: 0.8, child: MasMarkdown(data: _draf)),
+            const SizedBox(height: 6),
+            Row(children: [
+              _titik(m),
+              const SizedBox(width: 8),
+              Text('Menulis jawaban…',
+                  style: TextStyle(fontSize: 11, color: m.ink500)),
+              _Elapsed(since: _mulai, color: m.ink500),
+            ]),
+          ]),
     );
   }
 
@@ -1750,22 +1759,26 @@ class _AsistenScreenState extends State<AsistenScreen> {
           const SizedBox(height: 8),
         ],
         Row(children: [
-          // Kamera = jawab permintaan nomor rangka dengan FOTO. Nomornya dibaca
-          // server lalu dikirim sendiri sebagai pesan — tak ada yang menunggu
-          // tombol Kirim (beda dengan lampiran Excel di sebelahnya).
+          // "+" = semua lampiran (foto nomor rangka / kode kesalahan, Excel).
+          // Foto dibaca server lalu dikirim sendiri; Excel hanya DILAMPIRKAN
+          // dan menunggu tombol Kirim.
           Tooltip(
-            message: 'Foto nomor rangka atau layar kode kesalahan — dibaca '
-                'otomatis lalu dikirim',
-            child: _sqBtn(m, Icons.photo_camera_outlined,
-                _busy || _locked || _ocrBusy ? null : _pilihFoto, false),
-          ),
-          const SizedBox(width: 8),
-          // Klip = lampirkan Excel, persis tombol paperclip web. Memilih file
-          // hanya MELAMPIRKAN; pengiriman menunggu user menekan Kirim.
-          Tooltip(
-            message: 'Lampirkan Excel (.xlsx) — asisten bisa isi stok / nama part / harga',
-            child: _sqBtn(m, Icons.attach_file_rounded,
-                _busy || _locked ? null : _pickSheet, false),
+            message: 'Lampirkan foto atau Excel',
+            child: _ocrBusy
+                ? Container(
+                    width: 40, height: 40,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: m.ink200),
+                    ),
+                    child: SizedBox(
+                      width: 16, height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: m.brand600),
+                    ),
+                  )
+                : _sqBtn(m, Icons.add_rounded,
+                    _busy || _locked ? null : _pilihLampiran, false),
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -1795,7 +1808,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
                           ? 'Mau diapakan filenya? (mis. isikan stoknya)'
                           : _kartuAktif != null
                               ? 'Atau balas langsung…'
-                              : 'Tanya stok, harga, BOM per-VIN…'),
+                              : 'Tulis pertanyaan…'),
                   hintStyle: TextStyle(color: m.ink400, fontSize: 13.5),
                   contentPadding: const EdgeInsets.symmetric(vertical: 11),
                 ),
@@ -1828,7 +1841,7 @@ class _AsistenScreenState extends State<AsistenScreen> {
             borderRadius: BorderRadius.circular(10),
             border: primary ? null : Border.all(color: m.ink200),
           ),
-          child: Icon(icon, size: 17, color: primary ? Colors.white : m.ink600),
+          child: Icon(icon, size: 19, color: primary ? Colors.white : m.ink600),
         ),
       ),
     );
@@ -1850,6 +1863,36 @@ Future<void> _simpanDanBuka(Uint8List bytes, String filename) async {
 String _namaAman(String s) {
   final base = s.trim().isEmpty ? 'export.xlsx' : s.trim();
   return base.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+}
+
+/// Jawaban markdown → teks polos untuk tombol Salin. Ditempel ke WhatsApp /
+/// catatan, simbol `**tebal**`, `# judul`, dan baris tabel `| a | b |` mentah
+/// hanya jadi sampah. Tabel diratakan jadi "a · b" per baris; garis pemisah
+/// `|---|` dibuang.
+String _teksPolos(String md) {
+  final out = <String>[];
+  for (var line in md.split('\n')) {
+    final t = line.trim();
+    if (RegExp(r'^\|?\s*:?-{2,}').hasMatch(t) && !RegExp(r'[A-Za-z0-9]').hasMatch(t)) {
+      continue; // |---|:---:| pemisah header tabel
+    }
+    if (t.startsWith('|') && t.endsWith('|') && t.length > 1) {
+      line = t
+          .substring(1, t.length - 1)
+          .split('|')
+          .map((c) => c.trim())
+          .where((c) => c.isNotEmpty)
+          .join(' · ');
+    }
+    line = line
+        .replaceFirst(RegExp(r'^\s{0,3}#{1,6}\s+'), '')
+        .replaceAllMapped(RegExp(r'\*\*(.+?)\*\*'), (m) => m[1]!)
+        .replaceAllMapped(RegExp(r'__(.+?)__'), (m) => m[1]!)
+        .replaceAllMapped(RegExp(r'`([^`]+)`'), (m) => m[1]!)
+        .replaceFirstMapped(RegExp(r'^(\s*)[-*]\s+'), (m) => '${m[1]}• ');
+    out.add(line);
+  }
+  return out.join('\n').replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
 }
 
 // ── Baris sumber (chip tool) + waktu ────────────────────────────────
@@ -1916,11 +1959,12 @@ class _SourceRow extends StatelessWidget {
       children: [
         if (tools.isNotEmpty)
           Text('Sumber:', style: TextStyle(fontSize: 10.5, color: m.ink400)),
+        // TANPA `alignment` pada Container: Container ber-alignment melebar
+        // memenuhi batas lebar induknya — di dalam Wrap itu berarti SATU chip
+        // selebar layar, dan "Sumber:" + jam terdorong ke baris sendiri.
         for (final t in tools.take(4))
           Container(
-            height: 20,
-            padding: const EdgeInsets.symmetric(horizontal: 7),
-            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
             decoration: BoxDecoration(
               color: m.ink100,
               borderRadius: BorderRadius.circular(999),
@@ -2663,6 +2707,54 @@ class _ExplodedTileState extends State<_ExplodedTile> {
 
 // Catatan: kelas _SimsThumbs (foto SIMS untuk PN yang disebut asisten) dihapus —
 // fitur ini dimatikan di web atas permintaan pemilik (2026-07-08).
+
+/// Penghitung detik di indikator menunggu (paritas `Elapsed` web).
+///
+/// Jawaban butuh 14 detik (separuh kasus) sampai 254 detik (terburuk). Angka
+/// yang berjalan tidak mempercepat apa pun, tapi mengubah "aplikasinya hang?"
+/// menjadi "masih jalan, sudah 20 detik". Muncul setelah 3 detik supaya jawaban
+/// cepat tidak ikut berkedip.
+class _Elapsed extends StatefulWidget {
+  final DateTime? since;
+  final Color color;
+  const _Elapsed({required this.since, required this.color});
+  @override
+  State<_Elapsed> createState() => _ElapsedState();
+}
+
+class _ElapsedState extends State<_Elapsed> {
+  Timer? _t;
+
+  @override
+  void initState() {
+    super.initState();
+    _t = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _t?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final since = widget.since;
+    if (since == null) return const SizedBox.shrink();
+    final detik = DateTime.now().difference(since).inSeconds;
+    if (detik < 3) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(left: 6),
+      child: Text('· $detik dtk',
+          style: TextStyle(
+              fontSize: 11,
+              color: widget.color,
+              fontFeatures: const [FontFeature.tabularFigures()])),
+    );
+  }
+}
 
 class _Dot extends StatefulWidget {
   final double delay;
