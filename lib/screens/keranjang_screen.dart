@@ -1602,7 +1602,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         ),
         const SizedBox(height: 8),
         Text(
-          'Harga part dihitung dari sistem saat pesanan dibuat. Ongkir opsional.',
+          'Harga, ongkir, dan potongan dihitung ulang sistem saat pesanan dibuat.',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 11.5, color: m.ink400),
         ),
