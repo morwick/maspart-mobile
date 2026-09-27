@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../api_service.dart';
 import '../auth_storage.dart';
 import '../cart.dart';
+import '../ikon_badge.dart';
 import '../push.dart';
 import '../theme/mas_theme.dart';
 import '../utils.dart';
@@ -138,7 +139,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// (Penegakan sesungguhnya tetap di server.)
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _refreshPermissions();
+    if (state == AppLifecycleState.resumed) {
+      _refreshPermissions();
+      _notifTerlihat();
+    }
+  }
+
+  /// Akun non-pembeli (cabang/staf) tak punya lonceng, padahal tetap menerima
+  /// push (mis. "Pesanan baru masuk"). Membuka aplikasi = kabarnya sudah
+  /// terlihat → tandai dibaca supaya angka badge di ikon tak menumpuk terus.
+  /// Pembeli diurus lonceng (widgets/notif_bell.dart).
+  void _notifTerlihat() {
+    if (!_sesiSiap || _role == 'pembeli') return;
+    ApiService.bacaNotifikasi().then((_) => IkonBadge.pasang(0)).catchError((_) {});
   }
 
   Future<void> _refreshPermissions() async {
@@ -267,6 +280,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         _sesiSiap = true;
         _bukaTautanPush(); // push yang diketuk sebelum shell/login siap
         Push.daftarkan(); // no-op bila push tidur; tak pernah melempar
+        _notifTerlihat();
       }
     }
   }

@@ -4,6 +4,7 @@
 // Dipakai pertama oleh Return: tiap perubahan status → satu notifikasi.
 // Diperbarui tiap 60 detik selama aplikasi aktif; membuka panel menandai semua
 // dibaca; ketuk item bertautan /retur/{kode} → Detail Return.
+// Jumlah belum dibaca juga jadi ANGKA BADGE di ikon aplikasi (ikon_badge.dart).
 // ⛔ Lonceng tak boleh mengganggu layar: semua galat didiamkan, dan bila fitur
 // belum aktif di server (aktif=false) lonceng tidak tampil sama sekali.
 
@@ -14,7 +15,9 @@ import 'package:flutter/services.dart';
 
 import '../api_service.dart';
 import '../app/nav.dart';
+import '../ikon_badge.dart';
 import '../order_ui.dart';
+import '../push.dart';
 import '../theme/mas_theme.dart';
 
 class NotifBell extends StatefulWidget {
@@ -55,6 +58,7 @@ class _NotifBellState extends State<NotifBell> {
         _n = r.belumDibaca;
         _list = r.notifikasi;
       });
+      if (r.aktif) IkonBadge.pasang(r.belumDibaca);
     } catch (_) {/* lonceng tak boleh mengganggu halaman */}
   }
 
@@ -64,6 +68,7 @@ class _NotifBellState extends State<NotifBell> {
     if (_n > 0) {
       ApiService.bacaNotifikasi().then((_) {
         if (mounted) setState(() => _n = 0);
+        Push.semuaDibaca();
       }).catchError((_) {});
     }
     final m = context.mas;

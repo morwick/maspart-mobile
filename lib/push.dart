@@ -13,6 +13,9 @@
 //   • logout        → Push.lepas()    : hapus token di server, lalu di perangkat.
 //   • ketuk push    → [Push.tautanTertunda] ← tautan web; shell yang membukanya
 //                     (via tujuanTautan di app/nav.dart, sama dengan lonceng).
+//   • tiap push     → data['badge'] = jumlah belum dibaca → angka di ikon
+//                     aplikasi (lib/ikon_badge.dart), juga saat aplikasi tertutup.
+//                     Pesan data-saja {badge} = sinkron angka (dibaca di web).
 // ⛔ Tak ada fungsi di sini yang boleh melempar galat ke pemanggil.
 
 import 'dart:async';
@@ -23,12 +26,16 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'api_service.dart';
+import 'ikon_badge.dart';
 
 /// Penangan pesan saat aplikasi di latar belakang / tertutup. Pesan bertipe
-/// `notification` sudah ditampilkan sistem sendiri, jadi cukup kosong — tapi
-/// WAJIB terdaftar & top-level (dijalankan di isolate terpisah).
+/// `notification` sudah ditampilkan sistem sendiri; di sini hanya angka badge
+/// ikon yang diperbarui. WAJIB terdaftar & top-level (isolate terpisah).
 @pragma('vm:entry-point')
-Future<void> _pushLatarBelakang(RemoteMessage message) async {}
+Future<void> _pushLatarBelakang(RemoteMessage message) async {
+  final n = IkonBadge.dariData(message.data);
+  if (n != null) await IkonBadge.pasang(n);
+}
 
 class Push {
   Push._();
@@ -132,9 +139,22 @@ class Push {
     }
   }
 
+  /// Semua notifikasi sudah dibaca → angka di ikon hilang & baki notifikasi
+  /// sistem aplikasi ini dibersihkan.
+  static Future<void> semuaDibaca() async {
+    await IkonBadge.pasang(0);
+    if (!aktif) return;
+    try {
+      await _lokal.cancelAll();
+    } catch (e) {
+      debugPrint('Push: bersihkan baki gagal ($e)');
+    }
+  }
+
   /// Logout: lepas token di server (SEBELUM token sesi dibuang), lalu hapus
   /// token perangkat supaya akun berikutnya di HP ini dapat token baru.
   static Future<void> lepas() async {
+    await semuaDibaca(); // angka akun lama tak boleh tertinggal di ikon
     if (!aktif) return;
     await _subRefresh?.cancel();
     _subRefresh = null;
@@ -165,6 +185,8 @@ class Push {
   }
 
   static Future<void> _tampilkanDepan(RemoteMessage m) async {
+    final badge = IkonBadge.dariData(m.data);
+    if (badge != null) IkonBadge.pasang(badge);
     try {
       final judul = m.notification?.title ?? m.data['judul']?.toString() ?? '';
       final isi = m.notification?.body ?? m.data['isi']?.toString() ?? '';
@@ -182,6 +204,7 @@ class Push {
             priority: Priority.high,
             icon: _ikon,
             styleInformation: BigTextStyleInformation(isi),
+            number: badge,
           ),
         ),
         payload: _tautanDari(m),
