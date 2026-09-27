@@ -260,16 +260,31 @@ class _TokoScreenState extends State<TokoScreen> {
               title: _q.isNotEmpty
                   ? 'Tidak ada produk yang cocok dengan "$_q".'
                   : 'Tidak ada produk yang cocok.',
-              subtitle: _q.isNotEmpty || _kategori.isNotEmpty
-                  ? 'Coba kata kunci atau kategori lain.'
-                  : 'Coba ubah filter.',
+              subtitle: _q.isNotEmpty
+                  ? 'Part yang Anda cari belum tampil di etalase? Tim gudang '
+                      'bisa bantu carikan atau tawarkan penggantinya.'
+                  : _kategori.isNotEmpty
+                      ? 'Coba kata kunci atau kategori lain.'
+                      : 'Coba ubah filter.',
               action: _q.isNotEmpty || _kategori.isNotEmpty
-                  ? MasButton(
-                      label: 'Tampilkan semua produk',
-                      primary: false,
-                      height: 38,
-                      onTap: _resetFilter,
-                    )
+                  ? Column(mainAxisSize: MainAxisSize.min, children: [
+                      if (_q.isNotEmpty) ...[
+                        MasButton(
+                          label: 'Minta dicarikan gudang',
+                          icon: Icons.chat_bubble_outline_rounded,
+                          height: 38,
+                          loading: _bukaChat,
+                          onTap: _bukaChat ? null : () => _mintaDicarikan(_q),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      MasButton(
+                        label: 'Tampilkan semua produk',
+                        primary: false,
+                        height: 38,
+                        onTap: _resetFilter,
+                      ),
+                    ])
                   : null,
             )
           else ...[
@@ -380,6 +395,29 @@ class _TokoScreenState extends State<TokoScreen> {
         ]),
       ),
     ]);
+  }
+
+  bool _bukaChat = false;
+
+  /// Pencarian nihil → Chat Gudang (gudang lokasi pembeli) dengan pesan
+  /// siap-kirim. Sama dengan web /toko: tidak dikirim otomatis, pembeli bisa
+  /// menambah detail unit/nomor mesin dulu.
+  Future<void> _mintaDicarikan(String kata) async {
+    final nav = AppNav.of(context);
+    setState(() => _bukaChat = true);
+    String? key;
+    try {
+      key = (await ApiService.buyerLocation()).key;
+    } catch (_) {
+      /* gagal → buka daftar percakapan tanpa gudang terpilih */
+    }
+    if (!mounted) return;
+    setState(() => _bukaChat = false);
+    nav.go(MasScreen.chat, part: {
+      if (key != null && key.isNotEmpty) 'gudang': key,
+      'pesan': 'Halo, saya mencari part "$kata" tapi tidak ketemu di '
+          'etalase. Bisa dibantu dicarikan atau ada penggantinya?',
+    });
   }
 
   /// "Tampilkan semua produk" di hasil kosong — kosongkan cari + kategori.

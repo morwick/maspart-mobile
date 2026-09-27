@@ -58,6 +58,10 @@ class ChatThreadView extends StatefulWidget {
   final List<String> quickReplies;
   final Duration pollEvery;
 
+  /// Pesan siap-kirim yang mengisi kotak ketik (mis. dari "Minta dicarikan"
+  /// di toko). Tidak dikirim otomatis — pembeli tetap bisa menyuntingnya.
+  final String? draft;
+
   const ChatThreadView({
     super.key,
     required this.me,
@@ -66,6 +70,7 @@ class ChatThreadView extends StatefulWidget {
     this.emptyText = 'Belum ada pesan. Mulai percakapan.',
     this.quickReplies = const [],
     this.pollEvery = const Duration(seconds: 7),
+    this.draft,
   });
 
   @override
@@ -87,6 +92,8 @@ class _ChatThreadViewState extends State<ChatThreadView> {
   void initState() {
     super.initState();
     _ctl.addListener(() => setState(() {})); // tombol kirim aktif/nonaktif
+    final draft = widget.draft?.trim() ?? '';
+    if (draft.isNotEmpty) _ctl.text = draft;
     _load(scrollToEnd: true);
     _poll = Timer.periodic(widget.pollEvery, (_) => _load());
   }

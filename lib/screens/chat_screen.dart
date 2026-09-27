@@ -36,6 +36,11 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Key gudang dari argumen pembuka (tetap di daftar walau belum ada pesan).
   String? _pre;
   String? _open;
+
+  /// Pesan siap-kirim dari argumen `pesan` (tombol "Minta dicarikan" di toko)
+  /// — hanya untuk thread gudang [_pre]; dibuang setelah terkirim supaya
+  /// tidak mengisi ulang kotak ketik saat thread dibuka lagi.
+  String? _draft;
   bool _loading = true;
   String? _error;
 
@@ -46,6 +51,10 @@ class _ChatScreenState extends State<ChatScreen> {
     if (g.isNotEmpty) {
       _pre = g;
       _open = g; // label menyusul saat daftar gudang termuat
+      final pesan = '${widget.args['pesan'] ?? ''}'.trim();
+      if (pesan.isNotEmpty) {
+        _draft = pesan.length > 500 ? pesan.substring(0, 500) : pesan;
+      }
     }
     _load();
   }
@@ -163,8 +172,12 @@ class _ChatScreenState extends State<ChatScreen> {
             emptyText: 'Tanyakan ketersediaan stok, ongkir, atau estimasi '
                 'pengiriman ke gudang ini.',
             quickReplies: _kUsulan,
+            draft: open == _pre ? _draft : null,
             fetch: () => ApiService.buyerGudangChat(open),
-            send: (body) => ApiService.sendBuyerGudangChat(open, body),
+            send: (body) async {
+              await ApiService.sendBuyerGudangChat(open, body);
+              _draft = null;
+            },
           ),
         ),
       ]);
