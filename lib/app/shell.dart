@@ -506,6 +506,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // Admin
       case MasScreen.orders:
         return const OrdersScreen();
+      case MasScreen.bermasalah:
+        return const BermasalahScreen();
       case MasScreen.orderDetail:
         return OrderDetailScreen(args: args);
       case MasScreen.penjualan:

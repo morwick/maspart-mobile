@@ -1736,6 +1736,18 @@ class ApiService {
         },
       );
 
+  /// Pesanan Bermasalah (T-7) — padanan web /admin/bermasalah.
+  static Future<PesananBermasalah> pesananBermasalah() async =>
+      PesananBermasalah.fromJson(
+          _Api._obj(await _Api.get('/api/admin/pesanan-bermasalah')));
+
+  /// Tutup catatan pembayaran umum (nominal tak cocok, stok gagal dikunci, …)
+  /// — padanan web `adminTandaiDitangani`. Catatan wajib (>= 10 karakter).
+  static Future<void> adminTandaiDitangani(String code, String catatan) => _Api.post(
+        '/api/admin/orders/${Uri.encodeComponent(code)}/tandai-ditangani',
+        body: {'catatan': catatan},
+      );
+
   /// Lepas tahanan kirim pesanan yang dananya ditarik (audit 2026-09-28 T-5)
   /// — padanan web `adminLepasTahan`. Alasan wajib (>= 10 karakter).
   static Future<void> adminLepasTahan(String code, String alasan) => _Api.post(

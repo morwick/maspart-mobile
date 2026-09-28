@@ -45,6 +45,7 @@ enum MasScreen {
 
   // Admin
   orders,
+  bermasalah,
   orderDetail,
   penjualan,
   feedback,
@@ -99,6 +100,7 @@ const Map<MasScreen, (String, String)> kScreenTitles = {
   MasScreen.cabangChat: ('Chat Pembeli', 'Percakapan dengan pembeli'),
 
   MasScreen.orders: ('Pesanan', 'Kelola & verifikasi pesanan'),
+  MasScreen.bermasalah: ('Pesanan Bermasalah', 'Pesanan yang butuh tindakan admin'),
   MasScreen.orderDetail: ('Detail Pesanan', ''),
   MasScreen.penjualan: ('Laporan Penjualan', 'Rekap omzet & barang terjual'),
   MasScreen.feedback: ('Umpan Balik AI', 'Jawaban yang dinilai user'),
@@ -184,6 +186,7 @@ const List<NavItem> _navData = [
 
 const List<NavItem> _navAdmin = [
   NavItem('Pesanan', Icons.shopping_cart_outlined, MasScreen.orders),
+  NavItem('Pesanan Bermasalah', Icons.report_problem_outlined, MasScreen.bermasalah),
   NavItem('Laporan Penjualan', Icons.bar_chart_rounded, MasScreen.penjualan),
   NavItem('Umpan Balik AI', Icons.forum_outlined, MasScreen.feedback),
   NavItem('Observabilitas AI', Icons.monitor_heart_outlined, MasScreen.chatlog),

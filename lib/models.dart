@@ -1424,6 +1424,62 @@ class OrderItemDetail {
       );
 }
 
+/// Satu pesanan di halaman Pesanan Bermasalah (audit 2026-09-28 T-7).
+class PesananMasalah {
+  final String orderCode;
+  final String pembeli;
+  final String gudang;
+  final int total;
+  final String status;
+  final int? umurHari;
+  final String catatan;
+  final bool perluRefund;
+
+  const PesananMasalah({
+    required this.orderCode,
+    this.pembeli = '',
+    this.gudang = '',
+    this.total = 0,
+    this.status = '',
+    this.umurHari,
+    this.catatan = '',
+    this.perluRefund = false,
+  });
+
+  factory PesananMasalah.fromJson(Map<String, dynamic> j) => PesananMasalah(
+        orderCode: _s(j['order_code']),
+        pembeli: _s(j['pembeli']),
+        gudang: _s(j['gudang']),
+        total: _i(j['total']),
+        status: _s(j['status']),
+        umurHari: _iOrNull(j['umur_hari']),
+        catatan: _s(j['catatan']),
+        perluRefund: _b(j['perlu_refund']),
+      );
+}
+
+/// Pesanan Bermasalah per jenis masalah (kunci = nama daftar dari server).
+class PesananBermasalah {
+  final Map<String, List<PesananMasalah>> daftar;
+  const PesananBermasalah(this.daftar);
+
+  static const kunci = [
+    'uang_perlu_dicek', 'kendala_gudang', 'bayar_macet',
+    'belum_diambil', 'lunas_belum_dikirim', 'penawaran_gagal',
+  ];
+
+  int get jumlah => daftar.values.fold(0, (n, l) => n + l.length);
+
+  factory PesananBermasalah.fromJson(Map<String, dynamic> j) => PesananBermasalah({
+        for (final k in kunci)
+          k: (j[k] as List?)
+                  ?.whereType<Map>()
+                  .map((e) => PesananMasalah.fromJson(e.cast<String, dynamic>()))
+                  .toList() ??
+              const <PesananMasalah>[],
+      });
+}
+
 class OrderSummary {
   final String orderCode;
   final String username;
@@ -1588,6 +1644,9 @@ class OrderDetail extends OrderSummary {
   final String? statusRefund;
   final int refundDikembalikan;
 
+  /// T-7 (admin): ada catatan pembayaran umum → "Tandai sudah ditangani".
+  final bool bisaDitangani;
+
   /// Penawaran Penjualan Accurate otomatis: created | skip | failed.
   final String? penawaranStatus;
   final String? penawaranNumber;
@@ -1669,6 +1728,7 @@ class OrderDetail extends OrderSummary {
     this.alasanBatalWaktu,
     this.statusRefund,
     this.refundDikembalikan = 0,
+    this.bisaDitangani = false,
     this.penawaranStatus,
     this.penawaranNumber,
     this.penawaranNote,
@@ -1745,6 +1805,7 @@ class OrderDetail extends OrderSummary {
         alasanBatalWaktu: _sOrNull((j['alasan_batal'] as Map?)?['waktu']),
         statusRefund: _sOrNull(j['status_refund']),
         refundDikembalikan: _i(j['refund_dikembalikan']),
+        bisaDitangani: _b(j['bisa_ditangani']),
         penawaranStatus: _sOrNull(j['penawaran_status']),
         penawaranNumber: _sOrNull(j['penawaran_number']),
         penawaranNote: _sOrNull(j['penawaran_note']),

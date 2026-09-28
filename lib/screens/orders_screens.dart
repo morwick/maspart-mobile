@@ -332,6 +332,156 @@ class _OrdersScreenState extends State<OrdersScreen> {
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// 1b. Pesanan Bermasalah (admin) — audit 2026-09-28 T-7, padanan web
+//     /admin/bermasalah. Dulu daftar ini hanya bisa dibaca lewat asisten AI.
+// ══════════════════════════════════════════════════════════════════════
+
+class BermasalahScreen extends StatefulWidget {
+  const BermasalahScreen({super.key});
+
+  @override
+  State<BermasalahScreen> createState() => _BermasalahScreenState();
+}
+
+class _BermasalahScreenState extends State<BermasalahScreen> {
+  PesananBermasalah? _data;
+  bool _loading = true;
+  String? _error;
+
+  static const _judul = {
+    'uang_perlu_dicek': ('Uang perlu dicek',
+        'Uang pembeli sudah masuk tapi pesanannya bermasalah — refund, konfirmasi, atau cek stok.'),
+    'kendala_gudang': ('Kendala dari gudang',
+        'Gudang melaporkan kendala pada pesanan lunas — putuskan lanjut kirim atau batalkan.'),
+    'bayar_macet': ('Pembayaran macet',
+        'Lewat tenggat bayar tapi belum lunas/batal — periksa manual.'),
+    'belum_diambil': ('Ambil di Toko belum diambil', 'Sudah lewat batas ambil — hubungi pembeli.'),
+    'lunas_belum_dikirim': ('Lunas, belum dikirim',
+        'Sudah lunas beberapa hari tapi belum dikirim — pembeli menunggu.'),
+    'penawaran_gagal': ('Penawaran Accurate gagal', 'Pesanan lunas belum tercatat di Accurate.'),
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final d = await ApiService.pesananBermasalah();
+      if (!mounted) return;
+      setState(() {
+        _data = d;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final m = context.mas;
+    final nav = AppNav.of(context);
+    final d = _data;
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        children: [
+          if (_error != null) ...[
+            _Alert(_error!),
+            const SizedBox(height: 14),
+          ],
+          if (_loading && d == null)
+            Column(children: [
+              for (int i = 0; i < 3; i++)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 10),
+                  child: MasSkeleton(height: 96),
+                ),
+            ])
+          else if (d == null || d.jumlah == 0)
+            const MasEmpty(
+              icon: Icons.verified_outlined,
+              title: 'Tidak ada pesanan bermasalah',
+              subtitle: 'Uang perlu dicek, kendala gudang & pesanan macet akan muncul di sini.',
+            )
+          else
+            for (final k in PesananBermasalah.kunci)
+              if ((d.daftar[k] ?? const []).isNotEmpty) ...[
+                Text('${_judul[k]?.$1 ?? k} (${d.daftar[k]!.length})',
+                    style: TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w700, color: m.ink900)),
+                const SizedBox(height: 2),
+                Text(_judul[k]?.$2 ?? '',
+                    style: TextStyle(fontSize: 12, color: m.ink500)),
+                const SizedBox(height: 8),
+                for (final o in d.daftar[k]!)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _kartu(m, nav, o),
+                  ),
+                const SizedBox(height: 8),
+              ],
+        ],
+      ),
+    );
+  }
+
+  Widget _kartu(MasColors m, AppNav nav, PesananMasalah o) => MasCard(
+        onTap: () => nav.go(MasScreen.orderDetail, part: {'order_code': o.orderCode}),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Expanded(
+                child: Text(o.orderCode,
+                    style: masMono(size: 13, weight: FontWeight.w700, color: m.ink900)),
+              ),
+              if (o.perluRefund) ...[
+                const MasPill(label: 'Perlu refund', tone: MasPillTone.danger, height: 20),
+                const SizedBox(width: 6),
+              ],
+              MasPill(
+                label: orderStatusLabel(o.status),
+                tone: orderStatusTone(o.status),
+                height: 20,
+              ),
+            ]),
+            const SizedBox(height: 6),
+            Row(children: [
+              Expanded(
+                child: Text(
+                    '${o.pembeli.isNotEmpty ? o.pembeli : '—'} · '
+                    '${o.gudang.isNotEmpty ? o.gudang : '—'}'
+                    '${o.umurHari != null ? ' · ${o.umurHari} hari' : ''}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: m.ink600)),
+              ),
+              Text(formatRupiah(o.total),
+                  style: masMono(size: 13, weight: FontWeight.w700, color: m.brand700)),
+            ]),
+            if (o.catatan.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(o.catatan, style: TextStyle(fontSize: 12, color: m.ink700)),
+            ],
+          ],
+        ),
+      );
+}
+
+// ══════════════════════════════════════════════════════════════════════
 // 2. Detail pesanan (admin)
 // ══════════════════════════════════════════════════════════════════════
 
@@ -839,6 +989,73 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  /// "Tandai sudah ditangani" (T-7, padanan web): menutup catatan pembayaran
+  /// umum (nominal tak cocok, stok gagal dikunci, …). Catatan wajib ≥ 10.
+  Future<void> _tandaiDitangani() async {
+    final nav = AppNav.of(context);
+    final ctl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final m = ctx.mas;
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            final cukup =
+                ctl.text.trim().replaceAll(RegExp(r'\s+'), ' ').length >= 10;
+            return AlertDialog(
+              title: const Text('Tandai sudah ditangani', style: TextStyle(fontSize: 16)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Tulis apa yang sudah dilakukan (tercatat di riwayat pesanan).',
+                      style: TextStyle(fontSize: 12.5, color: m.ink600)),
+                  const SizedBox(height: 8),
+                  MasInput(
+                    controller: ctl,
+                    hint: 'mis. selisih sudah ditransfer balik ke pembeli',
+                    height: 40,
+                    onChanged: (_) => setLocal(() {}),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Batal')),
+                TextButton(
+                  onPressed: cukup ? () => Navigator.pop(ctx, true) : null,
+                  child: const Text('Simpan'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    final catatan = ctl.text.trim();
+    ctl.dispose();
+    if (ok != true || !mounted) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ApiService.adminTandaiDitangani(_code, catatan);
+      if (!mounted) return;
+      setState(() => _busy = false);
+      nav.toast('Catatan pembayaran ditandai sudah ditangani.');
+      await _load();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _busy = false;
+      });
+    }
+  }
+
   Future<void> _launch(String url) async {
     final nav = AppNav.of(context);
     final uri = Uri.tryParse(url);
@@ -886,6 +1103,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             _Alert('⚠️ Pembayaran perlu ditindaklanjuti.\n• '
                 '${o.catatanTerbuka.join('\n• ')}',
                 tone: MasPillTone.warn),
+            if (o.bisaDitangani) ...[
+              const SizedBox(height: 8),
+              MasButton(
+                label: 'Tandai sudah ditangani…',
+                primary: false,
+                expand: true,
+                height: 40,
+                loading: _busy,
+                onTap: _busy ? null : _tandaiDitangani,
+              ),
+            ],
             if (o.perluRefund) ...[
               const SizedBox(height: 8),
               MasButton(
