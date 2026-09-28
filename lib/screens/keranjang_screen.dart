@@ -400,9 +400,13 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   int _hargaOf(CartItem i) =>
       _srv(i.partNumber)?.harga.round() ?? priceToNum(i.harga);
 
-  bool _bisaBeli(CartItem i) =>
-      _srv(i.partNumber)?.bisaDibeli ??
-      (hasPrice(i.harga) && hasWeight(i.berat));
+  /// R-19 (paritas web): barang yang hanya terhalang BERAT tak bisa dikirim,
+  /// tapi tetap bisa dibeli dengan Ambil di Toko (ongkirnya tak dihitung).
+  bool _bisaBeli(CartItem i) {
+    final s = _srv(i.partNumber);
+    if (s != null) return s.bisaDibeli || (_ambilSendiri && s.hanyaAmbil);
+    return hasPrice(i.harga) && hasWeight(i.berat);
+  }
 
   List<String> get _gudangList => _cart.items
       .map((i) => _gudangOf(i.partNumber))
