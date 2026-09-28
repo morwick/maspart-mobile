@@ -1800,11 +1800,21 @@ class ApiService {
   /// Lunasi MANUAL pesanan yang dibayar di luar Midtrans (audit 2026-09-28
   /// T-4) — padanan web `adminLunasiManual`. Server mengecek Midtrans dulu &
   /// menutup tagihannya; `pesan` terisi bila pembeli ternyata sudah membayar
-  /// lewat Midtrans.
-  static Future<String?> adminLunasiManual(String code, String alasan) async {
-    final data = _Api._obj(await _Api.post(
+  /// lewat Midtrans. [bukti] (opsional) = foto struk / PDF bukti transfer —
+  /// tampil di kolom "Bukti" daftar pesanan.
+  static Future<String?> adminLunasiManual(
+    String code,
+    String alasan, {
+    Uint8List? bukti,
+    String? buktiNama,
+  }) async {
+    final data = _Api._obj(await _Api.multipart(
       '/api/admin/orders/${Uri.encodeComponent(code)}/lunasi-manual',
-      body: {'alasan': alasan},
+      files: [
+        if (bukti != null)
+          (field: 'bukti', bytes: bukti, filename: buktiNama ?? 'struk.jpg'),
+      ],
+      fields: {'alasan': alasan},
     ));
     final pesan = data['pesan'];
     return pesan is String && pesan.isNotEmpty ? pesan : null;

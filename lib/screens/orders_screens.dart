@@ -9,8 +9,12 @@
 // percakapan. Model tidak dipakai di sini, jadi disembunyikan supaya nama
 // `OrderChat` tegas menunjuk widget-nya.
 
+import 'dart:typed_data';
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api_service.dart';
@@ -864,6 +868,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final nav = AppNav.of(context);
     final alasanCtl = TextEditingController();
     final kodeCtl = TextEditingController();
+    // Foto struk / PDF bukti transfer (opsional) — padanan web "+ Foto struk".
+    Uint8List? bukti;
+    String buktiNama = '';
+    String? buktiErr;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) {
@@ -874,6 +882,46 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 alasanCtl.text.trim().replaceAll(RegExp(r'\s+'), ' ').length >= 10;
             final kodeCocok =
                 kodeCtl.text.trim().toUpperCase() == _code.toUpperCase();
+            final pdf = buktiNama.toLowerCase().endsWith('.pdf');
+
+            void pasang(Uint8List? b, String nama) => setLocal(() {
+                  if (b != null && b.length > 10 * 1024 * 1024) {
+                    buktiErr = 'Ukuran file bukti maksimal 10 MB.';
+                    return;
+                  }
+                  bukti = b;
+                  buktiNama = nama;
+                  buktiErr = null;
+                });
+
+            Future<void> ambilFoto(ImageSource src) async {
+              try {
+                // 2200 px: tulisan & nominal di struk harus tetap terbaca.
+                final x = await ImagePicker()
+                    .pickImage(source: src, imageQuality: 85, maxWidth: 2200);
+                if (x == null) return;
+                pasang(await x.readAsBytes(),
+                    x.name.isEmpty ? 'struk.jpg' : x.name);
+              } catch (_) {
+                setLocal(() => buktiErr = 'Tidak dapat mengakses kamera/galeri.');
+              }
+            }
+
+            Future<void> ambilPdf() async {
+              try {
+                // withData wajib: file dari Drive/Cloud sering tak punya path.
+                final res = await FilePicker.pickFiles(
+                  type: FileType.custom,
+                  allowedExtensions: const ['pdf'],
+                  withData: true,
+                );
+                final f = res?.files.first;
+                if (f == null || f.bytes == null) return;
+                pasang(f.bytes, f.name);
+              } catch (_) {
+                setLocal(() => buktiErr = 'Tidak dapat membuka file.');
+              }
+            }
             return AlertDialog(
               title: const Text('Lunasi manual', style: TextStyle(fontSize: 16)),
               content: SingleChildScrollView(
@@ -897,6 +945,63 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       height: 40,
                       onChanged: (_) => setLocal(() {}),
                     ),
+                    const SizedBox(height: 10),
+                    Text('Foto struk / bukti transfer (opsional)',
+                        style: TextStyle(fontSize: 12, color: m.ink600)),
+                    const SizedBox(height: 5),
+                    Wrap(spacing: 6, runSpacing: 6, children: [
+                      MasButton(
+                        label: 'Kamera',
+                        icon: Icons.photo_camera_outlined,
+                        primary: false,
+                        height: 34,
+                        onTap: () => ambilFoto(ImageSource.camera),
+                      ),
+                      MasButton(
+                        label: 'Galeri',
+                        icon: Icons.photo_library_outlined,
+                        primary: false,
+                        height: 34,
+                        onTap: () => ambilFoto(ImageSource.gallery),
+                      ),
+                      MasButton(
+                        label: 'PDF',
+                        icon: Icons.picture_as_pdf_outlined,
+                        primary: false,
+                        height: 34,
+                        onTap: ambilPdf,
+                      ),
+                    ]),
+                    if (bukti != null) ...[
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        if (pdf)
+                          Icon(Icons.picture_as_pdf_outlined, color: m.ink500)
+                        else
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: Image.memory(bukti!,
+                                width: 56, height: 56, fit: BoxFit.cover),
+                          ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(buktiNama,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 12, color: m.ink700)),
+                        ),
+                        IconButton(
+                          tooltip: 'Hapus',
+                          icon: Icon(Icons.close, size: 18, color: m.ink500),
+                          onPressed: () => pasang(null, ''),
+                        ),
+                      ]),
+                    ],
+                    if (buktiErr != null) ...[
+                      const SizedBox(height: 4),
+                      Text(buktiErr!,
+                          style: TextStyle(fontSize: 11.5, color: m.danger600)),
+                    ],
                     const SizedBox(height: 10),
                     Text('Ketik ulang kode $_code untuk konfirmasi',
                         style: TextStyle(fontSize: 12, color: m.ink600)),
@@ -937,7 +1042,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       _error = null;
     });
     try {
-      final pesan = await ApiService.adminLunasiManual(_code, alasan);
+      final pesan = await ApiService.adminLunasiManual(_code, alasan,
+          bukti: bukti, buktiNama: buktiNama.isEmpty ? null : buktiNama);
       if (!mounted) return;
       setState(() => _busy = false);
       nav.toast(pesan ?? 'Pesanan dilunasi manual — gudang sudah dikabari.');
