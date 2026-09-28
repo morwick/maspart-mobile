@@ -365,7 +365,10 @@ class _BermasalahScreenState extends State<BermasalahScreen> {
     'belum_diambil': ('Ambil di Toko belum diambil', 'Sudah lewat batas ambil — hubungi pembeli.'),
     'lunas_belum_dikirim': ('Lunas, belum dikirim',
         'Sudah lunas beberapa hari tapi belum dikirim — pembeli menunggu.'),
-    'penawaran_gagal': ('Penawaran Accurate gagal', 'Pesanan lunas belum tercatat di Accurate.'),
+    'penawaran_gagal': ('Penawaran Accurate gagal / dilewati',
+        'Pesanan lunas belum tercatat di Accurate — buat manual, lalu tandai beres di halaman pesanan.'),
+    'accurate_batal': ('Pesanan batal, penawaran Accurate masih ada',
+        'Hapus/batalkan penawaran (dan dokumen turunannya bila sudah diproses) di Accurate, lalu tandai beres.'),
     'retur_accurate': ('Retur: dokumen Accurate belum dibuat',
         'Retur Penjualan / Pengiriman pengganti belum dibuat di Accurate — stok & omzet belum dikoreksi.'),
   };
@@ -1266,6 +1269,95 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  /// Audit S-5/S-21 (padanan web): tindakan manual di Accurate sudah dikerjakan.
+  /// Pesanan batal → keterangan wajib ≥ 10; pesanan lunas tanpa penawaran →
+  /// nomor dokumen Accurate yang dibuat manual wajib.
+  Future<void> _accurateBeres(OrderDetail o) async {
+    final nav = AppNav.of(context);
+    final tutup = o.accuratePerluTutup;
+    final dokCtl = TextEditingController();
+    final ketCtl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final m = ctx.mas;
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            final cukup = tutup
+                ? ketCtl.text.trim().replaceAll(RegExp(r'\s+'), ' ').length >= 10
+                : dokCtl.text.trim().length >= 3;
+            return AlertDialog(
+              title: const Text('Tindakan Accurate beres', style: TextStyle(fontSize: 16)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                      tutup
+                          ? 'Penawaran ${o.penawaranNumber ?? ''} sudah dihapus/dibatalkan di '
+                              'Accurate (juga dokumen turunannya)? Tulis apa yang dilakukan.'
+                          : 'Isi nomor dokumen Accurate (Penawaran / Pesanan Penjualan) yang '
+                              'dibuat manual untuk pesanan ini.',
+                      style: TextStyle(fontSize: 12.5, color: m.ink600)),
+                  const SizedBox(height: 8),
+                  if (!tutup) ...[
+                    MasInput(
+                      controller: dokCtl,
+                      hint: 'No. dokumen Accurate',
+                      height: 40,
+                      onChanged: (_) => setLocal(() {}),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  MasInput(
+                    controller: ketCtl,
+                    hint: tutup
+                        ? 'mis. penawaran dihapus, belum jadi SO'
+                        : 'Keterangan (opsional)',
+                    height: 40,
+                    onChanged: (_) => setLocal(() {}),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Batal')),
+                TextButton(
+                  onPressed: cukup ? () => Navigator.pop(ctx, true) : null,
+                  child: const Text('Simpan'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    final dokumen = dokCtl.text.trim();
+    final keterangan = ketCtl.text.trim();
+    dokCtl.dispose();
+    ketCtl.dispose();
+    if (ok != true || !mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ApiService.adminAccurateBeres(_code,
+          dokumen: dokumen, keterangan: keterangan);
+      if (!mounted) return;
+      setState(() => _busy = false);
+      nav.toast('Tindakan Accurate ditandai beres.');
+      await _load();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _busy = false;
+      });
+    }
+  }
+
   Future<void> _launch(String url) async {
     final nav = AppNav.of(context);
     final uri = Uri.tryParse(url);
@@ -1755,6 +1847,30 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 Text(o.penawaranNote!,
                     style:
                         TextStyle(fontSize: 12, color: m.ink600, height: 1.45)),
+              ],
+              // Audit S-5/S-21: aplikasi tak menghapus/membuat dokumen lain di
+              // Accurate — admin mengerjakannya manual lalu menandainya beres.
+              if (o.accuratePerluTutup || o.penawaranPerluManual) ...[
+                const SizedBox(height: 10),
+                _Alert(
+                    o.accuratePerluTutup
+                        ? 'Pesanan ini DIBATALKAN, tetapi penawaran '
+                            '${o.penawaranNumber ?? ''} masih ada di Accurate. Hapus/batalkan '
+                            'penawaran itu — juga Pesanan/Pengiriman/Faktur turunannya bila '
+                            'sudah diproses — supaya stok & omzet Accurate tidak salah.'
+                        : 'Pesanan sudah LUNAS tetapi belum tercatat di Accurate. Buat '
+                            'Pesanan Penjualan manual (catatan ${o.orderCode}, gudang '
+                            '${o.pengirim}), lalu isi nomornya.',
+                    tone: MasPillTone.danger),
+                const SizedBox(height: 8),
+                MasButton(
+                  label: 'Tandai beres…',
+                  primary: false,
+                  expand: true,
+                  height: 40,
+                  loading: _busy,
+                  onTap: _busy ? null : () => _accurateBeres(o),
+                ),
               ],
             ],
           ),
