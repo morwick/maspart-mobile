@@ -379,6 +379,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   /// begitu saja.
   Future<void> _setStatus(String status) async {
     final nav = AppNav.of(context);
+    // Batal punya konfirmasi sendiri yang menyebut akibatnya; pesanan LUNAS
+    // wajib ketik ulang kode (paritas web — uang harus dikembalikan).
+    if (status == 'batal') {
+      if (!await _konfirmasiBatal()) return;
+      if (!mounted) return;
+      await _jalankanStatus(nav, status);
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -400,7 +408,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       ),
     );
     if (ok != true || !mounted) return;
+    await _jalankanStatus(nav, status);
+  }
 
+  Future<void> _jalankanStatus(AppNav nav, String status) async {
     setState(() {
       _busy = true;
       _error = null;
@@ -418,6 +429,94 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         _busy = false;
       });
     }
+  }
+
+  /// Konfirmasi BATAL (paritas web). Belum dibayar → dialog yang menyebut
+  /// akibatnya (tagihan Midtrans ditutup, stok dilepas, tak bisa dihidupkan
+  /// lagi). Sudah LUNAS (diproses/dikirim) → wajib ketik ulang kode pesanan:
+  /// uang harus dikembalikan ke pembeli.
+  Future<bool> _konfirmasiBatal() async {
+    final o = _order;
+    final lunas = o != null && (o.status == 'diproses' || o.status == 'dikirim');
+    final total = formatRupiah(o?.total ?? 0);
+    if (!lunas) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Batalkan pesanan?', style: TextStyle(fontSize: 16)),
+          content: Text(
+            'Batalkan $_code ($total)?\n\n'
+            '• Tagihan Midtrans pembeli DITUTUP — pembeli tak bisa membayar lagi.\n'
+            '• Tahanan stok dilepas; voucher & poin dikembalikan ke pembeli.\n'
+            '• Pembeli langsung dikabari pesanannya dibatalkan.\n'
+            '• Pesanan batal TIDAK BISA dihidupkan lagi.',
+            style: const TextStyle(fontSize: 13.5),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Kembali')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Batalkan pesanan')),
+          ],
+        ),
+      );
+      return ok == true;
+    }
+    final kodeCtl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final m = ctx.mas;
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            final cocok = kodeCtl.text.trim().toUpperCase() == _code.toUpperCase();
+            return AlertDialog(
+              title: const Text('Batalkan pesanan LUNAS?', style: TextStyle(fontSize: 16)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Pesanan $_code sudah LUNAS ($total)'
+                      '${o?.status == 'dikirim' ? ' dan barangnya SUDAH DIKIRIM' : ''}. '
+                      'Membatalkannya berarti uang HARUS dikembalikan ke pembeli '
+                      '(transfer manual) — pesanan ditandai perlu refund dan tidak '
+                      'bisa dihidupkan lagi.',
+                      style: TextStyle(fontSize: 12.5, color: m.danger600),
+                    ),
+                    const SizedBox(height: 10),
+                    Text('Ketik ulang kode $_code untuk membatalkan',
+                        style: TextStyle(fontSize: 12, color: m.ink600)),
+                    const SizedBox(height: 5),
+                    MasInput(
+                      controller: kodeCtl,
+                      hint: _code,
+                      mono: true,
+                      height: 40,
+                      onChanged: (_) => setLocal(() {}),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Kembali')),
+                TextButton(
+                  onPressed: cocok ? () => Navigator.pop(ctx, true) : null,
+                  child: const Text('Batalkan pesanan'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    kodeCtl.dispose();
+    return ok == true;
   }
 
   /// Lunasi MANUAL (audit 2026-09-28 T-4) — padanan web: bukti pembayaran
