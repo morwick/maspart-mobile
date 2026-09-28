@@ -422,13 +422,21 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
   }
 
   Future<void> _setStatus(String status, {String? trackingNo}) async {
+    // R-12: kendala gudang yang masih terbuka menahan pengiriman — lanjut hanya
+    // dengan alasan yang tercatat (paritas web).
+    String? abaikan;
+    final o = _order;
+    if (status == 'dikirim' && o != null && o.kendalaTahanKirim) {
+      abaikan = await tanyaAbaikanKendala(context, _code, o.kendalaNote ?? '-');
+      if (abaikan == null || !mounted) return;
+    }
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
       await ApiService.setBranchOrderStatus(_code, status,
-          trackingNo: trackingNo);
+          trackingNo: trackingNo, abaikanKendala: abaikan);
       await _load();
     } on ApiException catch (e) {
       // Galat jaringan kini ApiException(0) berpesan "Koneksi terputus —

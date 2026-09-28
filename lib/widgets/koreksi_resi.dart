@@ -106,6 +106,53 @@ Future<String?> tanyaResiKirim(BuildContext context, String kode) async {
 /// S-19: admin menyelesaikan pesanan Ambil di Toko TANPA serah terima gudang
 /// (tanpa kode ambil & foto) — alasan wajib (min. 10 karakter), dicatat di
 /// pesanan. Null = dibatalkan. Padanan web: prompt alasan di admin/orders.
+/// R-12: kendala gudang (stok kurang / rusak / beda) yang masih terbuka menahan
+/// 'dikirim'. Tanyakan alasan mengabaikannya (≥ 10 karakter) — null = batal.
+Future<String?> tanyaAbaikanKendala(
+    BuildContext context, String kode, String kendala) async {
+  final ctl = TextEditingController();
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setLocal) => AlertDialog(
+        title: const Text('Ada kendala yang belum beres',
+            style: TextStyle(fontSize: 16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Pesanan $kode: "$kendala".\n\nTetap kirim? Tulis alasannya — '
+              'mis. stok sudah ada, atau kirim sebagian atas persetujuan pembeli. '
+              'Alasan dicatat di pesanan dan kendalanya ditutup.',
+              style: const TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 10),
+            MasInput(
+              controller: ctl,
+              hint: 'Alasan (min. 10 karakter)',
+              maxLines: 3,
+              onChanged: (_) => setLocal(() {}),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Batal')),
+          TextButton(
+            onPressed: ctl.text.trim().length >= 10 ? () => Navigator.pop(ctx, true) : null,
+            child: const Text('Tetap Kirim'),
+          ),
+        ],
+      ),
+    ),
+  );
+  final alasan = ctl.text.trim();
+  ctl.dispose();
+  return ok == true ? alasan : null;
+}
+
 Future<String?> tanyaAlasanSelesaiPickup(BuildContext context, String kode) async {
   final ctl = TextEditingController();
   final ok = await showDialog<bool>(
