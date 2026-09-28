@@ -1731,9 +1731,21 @@ class ApiService {
     return OrderDetail.fromJson(_Api._obj(data));
   }
 
-  static Future<void> setOrderStatus(String code, String status) => _Api.put(
+  /// T-11: `trackingNo` = resi saat admin menandai 'dikirim' pesanan kurir (wajib).
+  static Future<void> setOrderStatus(String code, String status, {String? trackingNo}) =>
+      _Api.put(
         '/api/admin/orders/${Uri.encodeComponent(code)}/status',
-        body: {'status': status},
+        body: {'status': status, if (trackingNo != null) 'tracking_no': trackingNo},
+      );
+
+  /// T-11: koreksi resi pesanan yang SUDAH dikirim — tercatat & pembeli
+  /// dikabari. `admin` memilih endpoint admin / gudang cabang.
+  static Future<void> koreksiResi(String code, String resi, String alasan,
+          {required bool admin}) =>
+      _Api.post(
+        '${admin ? '/api/admin/orders/' : '/api/branch/orders/'}'
+        '${Uri.encodeComponent(code)}/resi',
+        body: {'resi': resi, 'alasan': alasan},
       );
 
   /// Batalkan pesanan oleh admin — alasan WAJIB (audit 2026-09-28 T-6),

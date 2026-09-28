@@ -18,6 +18,7 @@ import '../app/nav.dart';
 import '../order_ui.dart';
 import '../theme/mas_theme.dart';
 import '../utils.dart';
+import '../widgets/koreksi_resi.dart';
 import '../widgets/mas_ui.dart';
 import '../widgets/order_chat.dart';
 
@@ -566,16 +567,47 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       ),
     );
     if (ok != true || !mounted) return;
-    await _jalankanStatus(nav, status);
+    // T-11: pesanan kurir tak boleh 'dikirim' tanpa resi yang sah (server
+    // memeriksa format & keunikannya). Biasanya diisi gudang.
+    String? resi;
+    final o = _order;
+    if (status == 'dikirim' && o != null && !o.pickup && (o.trackingNo ?? '').isEmpty) {
+      resi = await tanyaResiKirim(context, _code);
+      if (resi == null || !mounted) return;
+    }
+    await _jalankanStatus(nav, status, trackingNo: resi);
   }
 
-  Future<void> _jalankanStatus(AppNav nav, String status) async {
+  Future<void> _koreksiResi() async {
+    final nav = AppNav.of(context);
+    final hasil = await tanyaKoreksiResi(context, _order?.trackingNo);
+    if (hasil == null || !mounted) return;
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      await ApiService.setOrderStatus(_code, status);
+      await ApiService.koreksiResi(_code, hasil.$1, hasil.$2, admin: true);
+      if (!mounted) return;
+      setState(() => _busy = false);
+      nav.toast('Resi dikoreksi — pembeli sudah dikabari.');
+      await _load();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _busy = false;
+      });
+    }
+  }
+
+  Future<void> _jalankanStatus(AppNav nav, String status, {String? trackingNo}) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ApiService.setOrderStatus(_code, status, trackingNo: trackingNo);
       if (!mounted) return;
       setState(() => _busy = false);
       nav.toast('Status → ${orderStatusLabel(status)}');
@@ -1681,6 +1713,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               : () => _setStatus(s),
                         ),
                     ],
+                  ),
+                ],
+                if (o.status == 'dikirim' && !o.pickup) ...[
+                  const SizedBox(height: 8),
+                  MasButton(
+                    label: '✎ Koreksi resi${(o.trackingNo ?? '').isNotEmpty ? ' (${o.trackingNo})' : ''}',
+                    primary: false,
+                    expand: true,
+                    height: 36,
+                    onTap: _busy ? null : _koreksiResi,
                   ),
                 ],
                 const SizedBox(height: 12),

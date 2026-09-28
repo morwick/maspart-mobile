@@ -25,6 +25,7 @@ import '../app/nav.dart';
 import '../order_ui.dart';
 import '../theme/mas_theme.dart';
 import '../utils.dart';
+import '../widgets/koreksi_resi.dart';
 import '../widgets/mas_ui.dart';
 import '../widgets/chat_thread.dart';
 import '../widgets/order_chat.dart';
@@ -835,6 +836,24 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
     }
   }
 
+  Future<void> _koreksiResi() async {
+    final hasil = await tanyaKoreksiResi(context, _order?.trackingNo);
+    if (hasil == null || !mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ApiService.koreksiResi(_code, hasil.$1, hasil.$2, admin: false);
+      if (mounted) AppNav.of(context).toast('Resi dikoreksi — pembeli sudah dikabari.');
+      await _load();
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _copy(String text, String label) {
     Clipboard.setData(ClipboardData(text: text));
     AppNav.of(context).toast('$label disalin');
@@ -1302,13 +1321,24 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
               // tak bisa konfirmasi sendiri) — jalur kurir tetap seperti semula.
               if (pickup)
                 ..._serahTerimaForm(m, o)
-              else
+              else ...[
                 MasButton(
                   label: _busy ? 'Memproses…' : '✓ Tandai Selesai',
                   expand: true,
                   loading: _busy,
                   onTap: _busy ? null : () => _lanjutkan(o),
                 ),
+                const SizedBox(height: 6),
+                // T-11: resi salah ketik — tercatat & pembeli dikabari.
+                Center(
+                  child: TextButton(
+                    onPressed: _busy ? null : _koreksiResi,
+                    child: Text(
+                        '✎ Koreksi resi${(o.trackingNo ?? '').isNotEmpty ? ' (${o.trackingNo})' : ''}',
+                        style: TextStyle(fontSize: 13, color: m.ink600)),
+                  ),
+                ),
+              ],
             ],
             if (tahap > 5) ...[
               if (pickup && (o.pickupProofUrl ?? '').isNotEmpty)
