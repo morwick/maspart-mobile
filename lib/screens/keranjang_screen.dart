@@ -250,13 +250,12 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   /// Ongkir dihitung OTOMATIS begitu alamat (kode pos) & berat siap. Dulu
   /// pembeli harus ingat menekan "Cek Ongkir"; yang lupa membuat order tanpa
   /// kurir. Debounce 900 ms supaya tak menembak tiap ketikan.
-  void _scheduleOngkir() {
+  void _scheduleOngkir({bool lambat = false}) {
     _ongkirDebounce?.cancel();
     if (_itemsBeli.isNotEmpty &&
         _weightGrams > 0 &&
         _postalCtl.text.trim().length >= 5) {
-      _ongkirDebounce =
-          Timer(const Duration(milliseconds: 900), () => _cekOngkir());
+      _ongkirDebounce = Timer(Duration(milliseconds: lambat ? 1500 : 900), () => _cekOngkir());
     }
     _schedulePickup();
   }
@@ -528,6 +527,15 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   /// Ambil sendiri = tak ada ongkir sama sekali (bukan "ongkir belum dipilih").
   int get _ongkir => _ambilSendiri ? 0 : (_rate?.price ?? 0).round();
 
+  /// Total yang TAMPIL (rumus = backend orders.create_order): barang setelah
+  /// voucher & poin + PPN + ongkir − potongan ongkir. Dikirim sebagai
+  /// expected_total (T-13) — server menolak bila hitungannya berbeda.
+  int get _totalTampil {
+    final bersih = _subtotal - _vDiskon - _potongan;
+    final t = totalOf(bersih < 0 ? 0 : bersih, _ongkir, _vOngkir).round();
+    return t < 0 ? 0 : t;
+  }
+
   // ── Checkout ────────────────────────────────────────────────────────
 
   Future<void> _process() async {
@@ -555,17 +563,17 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       return;
     }
 
-    // Tarif tersedia tapi tak ada yang dipilih → pastikan itu disengaja
-    // (mis. ambil sendiri di gudang), jangan diam-diam order tanpa ongkir.
-    // Mode ambil sendiri memang tak berkurir → jangan tanya apa pun.
-    if (!_ambilSendiri && _rates.isNotEmpty && _rate == null) {
-      final ok = await _confirm(
-        'Belum pilih kurir',
-        'Anda belum memilih kurir/ongkir. Lanjut TANPA ongkir?\n\n'
-            '(Barang diambil sendiri di gudang atau pengiriman diatur terpisah.)',
-      );
-      if (ok != true) return;
+    // Kirim ke alamat WAJIB punya ongkir terhitung (paritas web, audit
+    // 2026-09-28 KL-13/T-13). Dialog lama "Lanjut TANPA ongkir?" menjanjikan
+    // opsi yang tak ada — server selalu menolak pesanan kirim tanpa ongkir.
+    if (!_ambilSendiri && (_rate == null || _loadingRates)) {
+      setState(() => _error = _loadingRates
+          ? 'Ongkir sedang dihitung — tunggu sebentar.'
+          : 'Ongkir wajib dihitung sebelum memesan — isi kode pos & alamat '
+              'lengkap, lalu pilih kurir.');
+      return;
     }
+    final tampil = _totalTampil;
 
     setState(() {
       _busy = true;
@@ -584,6 +592,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         shippingCost: _ongkir.toDouble(),
         pointRedeem: _poinPakai,
         voucherCodes: _vKode,
+        expectedTotal: tampil,
         pickup: _ambilSendiri,
         weightGrams: _weightGrams,
         paymentMethod: 'gateway',
@@ -623,27 +632,19 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         'autopay': true,
       });
     } on ApiException catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      if (!mounted) return;
+      setState(() => _error = e.message);
+      if (e.statusCode == 409) {
+        // T-13: tagihan berubah (harga / ongkir / voucher / poin) — pesanan
+        // BELUM dibuat. Muat ulang semua angka supaya pembeli melihat total baru
+        // sebelum menekan Proses lagi.
+        await _refreshServerState();
+        if (mounted && !_ambilSendiri) await _cekOngkir();
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
-
-  Future<bool?> _confirm(String title, String body) => showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(title, style: const TextStyle(fontSize: 16)),
-          content: Text(body, style: const TextStyle(fontSize: 13.5)),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Batal')),
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Lanjut')),
-          ],
-        ),
-      );
 
   Future<void> _openMap() async {
     final place = await Navigator.of(context).push<GeoPlace>(
@@ -1004,12 +1005,18 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
               controller: _addressCtl,
               hint: 'Jalan, no, RT/RW, kelurahan, kecamatan, kota, provinsi',
               maxLines: 3,
-              // Alamat ikut menentukan jarak ke gudang (paritas web).
-              // Alamat ikut menentukan tujuan ongkir bila kode pos tak dikenal
-              // (dicari dari kelurahan/kecamatan) — tarif diambil ulang HANYA saat
-              // cek sebelumnya gagal; selain itu tiap ketikan memakan kuota harian.
-              onChanged: (_) =>
-                  _rateErr != null ? _scheduleOngkir() : _schedulePickup(),
+              // Alamat ikut menentukan jarak ke gudang & TUJUAN ongkir (server
+              // mencocokkan kota/provinsi alamat — T-1). Audit 2026-09-28 T-13:
+              // dulu tarif lama bertahan saat alamat diganti ke kota lain lalu
+              // server menagih tarif baru. Kini tarif gugur SEKETIKA dan dihitung
+              // ulang 1,5 dtk setelah berhenti mengetik (hemat kuota).
+              onChanged: (_) {
+                setState(() {
+                  _rates = [];
+                  _rate = null;
+                });
+                _scheduleOngkir(lambat: true);
+              },
             ),
           ),
           const SizedBox(height: 10),

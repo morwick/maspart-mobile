@@ -97,6 +97,11 @@ class _Api {
       final data = jsonDecode(utf8.decode(r.bodyBytes));
       final detail = data is Map ? data['detail'] : null;
       if (detail is String && detail.trim().isNotEmpty) return detail;
+      // T-13: 409 "tagihan berubah" membawa OBJEK {pesan, total_baru, …}.
+      if (detail is Map && detail['pesan'] is String &&
+          (detail['pesan'] as String).trim().isNotEmpty) {
+        return detail['pesan'] as String;
+      }
       if (detail is List) {
         final msgs = detail
             .map((d) => (d is Map ? d['msg'] : null)?.toString())
@@ -1126,10 +1131,14 @@ class ApiService {
     double? recipientLon,
     int pointRedeem = 0,
     List<String> voucherCodes = const [],
+    int? expectedTotal,
   }) async {
     final data = await _Api.post(
       '/api/orders',
       body: {
+        // T-13: total yang SEDANG DITAMPILKAN. Server menghitung ulang; beda →
+        // 409 dan pesanan TIDAK dibuat (pembeli tak ditagih angka yang tak ia lihat).
+        'expected_total': ?expectedTotal,
         'items': items.map((e) => e.toJson()).toList(),
         // Titik alamat ikut dikirim agar server bisa MEMBUKTIKAN sendiri bahwa
         // pembeli memang dekat gudang — flag `pickup` saja tak pernah cukup
