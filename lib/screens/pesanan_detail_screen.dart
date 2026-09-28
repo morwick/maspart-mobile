@@ -747,11 +747,46 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                       fontWeight: FontWeight.w600,
                       color: m.ink900)),
               const SizedBox(height: 4),
-              Text(
-                'Bawa kode pesanan ${o.orderCode}'
-                '${o.status == 'diproses' ? ' setelah gudang mengabari barang siap.' : '.'}',
-                style: TextStyle(fontSize: 12, color: m.ink500),
-              ),
+              if (o.kodeAmbil?.isNotEmpty ?? false)
+                // S-7: kode ambil = bukti bahwa yang datang memang pemilik pesanan.
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(top: 4, bottom: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: m.brand50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: m.brand100),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Kode ambil',
+                          style: TextStyle(fontSize: 11.5, color: m.ink600)),
+                      Text(o.kodeAmbil!,
+                          style: TextStyle(
+                              fontSize: 26,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 6,
+                              fontFamily: 'monospace',
+                              color: m.ink900)),
+                      Text(
+                        '${o.status == 'diproses' ? 'Tunjukkan ke petugas gudang setelah Anda dikabari barang siap.' : 'Tunjukkan ke petugas gudang saat mengambil barang.'}'
+                        ' Jangan bagikan ke orang lain — barang hanya diserahkan '
+                        'kepada pemegang kode ini.',
+                        style: TextStyle(
+                            fontSize: 11.5, color: m.ink600, height: 1.4),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Text(
+                  'Bawa kode pesanan ${o.orderCode}'
+                  '${o.status == 'diproses' ? ' setelah gudang mengabari barang siap.' : '.'}',
+                  style: TextStyle(fontSize: 12, color: m.ink500),
+                ),
               if (o.status == 'dikirim' && (o.batasAmbilAt?.isNotEmpty ?? false)) ...[
                 const SizedBox(height: 4),
                 Text(

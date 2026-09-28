@@ -348,7 +348,13 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
   Uint8List? _stFoto;
   String _stFotoNama = '';
   final _stNamaCtl = TextEditingController();
+
+  /// S-7: kode ambil 6 digit yang ditunjukkan pembeli dari HP-nya.
+  final _stKodeCtl = TextEditingController();
   String? _stErr;
+
+  String get _stKode => _stKodeCtl.text.replaceAll(RegExp(r'\D'), '');
+  bool get _stKodeLengkap => _stKode.length == 6;
 
   /// Server membalas 503 (migrasi 043 belum jalan) → tampilkan jalur lama
   /// "Tandai Selesai tanpa foto".
@@ -393,6 +399,7 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
   @override
   void dispose() {
     _stNamaCtl.dispose();
+    _stKodeCtl.dispose();
     super.dispose();
   }
 
@@ -620,7 +627,7 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
   /// Unggah foto serah terima → server langsung menandai pesanan selesai.
   Future<void> _serahTerima() async {
     final foto = _stFoto;
-    if (foto == null) return;
+    if (foto == null || !_stKodeLengkap) return;
     if (_order?.tahanKirim ?? false) {
       setState(() => _error = _order?.alasanTahan ?? 'Pesanan ditahan — hubungi admin.');
       return;
@@ -642,6 +649,7 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
         bytes: foto,
         filename: _stFotoNama,
         nama: _stNamaCtl.text,
+        kode: _stKode,
       );
       if (!mounted) return;
       setState(() {
@@ -649,6 +657,7 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
         _stFotoNama = '';
       });
       _stNamaCtl.clear();
+      _stKodeCtl.clear();
       AppNav.of(context).toast('Serah terima tersimpan — pesanan selesai.');
       await _load();
     } on ApiException catch (e) {
@@ -668,11 +677,54 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
     }
   }
 
-  /// Isi langkah 5 pesanan Ambil di Toko: foto pengambil (wajib) + nama
-  /// (opsional) → "Serahkan & Selesai".
+  /// Jalur lama (migrasi 043 belum jalan): selesai TANPA foto — tetap wajib
+  /// kode ambil dari pembeli (S-7).
+  Future<void> _selesaiTanpaFoto() async {
+    if (!_stKodeLengkap) return;
+    final ok = await _confirm(
+      'Selesai tanpa foto',
+      'Tandai $_code SELESAI TANPA foto bukti serah terima? Gudang tidak punya '
+          'bukti bila pembeli kelak menyangkal sudah mengambil barang.',
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _busy = true;
+      _stErr = null;
+      _error = null;
+    });
+    try {
+      await ApiService.setBranchOrderStatus(_code, 'selesai',
+          kodeAmbil: _stKode);
+      _stKodeCtl.clear();
+      await _load();
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _stErr = e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Isi langkah 5 pesanan Ambil di Toko: KODE AMBIL dari pembeli (wajib) +
+  /// foto pengambil (wajib) + nama (opsional) → "Serahkan & Selesai".
   List<Widget> _serahTerimaForm(MasColors m, OrderDetail o) {
     final foto = _stFoto;
     return [
+      MasInput(
+        controller: _stKodeCtl,
+        hint: 'Kode ambil 6 digit dari pembeli',
+        height: 44,
+        mono: true,
+        fontSize: 18,
+        keyboardType: TextInputType.number,
+        autocorrect: false,
+        enabled: !_busy,
+        onChanged: (_) => setState(() {}),
+      ),
+      Text(
+        'Minta pembeli menunjukkan KODE AMBIL dari detail pesanan / notifikasi '
+        'di HP-nya. Jangan serahkan barang tanpa kode yang cocok.',
+        style: TextStyle(fontSize: 11.5, color: m.ink500, height: 1.4),
+      ),
       if (foto == null)
         MasButton(
           label: '📷 Foto Pengambil',
@@ -726,13 +778,15 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
         label: _busy ? 'Memproses…' : '✓ Serahkan & Selesai',
         expand: true,
         loading: _busy,
-        onTap: _busy || foto == null || _stNonaktif ? null : _serahTerima,
+        onTap: _busy || foto == null || !_stKodeLengkap || _stNonaktif
+            ? null
+            : _serahTerima,
       ),
       // Server belum siap menyimpan foto → jalur lama tetap bisa dipakai.
       if (_stNonaktif)
         Center(
           child: TextButton(
-            onPressed: _busy ? null : () => _lanjutkan(o),
+            onPressed: _busy || !_stKodeLengkap ? null : _selesaiTanpaFoto,
             child: Text('Tandai Selesai tanpa foto',
                 style: TextStyle(fontSize: 13, color: m.ink700)),
           ),
@@ -1310,7 +1364,8 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
             if (tahap == 5) ...[
               Text(
                 pickup
-                    ? 'Saat pembeli datang: cocokkan nama dengan pesanan, minta '
+                    ? 'Saat pembeli datang: minta KODE AMBIL 6 digit dari HP-nya, '
+                        'cocokkan nama dengan pesanan, minta '
                         'tanda tangan di Tanda Terima, serahkan barang, lalu '
                         'foto pengambil sebagai bukti serah terima.'
                     : 'Pantau resi. Pembeli bisa konfirmasi sendiri; tandai '

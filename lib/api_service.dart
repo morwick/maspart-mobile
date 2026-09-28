@@ -1667,32 +1667,42 @@ class ApiService {
     return OrderDetail.fromJson(_Api._obj(data));
   }
 
+  /// `kodeAmbil`: jalur lama "selesai" Ambil di Toko tanpa foto (migrasi 043
+  /// belum jalan) tetap wajib kode ambil dari pembeli (S-7).
   static Future<void> setBranchOrderStatus(
     String code,
     String status, {
     String? trackingNo,
+    String? kodeAmbil,
   }) =>
       _Api.put(
         '/api/branch/orders/${Uri.encodeComponent(code)}/status',
-        body: {'status': status, 'tracking_no': ?trackingNo},
+        body: {
+          'status': status,
+          'tracking_no': ?trackingNo,
+          'kode_ambil': ?kodeAmbil,
+        },
       );
 
-  /// Serah terima pesanan Ambil di Toko: unggah foto orang yang mengambil
-  /// barang (+ nama opsional) → pesanan langsung 'selesai'. Kembalian = URL
-  /// publik foto. 503 = migrasi 043 belum jalan (pakai jalur status lama).
+  /// Serah terima pesanan Ambil di Toko: KODE AMBIL dari pembeli (wajib, S-7)
+  /// + foto orang yang mengambil barang (+ nama opsional) → pesanan langsung
+  /// 'selesai'. Kembalian = URL publik foto. 503 = migrasi 043 belum jalan
+  /// (pakai jalur status lama — tetap dengan kode ambil).
   static Future<String> serahTerimaPickup(
     String code, {
     required Uint8List bytes,
     required String filename,
     String? nama,
+    String? kode,
   }) async {
     // Server membatasi nama 80 karakter — potong di sini daripada ditolak 400.
     var n = nama?.trim() ?? '';
     if (n.length > 80) n = n.substring(0, 80);
+    final k = (kode ?? '').replaceAll(RegExp(r'\D'), '');
     final data = _Api._obj(await _Api.multipart(
       '/api/branch/orders/${Uri.encodeComponent(code)}/serah-terima',
       files: [(field: 'file', bytes: bytes, filename: filename)],
-      fields: {if (n.isNotEmpty) 'nama': n},
+      fields: {if (n.isNotEmpty) 'nama': n, 'kode': k},
     ));
     return '${data['url'] ?? ''}';
   }
