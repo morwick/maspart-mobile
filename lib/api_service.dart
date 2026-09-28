@@ -1715,6 +1715,19 @@ class ApiService {
         body: {'status': status},
       );
 
+  /// Lunasi MANUAL pesanan yang dibayar di luar Midtrans (audit 2026-09-28
+  /// T-4) — padanan web `adminLunasiManual`. Server mengecek Midtrans dulu &
+  /// menutup tagihannya; `pesan` terisi bila pembeli ternyata sudah membayar
+  /// lewat Midtrans.
+  static Future<String?> adminLunasiManual(String code, String alasan) async {
+    final data = _Api._obj(await _Api.post(
+      '/api/admin/orders/${Uri.encodeComponent(code)}/lunasi-manual',
+      body: {'alasan': alasan},
+    ));
+    final pesan = data['pesan'];
+    return pesan is String && pesan.isNotEmpty ? pesan : null;
+  }
+
   static Future<SalesRecap> salesRecap() async =>
       SalesRecap.fromJson(_Api._obj(await _Api.get('/api/admin/sales')));
 

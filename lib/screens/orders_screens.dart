@@ -420,6 +420,100 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  /// Lunasi MANUAL (audit 2026-09-28 T-4) — padanan web: bukti pembayaran
+  /// wajib (≥ 10 karakter) + ketik ulang kode pesanan. Dulu "Diproses" satu
+  /// ketukan = lunas tanpa uang, gudang dikabari "segera kirim".
+  Future<void> _lunasiManual() async {
+    final nav = AppNav.of(context);
+    final alasanCtl = TextEditingController();
+    final kodeCtl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final m = ctx.mas;
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            final alasanCukup =
+                alasanCtl.text.trim().replaceAll(RegExp(r'\s+'), ' ').length >= 10;
+            final kodeCocok =
+                kodeCtl.text.trim().toUpperCase() == _code.toUpperCase();
+            return AlertDialog(
+              title: const Text('Lunasi manual', style: TextStyle(fontSize: 16)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Hanya bila uang SUDAH MASUK di luar Midtrans (mis. transfer '
+                      'langsung). Server mengecek Midtrans dulu, lalu menutup '
+                      'tagihannya, mengunci stok, dan mengabari gudang untuk mengirim.',
+                      style: TextStyle(fontSize: 12.5, color: m.warn600),
+                    ),
+                    const SizedBox(height: 12),
+                    Text('Bukti pembayaran (bank, tanggal, nomor referensi)',
+                        style: TextStyle(fontSize: 12, color: m.ink600)),
+                    const SizedBox(height: 5),
+                    MasInput(
+                      controller: alasanCtl,
+                      hint: 'mis. Transfer BCA 28/09 ref 123456',
+                      height: 40,
+                      onChanged: (_) => setLocal(() {}),
+                    ),
+                    const SizedBox(height: 10),
+                    Text('Ketik ulang kode $_code untuk konfirmasi',
+                        style: TextStyle(fontSize: 12, color: m.ink600)),
+                    const SizedBox(height: 5),
+                    MasInput(
+                      controller: kodeCtl,
+                      hint: _code,
+                      mono: true,
+                      height: 40,
+                      onChanged: (_) => setLocal(() {}),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Batal')),
+                TextButton(
+                  onPressed: alasanCukup && kodeCocok
+                      ? () => Navigator.pop(ctx, true)
+                      : null,
+                  child: const Text('Lunasi manual'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    final alasan = alasanCtl.text.trim();
+    alasanCtl.dispose();
+    kodeCtl.dispose();
+    if (ok != true || !mounted) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final pesan = await ApiService.adminLunasiManual(_code, alasan);
+      if (!mounted) return;
+      setState(() => _busy = false);
+      nav.toast(pesan ?? 'Pesanan dilunasi manual — gudang sudah dikabari.');
+      await _load();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _busy = false;
+      });
+    }
+  }
+
   Future<void> _launch(String url) async {
     final nav = AppNav.of(context);
     final uri = Uri.tryParse(url);
@@ -860,23 +954,40 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   const SizedBox(height: 10),
                 ],
 
-                Text('Alur setelah lunas',
-                    style: TextStyle(fontSize: 11.5, color: m.ink500)),
-                const SizedBox(height: 7),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final s in kOrderFlow)
-                      MasButton(
-                        label: orderStatusLabel(s),
-                        primary: false,
-                        height: 36,
-                        // Status yang sedang berjalan tak perlu di-set ulang.
-                        onTap: _busy || o.status == s ? null : () => _setStatus(s),
-                      ),
-                  ],
-                ),
+                // Pesanan BELUM DIBAYAR tak boleh didorong maju dari sini (audit
+                // 2026-09-28 T-4): "Diproses" dulu = lunas tanpa uang. Pelunasan
+                // di luar Midtrans lewat "Lunasi manual" (bukti + ketik kode).
+                if (o.status == 'menunggu_pembayaran') ...[
+                  Text('Pesanan belum dibayar.',
+                      style: TextStyle(fontSize: 12.5, color: m.ink500)),
+                  const SizedBox(height: 7),
+                  MasButton(
+                    label: 'Lunasi manual…',
+                    primary: false,
+                    expand: true,
+                    height: 40,
+                    loading: _busy,
+                    onTap: _busy ? null : _lunasiManual,
+                  ),
+                ] else ...[
+                  Text('Alur setelah lunas',
+                      style: TextStyle(fontSize: 11.5, color: m.ink500)),
+                  const SizedBox(height: 7),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final s in kOrderFlow)
+                        MasButton(
+                          label: orderStatusLabel(s),
+                          primary: false,
+                          height: 36,
+                          // Status yang sedang berjalan tak perlu di-set ulang.
+                          onTap: _busy || o.status == s ? null : () => _setStatus(s),
+                        ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 12),
                 Divider(height: 1, color: m.ink150),
                 const SizedBox(height: 10),
