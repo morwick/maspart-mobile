@@ -1628,6 +1628,10 @@ class OrderDetail extends OrderSummary {
   final String? pickedUpBy;
   final String? pickedUpAt;
 
+  /// S-7 (HANYA pembeli pemilik pesanan): kode ambil 6 digit yang ditunjukkan
+  /// ke gudang saat mengambil barang. Gudang & admin tak pernah menerimanya.
+  final String? kodeAmbil;
+
   /// Log catatan pembayaran (ADMIN saja — server tak mengirimnya ke pembeli).
   final String? paymentNote;
 
@@ -1734,6 +1738,7 @@ class OrderDetail extends OrderSummary {
     this.pickupProofUrl,
     this.pickedUpBy,
     this.pickedUpAt,
+    this.kodeAmbil,
     this.paymentNote,
     this.catatanTerbuka = const [],
     this.perluRefund = false,
@@ -1812,6 +1817,7 @@ class OrderDetail extends OrderSummary {
         pickupProofUrl: _sOrNull(j['pickup_proof_url']),
         pickedUpBy: _sOrNull(j['picked_up_by']),
         pickedUpAt: _sOrNull(j['picked_up_at']),
+        kodeAmbil: _sOrNull(j['kode_ambil']),
         paymentNote: _sOrNull(j['payment_note']),
         // Server lama belum mengirim catatan_terbuka → seluruh catatan terbuka.
         catatanTerbuka: j['catatan_terbuka'] is List
@@ -2118,6 +2124,10 @@ class PickupInfo {
   final String alasan;
   final bool didukung;
 
+  /// S-17: peringatan bila titik peta diabaikan server karena tak cocok dengan
+  /// kode pos/alamat (jarak lalu dihitung dari kode pos/alamat).
+  final String catatan;
+
   const PickupInfo({
     this.tersedia = false,
     this.gudang = '',
@@ -2128,6 +2138,7 @@ class PickupInfo {
     this.lon,
     this.alasan = '',
     this.didukung = false,
+    this.catatan = '',
   });
 
   factory PickupInfo.fromJson(Map<String, dynamic> j) => PickupInfo(
@@ -2140,6 +2151,7 @@ class PickupInfo {
         lon: _dOrNull(j['lon']),
         alasan: _s(j['alasan']),
         didukung: _b(j['didukung']),
+        catatan: _s(j['catatan']),
       );
 }
 

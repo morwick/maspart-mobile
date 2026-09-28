@@ -582,7 +582,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       resi = await tanyaResiKirim(context, _code);
       if (resi == null || !mounted) return;
     }
-    await _jalankanStatus(nav, status, trackingNo: resi);
+    // S-19: Ambil di Toko diselesaikan admin = TANPA bukti serah terima gudang
+    // (kode ambil + foto) → alasan wajib & dicatat di pesanan.
+    String? alasanSelesai;
+    if (status == 'selesai' && o != null && o.pickup) {
+      alasanSelesai = await tanyaAlasanSelesaiPickup(context, _code);
+      if (alasanSelesai == null || !mounted) return;
+    }
+    await _jalankanStatus(nav, status,
+        trackingNo: resi, alasanSelesai: alasanSelesai);
   }
 
   Future<void> _koreksiResi() async {
@@ -608,13 +616,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
-  Future<void> _jalankanStatus(AppNav nav, String status, {String? trackingNo}) async {
+  Future<void> _jalankanStatus(AppNav nav, String status,
+      {String? trackingNo, String? alasanSelesai}) async {
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      await ApiService.setOrderStatus(_code, status, trackingNo: trackingNo);
+      await ApiService.setOrderStatus(_code, status,
+          trackingNo: trackingNo, alasanSelesai: alasanSelesai);
       if (!mounted) return;
       setState(() => _busy = false);
       nav.toast('Status → ${orderStatusLabel(status)}');

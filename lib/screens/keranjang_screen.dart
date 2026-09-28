@@ -1103,6 +1103,10 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
                 setState(() {
                   _rates = [];
                   _rate = null;
+                  // KL-9/S-17 (paritas web): titik peta lama milik alamat lain —
+                  // dibuang saat alamat diketik ulang.
+                  _lat = null;
+                  _lon = null;
                 });
                 _scheduleOngkir(lambat: true);
               },
@@ -1123,6 +1127,8 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
                   setState(() {
                     _rates = [];
                     _rate = null;
+                    _lat = null;          // KL-9/S-17: titik peta basi dibuang
+                    _lon = null;
                   });
                   _scheduleOngkir();
                 },
@@ -1212,11 +1218,16 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           Text(
             'Barang disiapkan di Gudang ${p?.gudang ?? _gudangAktif}'
             '${p?.jarakKm != null ? ' (±${_km(p!.jarakKm)} km dari alamat Anda)' : ''}. '
-            'Bayar dulu lewat aplikasi, lalu datang membawa kode pesanan — '
-            'tak ada ongkir.'
+            'Bayar dulu lewat aplikasi, lalu datang menunjukkan kode ambil '
+            '(muncul di detail pesanan) — tak ada ongkir.'
             '${(p?.pic.isNotEmpty ?? false) ? '\nKontak gudang: ${p!.pic}' : ''}',
             style: TextStyle(fontSize: 12.5, color: m.ink700, height: 1.5),
           ),
+          if (p != null && p.catatan.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text('📍 ${p.catatan}',
+                style: TextStyle(fontSize: 12, color: m.warn600, height: 1.4)),
+          ],
           if (p?.lat != null && p?.lon != null) ...[
             const SizedBox(height: 8),
             MasButton(
@@ -1234,6 +1245,10 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
             const SizedBox(height: 8),
             Text('🏬 ${p.alasan}',
                 style: TextStyle(fontSize: 12, color: m.ink500, height: 1.4)),
+            // S-17: titik peta diabaikan karena tak cocok dengan kode pos/alamat.
+            if (p.catatan.isNotEmpty)
+              Text('📍 ${p.catatan}',
+                  style: TextStyle(fontSize: 12, color: m.warn600, height: 1.4)),
           ],
           const SizedBox(height: 8),
           // Berat tertagih = max(berat asli, volumetrik) + kemasan. Barang
