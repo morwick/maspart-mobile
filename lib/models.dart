@@ -5037,6 +5037,30 @@ class ReturPesananItem {
       );
 }
 
+/// Perkiraan refund dari SERVER untuk form retur (audit 2026-09-28 R-3) —
+/// aturan sama dengan plafon refund admin: PPN yang ditambahkan, porsi
+/// voucher/poin, syarat minimal belanja voucher, refund retur lain. Ongkir tak
+/// ikut. Paritas web `PerkiraanRefund`.
+class PerkiraanRefund {
+  final int perkiraan;
+  final int hargaBarang;
+  final bool voucherGugur;
+  final String catatan;
+  const PerkiraanRefund({
+    this.perkiraan = 0,
+    this.hargaBarang = 0,
+    this.voucherGugur = false,
+    this.catatan = '',
+  });
+
+  factory PerkiraanRefund.fromJson(Map<String, dynamic> j) => PerkiraanRefund(
+        perkiraan: _i(j['perkiraan']),
+        hargaBarang: _i(j['harga_barang']),
+        voucherGugur: _b(j['voucher_gugur']),
+        catatan: _s(j['catatan']),
+      );
+}
+
 /// Field `retur` di detail pesanan: boleh/tidak per barang + return yang ada.
 class ReturPesanan {
   final bool aktif;
