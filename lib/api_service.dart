@@ -1277,6 +1277,18 @@ class ApiService {
   static Future<void> cancelOrder(String code) =>
       _Api.post('/api/orders/${Uri.encodeComponent(code)}/cancel');
 
+  /// T-10: pembeli melapor barang belum diterima → selesai otomatis ditahan.
+  static Future<void> laporBelumDiterima(String code, String keterangan) => _Api.post(
+        '/api/orders/${Uri.encodeComponent(code)}/belum-diterima',
+        body: {'keterangan': keterangan.isEmpty ? null : keterangan},
+      );
+
+  /// T-10: admin menutup kendala pesanan → selesai otomatis berjalan lagi.
+  static Future<void> adminTutupKendala(String code, String catatan) => _Api.post(
+        '/api/admin/orders/${Uri.encodeComponent(code)}/kendala-selesai',
+        body: {'catatan': catatan},
+      );
+
   /// Unggah bukti transfer manual.
   static Future<String> uploadProof(
     String code, {
@@ -1677,11 +1689,12 @@ class ApiService {
   }
 
   /// Pilihan alasan kendala: [(key, label)] — satu sumber dengan web.
-  static Future<List<(String, String)>> branchKendalaAlasan() async {
+  /// (key, label, saat) — `saat` = tahap berlakunya: diproses | dikirim | semua (T-10).
+  static Future<List<(String, String, String)>> branchKendalaAlasan() async {
     final data = _Api._obj(await _Api.get('/api/branch/kendala/alasan'));
     return [
       for (final a in (data['alasan'] as List? ?? const []).whereType<Map>())
-        ('${a['key'] ?? ''}', '${a['label'] ?? ''}'),
+        ('${a['key'] ?? ''}', '${a['label'] ?? ''}', '${a['saat'] ?? 'semua'}'),
     ];
   }
 

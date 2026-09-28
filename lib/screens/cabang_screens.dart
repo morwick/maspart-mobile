@@ -742,9 +742,14 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
   /// Pengganti tombol batal: pesanan yang sampai ke gudang sudah LUNAS, jadi
   /// batal = refund = keputusan admin. Gudang melaporkan kendalanya saja.
   Future<void> _laporKendala() async {
-    List<(String, String)> opsi;
+    // T-10: setelah dikirim → kendala pengiriman (paket hilang / kembali).
+    final dikirim = _order?.status == 'dikirim';
+    final tahapIni = dikirim ? 'dikirim' : 'diproses';
+    List<(String, String, String)> opsi;
     try {
-      opsi = await ApiService.branchKendalaAlasan();
+      opsi = (await ApiService.branchKendalaAlasan())
+          .where((a) => a.$3 == 'semua' || a.$3 == tahapIni)
+          .toList();
     } on ApiException catch (e) {
       if (mounted) AppNav.of(context).toast(e.message);
       return;
@@ -766,9 +771,13 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Pesanan ini sudah dibayar pembeli, jadi gudang tidak bisa '
-                    'membatalkannya. Admin yang memutuskan lanjut atau batal '
-                    '(dan mengurus pengembalian dana).',
+                    dikirim
+                        ? 'Paket hilang, tertahan, atau kembali ke gudang? Admin akan '
+                            'menindaklanjuti — pesanan tidak selesai otomatis selama '
+                            'kendalanya dicek.'
+                        : 'Pesanan ini sudah dibayar pembeli, jadi gudang tidak bisa '
+                            'membatalkannya. Admin yang memutuskan lanjut atau batal '
+                            '(dan mengurus pengembalian dana).',
                     style: TextStyle(fontSize: 12.5, color: m.ink600, height: 1.45),
                   ),
                   const SizedBox(height: 8),
@@ -813,7 +822,9 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
           await ApiService.reportBranchKendala(_code, alasan, catatan);
       if (mounted) {
         AppNav.of(context).toast(tersimpan
-            ? 'Terkirim ke admin. Tunggu keputusan admin — jangan kirim dulu.'
+            ? (dikirim
+                ? 'Terkirim ke admin. Pesanan tidak selesai otomatis selama dicek.'
+                : 'Terkirim ke admin. Tunggu keputusan admin — jangan kirim dulu.')
             : 'Terkirim ke admin lewat Telegram (belum tersimpan di pesanan).');
       }
       await _load();
@@ -1328,6 +1339,28 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
                   (o.kendalaNote ?? '').isNotEmpty
                       ? '⚠️ Laporkan kendala lagi'
                       : '⚠️ Laporkan kendala ke admin',
+                  style: TextStyle(fontSize: 13, color: m.warn600)),
+            ),
+          ),
+        ],
+        // T-10: kendala SETELAH dikirim (paket hilang / kembali ke gudang).
+        if (tahap == 5 && !pickup) ...[
+          if (o.kendalaKirim) ...[
+            _alert(
+              m,
+              '⚠️ Kendala dilaporkan: ${o.kendalaNote ?? '-'}. Admin menindaklanjuti — '
+              'pesanan tidak selesai otomatis selama kendala ini terbuka.',
+              tone: MasPillTone.warn,
+            ),
+            const SizedBox(height: 6),
+          ],
+          Center(
+            child: TextButton(
+              onPressed: _busy ? null : _laporKendala,
+              child: Text(
+                  o.kendalaKirim
+                      ? '⚠️ Laporkan kendala pengiriman lagi'
+                      : '⚠️ Laporkan kendala pengiriman (paket hilang / kembali)',
                   style: TextStyle(fontSize: 13, color: m.warn600)),
             ),
           ),

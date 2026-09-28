@@ -1471,6 +1471,7 @@ class PesananBermasalah {
   static const kunci = [
     'uang_perlu_dicek', 'kendala_gudang', 'bayar_macet',
     'belum_diambil', 'lunas_belum_dikirim', 'penawaran_gagal', 'retur_accurate',
+    'kirim_lama',
   ];
 
   int get jumlah => daftar.values.fold(0, (n, l) => n + l.length);
@@ -1667,6 +1668,12 @@ class OrderDetail extends OrderSummary {
   final String? kendalaAt;
   final String? kendalaBy;
 
+  /// T-10: kendala SETELAH dikirim (menahan selesai otomatis) — admin/gudang.
+  final bool kendalaKirim;
+
+  /// T-10 (pembeli): laporan "belum terima barang" miliknya sedang dicek.
+  final bool laporanBelumDiterima;
+
   /// Penilaian (hanya pesanan selesai, migrasi 038).
   final Penilaian? penilaian;
 
@@ -1743,6 +1750,8 @@ class OrderDetail extends OrderSummary {
     this.kendalaNote,
     this.kendalaAt,
     this.kendalaBy,
+    this.kendalaKirim = false,
+    this.laporanBelumDiterima = false,
     this.penilaian,
     this.retur,
     this.items = const [],
@@ -1820,6 +1829,8 @@ class OrderDetail extends OrderSummary {
         kendalaNote: _sOrNull(j['kendala_note']),
         kendalaAt: _sOrNull(j['kendala_at']),
         kendalaBy: _sOrNull(j['kendala_by']),
+        kendalaKirim: _b(j['kendala_kirim']),
+        laporanBelumDiterima: _b(j['laporan_belum_diterima']),
         penilaian: j['penilaian'] is Map
             ? Penilaian.fromJson((j['penilaian'] as Map).cast<String, dynamic>())
             : null,

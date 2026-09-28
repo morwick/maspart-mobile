@@ -351,8 +351,10 @@ class _BermasalahScreenState extends State<BermasalahScreen> {
   static const _judul = {
     'uang_perlu_dicek': ('Uang perlu dicek',
         'Uang pembeli sudah masuk tapi pesanannya bermasalah — refund, konfirmasi, atau cek stok.'),
-    'kendala_gudang': ('Kendala dari gudang',
-        'Gudang melaporkan kendala pada pesanan lunas — putuskan lanjut kirim atau batalkan.'),
+    'kendala_gudang': ('Kendala (gudang / pembeli)',
+        'Kendala dari gudang, atau pembeli belum menerima barang — putuskan lanjut kirim, batalkan, atau cek paket.'),
+    'kirim_lama': ('Lama dikirim, belum selesai',
+        'Resi belum dinyatakan terkirim / tak bisa dilacak — cek paketnya ke ekspedisi.'),
     'bayar_macet': ('Pembayaran macet',
         'Lewat tenggat bayar tapi belum lunas/batal — periksa manual.'),
     'belum_diambil': ('Ambil di Toko belum diambil', 'Sudah lewat batas ambil — hubungi pembeli.'),
@@ -1062,6 +1064,70 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  /// T-10 (padanan web): kendala setelah dikirim selesai ditangani → selesai
+  /// otomatis berjalan lagi. Catatan wajib ≥ 10 karakter.
+  Future<void> _tutupKendala() async {
+    final nav = AppNav.of(context);
+    final ctl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final m = ctx.mas;
+        return StatefulBuilder(
+          builder: (ctx, setLocal) => AlertDialog(
+            title: const Text('Kendala selesai', style: TextStyle(fontSize: 16)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Bagaimana kendalanya selesai? Selesai otomatis berjalan lagi.',
+                    style: TextStyle(fontSize: 12.5, color: m.ink600)),
+                const SizedBox(height: 8),
+                MasInput(
+                  controller: ctl,
+                  hint: 'mis. paket ketemu, sudah diterima pembeli',
+                  height: 40,
+                  onChanged: (_) => setLocal(() {}),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Batal')),
+              TextButton(
+                onPressed: ctl.text.trim().replaceAll(RegExp(r'\s+'), ' ').length >= 10
+                    ? () => Navigator.pop(ctx, true)
+                    : null,
+                child: const Text('Simpan'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    final catatan = ctl.text.trim();
+    ctl.dispose();
+    if (ok != true || !mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ApiService.adminTutupKendala(_code, catatan);
+      if (!mounted) return;
+      setState(() => _busy = false);
+      nav.toast('Kendala ditutup — selesai otomatis berjalan lagi.');
+      await _load();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _busy = false;
+      });
+    }
+  }
+
   Future<void> _launch(String url) async {
     final nav = AppNav.of(context);
     final uri = Uri.tryParse(url);
@@ -1140,6 +1206,29 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 '${o.alasanBatalOleh != null ? '\n(oleh ${o.alasanBatalOleh}'
                     '${o.alasanBatalWaktu != null ? ', ${o.alasanBatalWaktu} UTC' : ''})' : ''}',
                 tone: MasPillTone.danger),
+            const SizedBox(height: 14),
+          ],
+
+          // Kendala dari gudang / pembeli (T-10: juga SETELAH dikirim — menahan
+          // selesai otomatis sampai admin menutupnya).
+          if ((o.kendalaNote ?? '').isNotEmpty &&
+              (o.status == 'diproses' || o.kendalaKirim)) ...[
+            _Alert(
+                '⚠️ ${o.kendalaKirim ? 'Kendala pengiriman' : 'Kendala dari gudang'}'
+                '${o.kendalaBy != null ? ' (${o.kendalaBy})' : ''}: ${o.kendalaNote}'
+                '${o.kendalaKirim ? '\nSelesai otomatis DITAHAN — cek paket ke ekspedisi.' : ''}',
+                tone: MasPillTone.warn),
+            if (o.kendalaKirim) ...[
+              const SizedBox(height: 8),
+              MasButton(
+                label: 'Kendala selesai…',
+                primary: false,
+                expand: true,
+                height: 40,
+                loading: _busy,
+                onTap: _busy ? null : _tutupKendala,
+              ),
+            ],
             const SizedBox(height: 14),
           ],
 

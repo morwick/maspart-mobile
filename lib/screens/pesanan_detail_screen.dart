@@ -198,6 +198,51 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
         gagal: 'Gagal mengonfirmasi penerimaan.');
   }
 
+  /// T-10: paket belum sampai / hilang — dulu tak ada jalurnya dan pesanan
+  /// tetap selesai otomatis di hari ke-7. Menahan selesai otomatis.
+  Future<void> _doBelumDiterima() async {
+    final ctl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final m = ctx.mas;
+        return AlertDialog(
+          title: const Text('Barang belum sampai?', style: TextStyle(fontSize: 16)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Penjual & admin akan mengecek paket ke ekspedisi. Pesanan tidak '
+                'selesai otomatis selama dicek.',
+                style: TextStyle(fontSize: 12.5, color: m.ink600, height: 1.45),
+              ),
+              const SizedBox(height: 8),
+              MasInput(
+                controller: ctl,
+                hint: 'Keterangan (opsional)',
+                height: 40,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Batal')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Kirim laporan')),
+          ],
+        );
+      },
+    );
+    final ket = ctl.text.trim();
+    ctl.dispose();
+    if (ok != true || !mounted) return;
+    await _run('belum', () => ApiService.laporBelumDiterima(_code, ket),
+        gagal: 'Gagal mengirim laporan.');
+  }
+
   Future<void> _doCancel() async {
     final ok = await _confirm(
       'Batalkan pesanan',
@@ -1005,6 +1050,24 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                   loading: _busy == 'confirm',
                   onTap: _busy != null ? null : _doConfirm,
                 ),
+                const SizedBox(height: 8),
+                // T-10: laporan "belum terima barang".
+                if (o.laporanBelumDiterima)
+                  _alert(
+                    m,
+                    'Laporan "belum terima barang" sudah dikirim — penjual sedang '
+                    'mengecek paket Anda. Pesanan tidak akan selesai otomatis selama dicek.',
+                    tone: MasPillTone.warn,
+                  )
+                else
+                  MasButton(
+                    label: _busy == 'belum' ? 'Mengirim…' : 'Belum Terima Barang',
+                    primary: false,
+                    expand: true,
+                    height: 38,
+                    loading: _busy == 'belum',
+                    onTap: _busy != null ? null : _doBelumDiterima,
+                  ),
               ],
 
               if (['menunggu_pembayaran', 'menunggu_verifikasi']
