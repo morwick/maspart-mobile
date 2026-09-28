@@ -279,6 +279,9 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
     if (ok != true) return;
     await _run('cancel', () => ApiService.cancelOrder(_code),
         gagal: 'Gagal membatalkan pesanan.');
+    // R-24: batal ditolak karena pesanan ternyata SUDAH dibayar → statusnya
+    // baru saja berubah di server; muat ulang (pesan galat tetap tampil).
+    if (mounted && _error != null) await _load();
   }
 
   Future<void> _doUploadProof() async {
