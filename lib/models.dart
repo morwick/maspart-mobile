@@ -4825,7 +4825,10 @@ class ProdukUlasan {
 // ══════════════════════════════════════════════════════════════════════
 
 /// Status akhir return — tak ada lagi yang bisa dikerjakan.
-const Set<String> kReturAkhir = {'selesai', 'ditolak', 'dibatalkan'};
+const Set<String> kReturAkhir = {'selesai', 'ditolak', 'dibatalkan', 'dikembalikan'};
+
+/// Retur yang DITOLAK — termasuk yang barangnya dikirim balik ke pembeli (S-14).
+const Set<String> kReturDitolak = {'ditolak', 'menunggu_dikembalikan', 'dikembalikan'};
 
 String? _kosongNull(dynamic v) =>
     (v == null || v.toString().trim().isEmpty) ? null : v.toString();
@@ -4886,6 +4889,9 @@ class ReturConfig {
   final int durasiMinDetik;
   final int maksFoto;
 
+  /// S-10: retur menunggu pembeli (kirim barang / bukti) dibatalkan otomatis.
+  final int tungguPembeliHari;
+
   const ReturConfig({
     this.alasan = const [],
     this.jenisRusak = const [],
@@ -4897,6 +4903,7 @@ class ReturConfig {
     this.maksVideoMb = 50,
     this.durasiMinDetik = 10,
     this.maksFoto = 8,
+    this.tungguPembeliHari = 7,
   });
 
   factory ReturConfig.fromJson(Map<String, dynamic> j) {
@@ -4912,6 +4919,7 @@ class ReturConfig {
       maksVideoMb: _i(j['maks_video_mb'], 50),
       durasiMinDetik: _i(j['durasi_min_detik'], 10),
       maksFoto: _i(j['maks_foto'], 8),
+      tungguPembeliHari: _i(j['tunggu_pembeli_hari'], 7),
     );
   }
 }
@@ -4989,11 +4997,19 @@ class ReturPesananItem {
   final String partNumber;
   final bool bisa;
   final ReturRingkas? retur;
-  const ReturPesananItem({required this.partNumber, this.bisa = false, this.retur});
+
+  /// S-13: unit yang sudah memakai jatah retur & sisa yang masih boleh diretur
+  /// (null = server lama → pakai qty pesanan).
+  final int qtyDiretur;
+  final int? qtySisa;
+  const ReturPesananItem(
+      {required this.partNumber, this.bisa = false, this.retur, this.qtyDiretur = 0, this.qtySisa});
 
   factory ReturPesananItem.fromJson(Map<String, dynamic> j) => ReturPesananItem(
         partNumber: _s(j['part_number']),
         bisa: _b(j['bisa']),
+        qtyDiretur: _i(j['qty_diretur']),
+        qtySisa: _iOrNull(j['qty_sisa']),
         retur: j['retur'] is Map
             ? ReturRingkas.fromJson((j['retur'] as Map).cast<String, dynamic>())
             : null,
@@ -5077,13 +5093,19 @@ class ReturVideoMeta {
   final int? ukuran;
   final String? direkamAt;
   final String? nama;
-  const ReturVideoMeta({this.durasi, this.ukuran, this.direkamAt, this.nama});
+
+  /// S-15: true = durasi dibaca SERVER dari file; false = klaim perangkat saja.
+  final bool? durasiTerverifikasi;
+  const ReturVideoMeta(
+      {this.durasi, this.ukuran, this.direkamAt, this.nama, this.durasiTerverifikasi});
 
   factory ReturVideoMeta.fromJson(Map<String, dynamic> j) => ReturVideoMeta(
         durasi: _dOrNull(j['durasi']),
         ukuran: _iOrNull(j['ukuran']),
         direkamAt: _kosongNull(j['direkam_at']),
         nama: _kosongNull(j['nama']),
+        durasiTerverifikasi:
+            j['durasi_terverifikasi'] is bool ? j['durasi_terverifikasi'] as bool : null,
       );
 }
 
@@ -5137,6 +5159,15 @@ class ReturDetail extends ReturRingkas {
   /// T-8: tindakan manual di Accurate yang ditimbulkan retur (admin/gudang).
   final List<ReturTindakanAccurate> tindakanAccurate;
 
+  /// S-14: ganti ongkir kirim balik pembeli + resi barang yang dikirim balik
+  /// ke pembeli (retur ditolak setelah barang di gudang).
+  final int refundOngkir;
+  final String? returnToBuyerCourier;
+  final String? returnToBuyerTrackingNo;
+
+  /// S-10: batas pembeli kirim barang / bukti sebelum retur batal otomatis.
+  final String? batasPembeli;
+
   const ReturDetail({
     required super.returnCode,
     super.orderCode,
@@ -5185,6 +5216,10 @@ class ReturDetail extends ReturRingkas {
     this.tujuanGudang = '',
     this.tujuanPic = '',
     this.tindakanAccurate = const [],
+    this.refundOngkir = 0,
+    this.returnToBuyerCourier,
+    this.returnToBuyerTrackingNo,
+    this.batasPembeli,
   });
 
   factory ReturDetail.fromJson(Map<String, dynamic> j) {
@@ -5241,6 +5276,10 @@ class ReturDetail extends ReturRingkas {
       tujuanGudang: _s(tujuan['gudang']),
       tujuanPic: _s(tujuan['pic']),
       tindakanAccurate: _list(j['tindakan_accurate'], ReturTindakanAccurate.fromJson),
+      refundOngkir: _i(j['refund_ongkir']),
+      returnToBuyerCourier: _kosongNull(j['return_to_buyer_courier']),
+      returnToBuyerTrackingNo: _kosongNull(j['return_to_buyer_tracking_no']),
+      batasPembeli: _kosongNull(j['batas_pembeli']),
     );
   }
 }

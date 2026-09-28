@@ -1442,13 +1442,17 @@ class ApiService {
           await _Api.get('/api/branch/returns/${Uri.encodeComponent(code)}')));
 
   /// Aksi gudang: `terima_barang` | `periksa` | `catatan` (+ `note`) |
-  /// `accurate_beres` (+ `jenis`, `dokumen` — T-8, nomor dokumen Accurate).
+  /// `accurate_beres` (+ `jenis`, `dokumen` — T-8, nomor dokumen Accurate) |
+  /// `kembalikan_barang` (+ `kurir`, `resi`, atau `note` bila diambil di toko —
+  /// S-14, barang retur yang ditolak dikirim balik ke pembeli).
   static Future<ReturDetail> branchAksiRetur(
     String code,
     String aksi, {
     String? note,
     String? jenis,
     String? dokumen,
+    String? kurir,
+    String? resi,
   }) async {
     final data = await _Api.post(
       '/api/branch/returns/${Uri.encodeComponent(code)}/aksi',
@@ -1457,6 +1461,8 @@ class ApiService {
         if (note != null) 'note': note,
         if (jenis != null) 'jenis': jenis,
         if (dokumen != null) 'dokumen': dokumen,
+        if (kurir != null) 'kurir': kurir,
+        if (resi != null) 'resi': resi,
       },
     );
     return ReturDetail.fromJson(_Api._obj(data));

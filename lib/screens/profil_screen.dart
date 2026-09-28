@@ -39,7 +39,7 @@ class _ProfilScreenState extends State<ProfilScreen> {
   int? _voucher;
   List<OrderSummary>? _orders;
   int? _returAktif;
-  static const _returAkhir = {'selesai', 'ditolak', 'dibatalkan'};
+  static const _returAkhir = {'selesai', 'ditolak', 'dibatalkan', 'dikembalikan'};
 
   @override
   void initState() {
