@@ -1844,11 +1844,14 @@ class ApiService {
 
   /// `kodeAmbil`: jalur lama "selesai" Ambil di Toko tanpa foto (migrasi 043
   /// belum jalan) tetap wajib kode ambil dari pembeli (S-7).
+  /// `abaikanKendala`: alasan tetap 'dikirim' walau kendala gudang (stok
+  /// kurang/rusak/beda) masih terbuka — dicatat & kendala ditutup (R-12).
   static Future<void> setBranchOrderStatus(
     String code,
     String status, {
     String? trackingNo,
     String? kodeAmbil,
+    String? abaikanKendala,
   }) =>
       _Api.put(
         '/api/branch/orders/${Uri.encodeComponent(code)}/status',
@@ -1856,6 +1859,7 @@ class ApiService {
           'status': status,
           'tracking_no': ?trackingNo,
           'kode_ambil': ?kodeAmbil,
+          'abaikan_kendala': ?abaikanKendala,
         },
         pesanPutus: _Api.pesanPutusPesanan,
       );
@@ -1930,14 +1934,16 @@ class ApiService {
   /// T-11: `trackingNo` = resi saat admin menandai 'dikirim' pesanan kurir (wajib).
   /// S-19: `alasanSelesai` = alasan admin menyelesaikan pesanan Ambil di Toko
   /// tanpa serah terima gudang (wajib, min. 10 karakter — dicatat di pesanan).
+  /// R-12: `abaikanKendala` = alasan tetap 'dikirim' walau kendala gudang terbuka.
   static Future<void> setOrderStatus(String code, String status,
-          {String? trackingNo, String? alasanSelesai}) =>
+          {String? trackingNo, String? alasanSelesai, String? abaikanKendala}) =>
       _Api.put(
         '/api/admin/orders/${Uri.encodeComponent(code)}/status',
         body: {
           'status': status,
           if (trackingNo != null) 'tracking_no': trackingNo,
           if (alasanSelesai != null) 'alasan_selesai': alasanSelesai,
+          if (abaikanKendala != null) 'abaikan_kendala': abaikanKendala,
         },
         pesanPutus: _Api.pesanPutusPesanan,
       );

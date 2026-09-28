@@ -582,6 +582,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       resi = await tanyaResiKirim(context, _code);
       if (resi == null || !mounted) return;
     }
+    // R-12: kendala gudang (stok kurang / rusak / beda) masih terbuka → 'dikirim'
+    // hanya dengan alasan yang tercatat (kendala ikut ditutup).
+    String? abaikan;
+    if (status == 'dikirim' && o != null && o.kendalaTahanKirim) {
+      abaikan = await tanyaAbaikanKendala(context, _code, o.kendalaNote ?? '-');
+      if (abaikan == null || !mounted) return;
+    }
     // S-19: Ambil di Toko diselesaikan admin = TANPA bukti serah terima gudang
     // (kode ambil + foto) → alasan wajib & dicatat di pesanan.
     String? alasanSelesai;
@@ -590,7 +597,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       if (alasanSelesai == null || !mounted) return;
     }
     await _jalankanStatus(nav, status,
-        trackingNo: resi, alasanSelesai: alasanSelesai);
+        trackingNo: resi, alasanSelesai: alasanSelesai, abaikanKendala: abaikan);
   }
 
   Future<void> _koreksiResi() async {
@@ -617,14 +624,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 
   Future<void> _jalankanStatus(AppNav nav, String status,
-      {String? trackingNo, String? alasanSelesai}) async {
+      {String? trackingNo, String? alasanSelesai, String? abaikanKendala}) async {
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
       await ApiService.setOrderStatus(_code, status,
-          trackingNo: trackingNo, alasanSelesai: alasanSelesai);
+          trackingNo: trackingNo, alasanSelesai: alasanSelesai,
+          abaikanKendala: abaikanKendala);
       if (!mounted) return;
       setState(() => _busy = false);
       nav.toast('Status → ${orderStatusLabel(status)}');
