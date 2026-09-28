@@ -350,6 +350,15 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
     return null;
   }
 
+  /// S-13: unit yang masih boleh diretur (dibeli − yang sudah memakai jatah
+  /// retur sebelumnya). Server lama tanpa qty_sisa → qty pesanan.
+  int _sisaQty(ReturPesanan retur, OrderItemDetail item) {
+    for (final x in retur.items) {
+      if (x.partNumber == item.partNumber) return x.qtySisa ?? item.qty;
+    }
+    return item.qty;
+  }
+
   ReturAlasan? get _alasan {
     for (final a in _cfg?.alasan ?? const <ReturAlasan>[]) {
       if (a.kode == _reason) return a;
@@ -559,8 +568,9 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
         'description': _deskCtrl.text.trim(),
         'requested_resolution': _solusi,
         'unboxing_video_url': video.url,
-        // Durasi TIDAK dikirim: tanpa paket video_player durasi tak terbaca
-        // di HP. Waktu file = lastModified salinan yang dipilih (bila ada).
+        // Durasi TIDAK dikirim: server membaca durasi & waktu rekam langsung
+        // dari file video saat diunggah (S-15). Waktu file = lastModified
+        // salinan yang dipilih (bila ada) — hanya pembanding.
         'video_meta': {
           'ukuran': video.ukuran,
           if (video.lastModifiedMs != null) 'direkam_at': video.lastModifiedMs,
@@ -738,7 +748,7 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
     return [
       _judul(m, 'Barang apa yang bermasalah?', 'Satu pengajuan untuk satu barang.'),
       for (final it in o.items) _opsiBarang(m, it, retur),
-      if (item != null && item.qty > 1) ...[
+      if (item != null && _sisaQty(retur, item) > 1) ...[
         const _Label('Jumlah yang diretur'),
         Row(children: [
           MasButton(
@@ -757,10 +767,16 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
             label: '+',
             primary: false,
             height: 34,
-            onTap: _qty < item.qty ? () => setState(() => _qty += 1) : null,
+            onTap: _qty < _sisaQty(retur, item) ? () => setState(() => _qty += 1) : null,
           ),
           const SizedBox(width: 8),
-          Text('dari ${item.qty} pcs', style: TextStyle(fontSize: 12, color: m.ink500)),
+          Flexible(
+            child: Text(
+                _sisaQty(retur, item) < item.qty
+                    ? 'dari ${_sisaQty(retur, item)} pcs yang belum diretur'
+                    : 'dari ${item.qty} pcs',
+                style: TextStyle(fontSize: 12, color: m.ink500)),
+          ),
         ]),
       ],
       const _Label('Alasan return', wajib: '*'),
@@ -843,6 +859,7 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
         const SizedBox(height: 2),
         Text(
             '${it.qty} pcs · ${formatRupiah(it.price)}'
+            '${(st?.qtyDiretur ?? 0) > 0 ? ' · ${st!.qtyDiretur} sudah diretur' : ''}'
             '${berjalan != null ? ' · Return ${berjalan.returnCode}: ${berjalan.statusLabel}' : ''}',
             style: TextStyle(fontSize: 11.5, color: m.ink500)),
       ]),
@@ -1005,8 +1022,8 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: m.ink900)),
-              // Tanpa paket video_player durasi tak bisa dibaca di HP.
-              Text('${_mb(v.ukuran)} MB · durasi tidak diketahui',
+              // Durasi dibaca server dari file saat pengajuan dikirim (S-15).
+              Text('${_mb(v.ukuran)} MB · durasi dibaca server',
                   style: TextStyle(fontSize: 11.5, color: m.ink500)),
             ]),
           ),
@@ -1550,6 +1567,33 @@ class _ReturDetailScreenState extends State<ReturDetailScreen> {
                 tebal: 'Return ditolak.', tone: MasPillTone.danger),
             const SizedBox(height: 12),
           ],
+          // S-14: ditolak setelah barang dikirim ke gudang → barang dikirim balik.
+          if (r.status == 'menunggu_dikembalikan') ...[
+            ReturKotak.teks(
+                '${r.rejectionReason != null ? 'Alasan: ${r.rejectionReason}\n' : ''}'
+                'Barang Anda akan dikirim kembali oleh gudang — nomor resinya muncul di sini '
+                'setelah dikirim.',
+                tebal: 'Return ditolak.',
+                tone: MasPillTone.danger),
+            const SizedBox(height: 12),
+          ],
+          if (r.status == 'dikembalikan') ...[
+            ReturKotak.teks(
+                '${r.rejectionReason != null ? 'Alasan: ${r.rejectionReason}' : ''}'
+                '${r.returnToBuyerTrackingNo != null ? '\nDikirim via ${r.returnToBuyerCourier ?? '-'} · resi ${r.returnToBuyerTrackingNo}' : ''}',
+                tebal: 'Return ditolak — barang dikembalikan.',
+                tone: MasPillTone.danger),
+            const SizedBox(height: 12),
+          ],
+          // S-10: lewat batas ini pengajuan dibatalkan otomatis.
+          if (r.batasPembeli != null &&
+              (r.status == 'perlu_bukti' || r.status == 'menunggu_kirim')) ...[
+            ReturKotak.teks(
+                '${r.status == 'menunggu_kirim' ? 'Kirim barang' : 'Kirim bukti tambahan'} sebelum '
+                '${fmtDate(r.batasPembeli)} — lewat dari itu pengajuan return dibatalkan otomatis.',
+                tone: MasPillTone.warn),
+            const SizedBox(height: 12),
+          ],
           if (r.status == 'perlu_bukti') ...[
             _kartuPerluBukti(m, r),
             const SizedBox(height: 12),
@@ -1560,9 +1604,8 @@ class _ReturDetailScreenState extends State<ReturDetailScreen> {
           ],
           if (r.status == 'diproses') ...[
             ReturKotak.teks(
-                r.resolution == 'refund'
-                    ? 'Refund ${(r.refundAmount ?? 0) > 0 ? '${formatRupiah(r.refundAmount)} ' : ''}sedang diproses admin.'
-                    : 'Barang pengganti sedang disiapkan gudang.',
+                '${r.resolution == 'refund' ? 'Refund ${(r.refundAmount ?? 0) > 0 ? '${formatRupiah(r.refundAmount)} ' : ''}sedang diproses admin.' : 'Barang pengganti sedang disiapkan gudang.'}'
+                '${r.refundOngkir > 0 ? ' Ongkir kirim balik Anda diganti ${formatRupiah(r.refundOngkir)}.' : ''}',
                 tone: MasPillTone.brand),
             const SizedBox(height: 12),
           ],
@@ -1762,6 +1805,7 @@ const List<(String, String)> _kFilterGudang = [
   ('dikirim_balik', 'Dikirim Balik'),
   ('diterima_gudang', 'Diterima Gudang'),
   ('diproses', 'Diproses'),
+  ('menunggu_dikembalikan', 'Perlu Dikirim Balik'),   // S-14
   ('', 'Semua'),
 ];
 
@@ -1918,14 +1962,15 @@ class _CabangReturDetailScreenState extends State<CabangReturDetailScreen> {
     }
   }
 
-  Future<void> _aksi(String aksi, {String? note, String? jenis, String? dokumen}) async {
+  Future<void> _aksi(String aksi,
+      {String? note, String? jenis, String? dokumen, String? kurir, String? resi}) async {
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
       final r = await ApiService.branchAksiRetur(_code, aksi,
-          note: note, jenis: jenis, dokumen: dokumen);
+          note: note, jenis: jenis, dokumen: dokumen, kurir: kurir, resi: resi);
       if (!mounted) return;
       setState(() {
         _r = r;
@@ -1937,6 +1982,86 @@ class _CabangReturDetailScreenState extends State<CabangReturDetailScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// S-14 (paritas web ReturKelola): retur ditolak setelah barang di gudang —
+  /// barangnya dikirim balik ke pembeli (ekspedisi + resi, atau catatan bila
+  /// diambil pembeli di toko).
+  Future<void> _kembalikanBarang() async {
+    final kurirCtl = TextEditingController();
+    final resiCtl = TextEditingController();
+    final noteCtl = TextEditingController();
+    bool siap() {
+      final resi = resiCtl.text.trim();
+      if (resi.isNotEmpty) return kurirCtl.text.trim().isNotEmpty && resi.length >= 5;
+      return noteCtl.text.trim().length >= 5;
+    }
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final m = ctx.mas;
+        return StatefulBuilder(
+          builder: (ctx, setLocal) => AlertDialog(
+            title: const Text('Kirim balik barang ke pembeli', style: TextStyle(fontSize: 16)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Return ditolak — barang pembeli wajib dikembalikan.',
+                      style: TextStyle(fontSize: 12.5, color: m.ink600)),
+                  const SizedBox(height: 8),
+                  MasInput(
+                    controller: kurirCtl,
+                    hint: 'Ekspedisi (JNE, J&T, …)',
+                    height: 40,
+                    onChanged: (_) => setLocal(() {}),
+                  ),
+                  const SizedBox(height: 8),
+                  MasInput(
+                    controller: resiCtl,
+                    hint: 'Nomor resi',
+                    mono: true,
+                    height: 40,
+                    textCapitalization: TextCapitalization.characters,
+                    onChanged: (_) => setLocal(() {}),
+                  ),
+                  const SizedBox(height: 8),
+                  MasInput(
+                    controller: noteCtl,
+                    hint: 'Catatan — wajib bila diambil pembeli di toko (tanpa resi)',
+                    maxLines: 2,
+                    textCapitalization: TextCapitalization.sentences,
+                    onChanged: (_) => setLocal(() {}),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Batal')),
+              TextButton(
+                onPressed: siap() ? () => Navigator.pop(ctx, true) : null,
+                child: const Text('Simpan'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    final kurir = kurirCtl.text.trim();
+    final resi = resiCtl.text.trim().toUpperCase();
+    final note = noteCtl.text.trim();
+    kurirCtl.dispose();
+    resiCtl.dispose();
+    noteCtl.dispose();
+    if (ok != true || !mounted) return;
+    await _aksi('kembalikan_barang',
+        kurir: resi.isEmpty ? null : kurir,
+        resi: resi.isEmpty ? null : resi,
+        note: note.isEmpty ? null : note);
   }
 
   /// T-8 (paritas web ReturKelola): tandai dokumen Accurate sudah dibuat.
@@ -2044,6 +2169,15 @@ class _CabangReturDetailScreenState extends State<CabangReturDetailScreen> {
           MasCard(
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               const ReturJudul('Tindakan'),
+              if (s == 'menunggu_dikembalikan') ...[
+                MasButton(
+                  label: '📦 Kirim Balik Barang ke Pembeli',
+                  expand: true,
+                  height: 40,
+                  onTap: _busy ? null : _kembalikanBarang,
+                ),
+                const SizedBox(height: 8),
+              ],
               for (final t in tombol) ...[
                 MasButton(
                   label: t.$2,

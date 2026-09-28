@@ -29,6 +29,9 @@ const Map<String, MasPillTone> kReturTone = {
   'diproses': MasPillTone.brand,
   'selesai': MasPillTone.brand,
   'dibatalkan': MasPillTone.neutral,
+  // S-14: ditolak setelah barang di gudang → barang dikirim balik ke pembeli.
+  'menunggu_dikembalikan': MasPillTone.danger,
+  'dikembalikan': MasPillTone.danger,
 };
 
 /// Langkah baku bila server lama belum mengirim `langkah`.
@@ -141,12 +144,15 @@ class ReturStepper extends StatelessWidget {
   Widget build(BuildContext context) {
     final m = context.mas;
     final dasar = r.langkah.isEmpty ? kReturLangkah : r.langkah;
-    final gagal = r.status == 'ditolak' || r.status == 'dibatalkan';
+    final ditolak = kReturDitolak.contains(r.status);
+    final gagal = ditolak || r.status == 'dibatalkan';
     var ke = r.langkahKe;
     if (gagal) {
+      // Langkah terakhir yang dicapai = status riwayat terakhir yang ada di peta
+      // (lewati menunggu_dikembalikan → dikembalikan).
       ReturRiwayat? sebelum;
       for (final h in r.riwayat.reversed) {
-        if (h.newStatus != r.status) {
+        if (_peta.containsKey(h.newStatus)) {
           sebelum = h;
           break;
         }
@@ -155,7 +161,7 @@ class ReturStepper extends StatelessWidget {
       if (ke > dasar.length) ke = dasar.length;
     }
     final langkah = gagal
-        ? [...dasar.take(ke), r.status == 'ditolak' ? 'Ditolak' : 'Dibatalkan']
+        ? [...dasar.take(ke), ditolak ? 'Ditolak' : 'Dibatalkan']
         : dasar;
 
     return SingleChildScrollView(
@@ -370,7 +376,10 @@ class ReturBukti extends StatelessWidget {
                             style: TextStyle(
                                 fontSize: 13, fontWeight: FontWeight.w600, color: m.ink900)),
                         if (i == 0 && durasi != null && durasi > 0)
-                          Text('${durasi.round()} detik',
+                          // S-15: tanpa verifikasi server, durasi hanya klaim perangkat.
+                          Text(
+                              '${durasi.round()} detik'
+                              '${r.videoMeta.durasiTerverifikasi == false ? ' (menurut perangkat)' : ''}',
                               style: TextStyle(fontSize: 11.5, color: m.ink500)),
                       ],
                     ),
@@ -487,10 +496,21 @@ class ReturRingkasan extends StatelessWidget {
           Text(formatRupiah(r.refundAmount),
               style: biasa.copyWith(fontWeight: FontWeight.w700)),
         ),
+      if (r.refundOngkir > 0)
+        (
+          'Ganti ongkir kirim balik',
+          Text(formatRupiah(r.refundOngkir),
+              style: biasa.copyWith(fontWeight: FontWeight.w700)),
+        ),
       if (r.returnTrackingNo != null)
         ('Resi return', Text('${r.returnCourier ?? ''} · ${r.returnTrackingNo}', style: mono())),
       if (r.replacementTrackingNo != null)
         ('Resi pengganti', Text(r.replacementTrackingNo!, style: mono())),
+      if (r.returnToBuyerTrackingNo != null)
+        (
+          'Resi kirim balik ke pembeli',
+          Text('${r.returnToBuyerCourier ?? ''} · ${r.returnToBuyerTrackingNo}', style: mono()),
+        ),
       ('Diajukan', Text(fmtDate(r.submittedAt), style: biasa)),
     ];
 
@@ -568,8 +588,9 @@ class ReturPesananCard extends StatelessWidget {
       );
     }
 
-    final riwayat =
-        rt.returns.where((r) => r.status == 'ditolak' || r.status == 'dibatalkan').toList();
+    // S-13: retur yang sudah tuntas (termasuk selesai) — barangnya bisa diretur lagi
+    // untuk sisa unit, jadi tak lagi tampil per barang.
+    final riwayat = rt.returns.where((r) => kReturAkhir.contains(r.status)).toList();
 
     return MasCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -667,6 +688,11 @@ class ReturPesananCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: m.ink900)),
             Text(it.partNumber, style: masMono(size: 11, color: m.ink500)),
+            if (it.qtyDiretur > 0)
+              Text(
+                  '${it.qtyDiretur} unit sudah diretur'
+                  '${(it.qtySisa ?? 0) > 0 ? ' · sisa ${it.qtySisa} unit' : ''}',
+                  style: TextStyle(fontSize: 11, color: m.ink500)),
           ]),
         ),
         const SizedBox(width: 8),
