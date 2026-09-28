@@ -1566,8 +1566,27 @@ class OrderDetail extends OrderSummary {
   final String? pickedUpBy;
   final String? pickedUpAt;
 
-  /// Mis. dibayar setelah order batal → perlu refund.
+  /// Log catatan pembayaran (ADMIN saja — server tak mengirimnya ke pembeli).
   final String? paymentNote;
+
+  /// Audit 2026-09-28 T-6 (admin): catatan pembayaran yang MASIH perlu
+  /// tindakan, ada refund pesanan yang belum dicatat dibayar (+ perkiraan
+  /// nominalnya untuk isian awal "Refund sudah dibayar").
+  final List<String> catatanTerbuka;
+  final bool perluRefund;
+  final int saranRefund;
+
+  /// Alasan batal. Admin: label + oleh/waktu; pembeli: label untuk pembeli.
+  final String? alasanBatalLabel;
+  final String? alasanBatalPembeli;
+  final String? alasanBatalKet;
+  final String? alasanBatalOleh;
+  final String? alasanBatalWaktu;
+
+  /// Pembeli: status pengembalian dana pesanan batal-setelah-lunas
+  /// ('menunggu' | 'dikembalikan' | null) + nominal yang sudah dikembalikan.
+  final String? statusRefund;
+  final int refundDikembalikan;
 
   /// Penawaran Penjualan Accurate otomatis: created | skip | failed.
   final String? penawaranStatus;
@@ -1640,6 +1659,16 @@ class OrderDetail extends OrderSummary {
     this.pickedUpBy,
     this.pickedUpAt,
     this.paymentNote,
+    this.catatanTerbuka = const [],
+    this.perluRefund = false,
+    this.saranRefund = 0,
+    this.alasanBatalLabel,
+    this.alasanBatalPembeli,
+    this.alasanBatalKet,
+    this.alasanBatalOleh,
+    this.alasanBatalWaktu,
+    this.statusRefund,
+    this.refundDikembalikan = 0,
     this.penawaranStatus,
     this.penawaranNumber,
     this.penawaranNote,
@@ -1703,6 +1732,19 @@ class OrderDetail extends OrderSummary {
         pickedUpBy: _sOrNull(j['picked_up_by']),
         pickedUpAt: _sOrNull(j['picked_up_at']),
         paymentNote: _sOrNull(j['payment_note']),
+        // Server lama belum mengirim catatan_terbuka → seluruh catatan terbuka.
+        catatanTerbuka: j['catatan_terbuka'] is List
+            ? _strList(j['catatan_terbuka'])
+            : (j['payment_note'] == null ? const [] : ['${j['payment_note']}']),
+        perluRefund: _b(j['perlu_refund']),
+        saranRefund: _i(j['saran_refund']),
+        alasanBatalLabel: _sOrNull((j['alasan_batal'] as Map?)?['label']),
+        alasanBatalPembeli: _sOrNull((j['alasan_batal'] as Map?)?['label_pembeli']),
+        alasanBatalKet: _sOrNull((j['alasan_batal'] as Map?)?['keterangan']),
+        alasanBatalOleh: _sOrNull((j['alasan_batal'] as Map?)?['oleh']),
+        alasanBatalWaktu: _sOrNull((j['alasan_batal'] as Map?)?['waktu']),
+        statusRefund: _sOrNull(j['status_refund']),
+        refundDikembalikan: _i(j['refund_dikembalikan']),
         penawaranStatus: _sOrNull(j['penawaran_status']),
         penawaranNumber: _sOrNull(j['penawaran_number']),
         penawaranNote: _sOrNull(j['penawaran_note']),

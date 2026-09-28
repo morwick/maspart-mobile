@@ -1715,6 +1715,27 @@ class ApiService {
         body: {'status': status},
       );
 
+  /// Batalkan pesanan oleh admin — alasan WAJIB (audit 2026-09-28 T-6),
+  /// dicatat & dikirim ke pembeli. Padanan web `adminBatalkan`.
+  static Future<void> adminBatalkan(String code, String alasan, String keterangan) =>
+      _Api.put(
+        '/api/admin/orders/${Uri.encodeComponent(code)}/status',
+        body: {'status': 'batal', 'alasan_batal': alasan, 'keterangan_batal': keterangan},
+      );
+
+  /// Catat refund pesanan SUDAH ditransfer (T-6) → tanda "perlu refund"
+  /// ditutup + pembeli dikabari. Padanan web `adminRefundDibayar`.
+  static Future<void> adminRefundDibayar(
+          String code, int jumlah, String referensi, String keterangan) =>
+      _Api.post(
+        '/api/admin/orders/${Uri.encodeComponent(code)}/refund-dibayar',
+        body: {
+          'jumlah': jumlah,
+          'referensi': referensi,
+          'keterangan': keterangan.isEmpty ? null : keterangan,
+        },
+      );
+
   /// Lepas tahanan kirim pesanan yang dananya ditarik (audit 2026-09-28 T-5)
   /// — padanan web `adminLepasTahan`. Alasan wajib (>= 10 karakter).
   static Future<void> adminLepasTahan(String code, String alasan) => _Api.post(

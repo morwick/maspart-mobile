@@ -980,14 +980,20 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                   tone: MasPillTone.brand,
                 ),
 
+              // T-6: alasan dari penjual + status pengembalian dana. (Log catatan
+              // pembayaran internal tak lagi dikirim server ke pembeli.)
               if (o.status == 'batal')
-                _alert(m, 'Pesanan dibatalkan.', tone: MasPillTone.danger),
-
-              // Peringatan penting: dibayar setelah order batal → perlu refund.
-              if (o.paymentNote != null && o.paymentNote!.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                _alert(m, o.paymentNote!, tone: MasPillTone.warn),
-              ],
+                _alert(
+                  m,
+                  'Pesanan dibatalkan.'
+                  '${o.alasanBatalPembeli != null ? '\nAlasan: ${o.alasanBatalPembeli}'
+                      '${o.alasanBatalKet != null ? ' — ${o.alasanBatalKet}' : ''}' : ''}'
+                  '${o.statusRefund == 'menunggu' ? '\nDana Anda sedang diproses untuk dikembalikan oleh penjual.' : ''}'
+                  '${o.statusRefund == 'dikembalikan' ? '\nDana '
+                      '${o.refundDikembalikan > 0 ? '${formatRupiah(o.refundDikembalikan)} ' : ''}'
+                      'sudah dikembalikan.' : ''}',
+                  tone: MasPillTone.danger,
+                ),
 
               // Ambil di Toko tak dikonfirmasi pembeli: gudang yang menandai
               // selesai sambil memotret pengambil (bukti serah terima).

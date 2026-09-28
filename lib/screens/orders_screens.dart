@@ -382,9 +382,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     // Batal punya konfirmasi sendiri yang menyebut akibatnya; pesanan LUNAS
     // wajib ketik ulang kode (paritas web — uang harus dikembalikan).
     if (status == 'batal') {
-      if (!await _konfirmasiBatal()) return;
-      if (!mounted) return;
-      await _jalankanStatus(nav, status);
+      final alasan = await _konfirmasiBatal();
+      if (alasan == null || !mounted) return;
+      await _jalankanBatal(nav, alasan.$1, alasan.$2);
       return;
     }
     final ok = await showDialog<bool>(
@@ -431,73 +431,111 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
-  /// Konfirmasi BATAL (paritas web). Belum dibayar → dialog yang menyebut
-  /// akibatnya (tagihan Midtrans ditutup, stok dilepas, tak bisa dihidupkan
-  /// lagi). Sudah LUNAS (diproses/dikirim) → wajib ketik ulang kode pesanan:
-  /// uang harus dikembalikan ke pembeli.
-  Future<bool> _konfirmasiBatal() async {
+  Future<void> _jalankanBatal(AppNav nav, String alasan, String ket) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ApiService.adminBatalkan(_code, alasan, ket);
+      if (!mounted) return;
+      setState(() => _busy = false);
+      nav.toast('Pesanan dibatalkan — pembeli dikabari beserta alasannya.');
+      await _load();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _busy = false;
+      });
+    }
+  }
+
+  /// Alasan pembatalan (T-6) — kode sama dengan backend orders.ALASAN_BATAL.
+  static const _alasanBatal = <(String, String)>[
+    ('stok_habis', 'Stok habis / barang tidak tersedia'),
+    ('permintaan_pembeli', 'Permintaan pembeli'),
+    ('penipuan', 'Pesanan mencurigakan / indikasi penipuan'),
+    ('pembayaran', 'Pembayaran bermasalah'),
+    ('lainnya', 'Lainnya'),
+  ];
+
+  /// Konfirmasi BATAL (paritas web, P-1 + T-6): alasan WAJIB dipilih (dicatat &
+  /// dikirim ke pembeli; 'Lainnya' wajib keterangan). Sudah LUNAS
+  /// (diproses/dikirim) → wajib ketik ulang kode pesanan: uang harus
+  /// dikembalikan ke pembeli. Return (kode alasan, keterangan) atau null.
+  Future<(String, String)?> _konfirmasiBatal() async {
     final o = _order;
     final lunas = o != null && (o.status == 'diproses' || o.status == 'dikirim');
     final total = formatRupiah(o?.total ?? 0);
-    if (!lunas) {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Batalkan pesanan?', style: TextStyle(fontSize: 16)),
-          content: Text(
-            'Batalkan $_code ($total)?\n\n'
-            '• Tagihan Midtrans pembeli DITUTUP — pembeli tak bisa membayar lagi.\n'
-            '• Tahanan stok dilepas; voucher & poin dikembalikan ke pembeli.\n'
-            '• Pembeli langsung dikabari pesanannya dibatalkan.\n'
-            '• Pesanan batal TIDAK BISA dihidupkan lagi.',
-            style: const TextStyle(fontSize: 13.5),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Kembali')),
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Batalkan pesanan')),
-          ],
-        ),
-      );
-      return ok == true;
-    }
+    final ketCtl = TextEditingController();
     final kodeCtl = TextEditingController();
+    String? alasan;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) {
         final m = ctx.mas;
         return StatefulBuilder(
           builder: (ctx, setLocal) {
-            final cocok = kodeCtl.text.trim().toUpperCase() == _code.toUpperCase();
+            final ketCukup = alasan != 'lainnya' ||
+                ketCtl.text.trim().replaceAll(RegExp(r'\s+'), ' ').length >= 5;
+            final cocok = !lunas ||
+                kodeCtl.text.trim().toUpperCase() == _code.toUpperCase();
             return AlertDialog(
-              title: const Text('Batalkan pesanan LUNAS?', style: TextStyle(fontSize: 16)),
+              title: Text(lunas ? 'Batalkan pesanan LUNAS?' : 'Batalkan pesanan?',
+                  style: const TextStyle(fontSize: 16)),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Pesanan $_code sudah LUNAS ($total)'
-                      '${o?.status == 'dikirim' ? ' dan barangnya SUDAH DIKIRIM' : ''}. '
-                      'Membatalkannya berarti uang HARUS dikembalikan ke pembeli '
-                      '(transfer manual) — pesanan ditandai perlu refund dan tidak '
-                      'bisa dihidupkan lagi.',
-                      style: TextStyle(fontSize: 12.5, color: m.danger600),
+                      lunas
+                          ? 'Pesanan $_code sudah LUNAS ($total)'
+                              '${o?.status == 'dikirim' ? ' dan barangnya SUDAH DIKIRIM' : ''}. '
+                              'Uang HARUS dikembalikan ke pembeli (transfer manual) — '
+                              'pesanan ditandai perlu refund, retur yang masih berjalan '
+                              'ditutup, dan tidak bisa dihidupkan lagi.'
+                          : 'Batalkan $_code ($total)? Tagihan Midtrans pembeli DITUTUP, '
+                              'tahanan stok dilepas, voucher & poin dikembalikan. Pesanan '
+                              'batal TIDAK BISA dihidupkan lagi.',
+                      style: TextStyle(
+                          fontSize: 12.5, color: lunas ? m.danger600 : m.ink600),
                     ),
                     const SizedBox(height: 10),
-                    Text('Ketik ulang kode $_code untuk membatalkan',
+                    Text('Alasan pembatalan (dikirim ke pembeli)',
                         style: TextStyle(fontSize: 12, color: m.ink600)),
                     const SizedBox(height: 5),
+                    Wrap(spacing: 6, runSpacing: 6, children: [
+                      for (final a in _alasanBatal)
+                        ChoiceChip(
+                          label: Text(a.$2, style: const TextStyle(fontSize: 12.5)),
+                          selected: alasan == a.$1,
+                          onSelected: (_) => setLocal(() => alasan = a.$1),
+                        ),
+                    ]),
+                    const SizedBox(height: 8),
                     MasInput(
-                      controller: kodeCtl,
-                      hint: _code,
-                      mono: true,
+                      controller: ketCtl,
+                      hint: alasan == 'lainnya'
+                          ? 'Keterangan untuk pembeli (wajib)'
+                          : 'Keterangan untuk pembeli (opsional)',
                       height: 40,
                       onChanged: (_) => setLocal(() {}),
                     ),
+                    if (lunas) ...[
+                      const SizedBox(height: 10),
+                      Text('Ketik ulang kode $_code untuk membatalkan',
+                          style: TextStyle(fontSize: 12, color: m.ink600)),
+                      const SizedBox(height: 5),
+                      MasInput(
+                        controller: kodeCtl,
+                        hint: _code,
+                        mono: true,
+                        height: 40,
+                        onChanged: (_) => setLocal(() {}),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -506,7 +544,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     onPressed: () => Navigator.pop(ctx, false),
                     child: const Text('Kembali')),
                 TextButton(
-                  onPressed: cocok ? () => Navigator.pop(ctx, true) : null,
+                  onPressed: alasan != null && ketCukup && cocok
+                      ? () => Navigator.pop(ctx, true)
+                      : null,
                   child: const Text('Batalkan pesanan'),
                 ),
               ],
@@ -515,8 +555,116 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         );
       },
     );
+    final ket = ketCtl.text.trim();
+    ketCtl.dispose();
     kodeCtl.dispose();
-    return ok == true;
+    final kode = alasan;
+    if (ok != true || kode == null) return null;
+    return (kode, ket);
+  }
+
+  /// "Refund sudah dibayar" (T-6, padanan web): nominal + nomor referensi
+  /// transfer → tanda perlu refund ditutup, pembeli dikabari.
+  Future<void> _refundDibayar() async {
+    final nav = AppNav.of(context);
+    final o = _order;
+    if (o == null) return;
+    final jumlahCtl = TextEditingController(
+        text: o.saranRefund > 0 ? '${o.saranRefund}' : '');
+    final refCtl = TextEditingController();
+    final ketCtl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final m = ctx.mas;
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            final n = int.tryParse(jumlahCtl.text.replaceAll(RegExp(r'\D'), '')) ?? 0;
+            final sah = n > 0 &&
+                refCtl.text.trim().replaceAll(RegExp(r'\s+'), ' ').length >= 4;
+            return AlertDialog(
+              title: const Text('Refund sudah dibayar', style: TextStyle(fontSize: 16)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Catat HANYA setelah transfernya benar-benar berhasil. Tanda '
+                      '"perlu refund" ditutup (admin lain tak akan mentransfer lagi) '
+                      'dan pembeli dikabari dananya sudah dikembalikan.',
+                      style: TextStyle(fontSize: 12.5, color: m.warn600),
+                    ),
+                    const SizedBox(height: 10),
+                    Text('Nominal ditransfer${n > 0 ? ' (${formatRupiah(n)})' : ''}',
+                        style: TextStyle(fontSize: 12, color: m.ink600)),
+                    const SizedBox(height: 5),
+                    MasInput(
+                      controller: jumlahCtl,
+                      hint: 'mis. 1160000',
+                      mono: true,
+                      height: 40,
+                      keyboardType: TextInputType.number,
+                      onChanged: (_) => setLocal(() {}),
+                    ),
+                    const SizedBox(height: 8),
+                    Text('Nomor referensi transfer (bank + nomor)',
+                        style: TextStyle(fontSize: 12, color: m.ink600)),
+                    const SizedBox(height: 5),
+                    MasInput(
+                      controller: refCtl,
+                      hint: 'mis. BCA 28/09 ref 123456',
+                      height: 40,
+                      onChanged: (_) => setLocal(() {}),
+                    ),
+                    const SizedBox(height: 8),
+                    MasInput(
+                      controller: ketCtl,
+                      hint: 'Keterangan (opsional)',
+                      height: 40,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Batal')),
+                TextButton(
+                  onPressed: sah ? () => Navigator.pop(ctx, true) : null,
+                  child: const Text('Catat refund dibayar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    final jumlah = int.tryParse(jumlahCtl.text.replaceAll(RegExp(r'\D'), '')) ?? 0;
+    final ref = refCtl.text.trim();
+    final ket = ketCtl.text.trim();
+    jumlahCtl.dispose();
+    refCtl.dispose();
+    ketCtl.dispose();
+    if (ok != true || !mounted) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ApiService.adminRefundDibayar(_code, jumlah, ref, ket);
+      if (!mounted) return;
+      setState(() => _busy = false);
+      nav.toast('Refund dicatat sudah dibayar — pembeli dikabari.');
+      await _load();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _busy = false;
+      });
+    }
   }
 
   /// Lunasi MANUAL (audit 2026-09-28 T-4) — padanan web: bukti pembayaran
@@ -732,9 +880,32 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
           // Pembayaran bermasalah (mis. dana masuk setelah pesanan batal →
           // perlu refund manual). Ditaruh paling atas: ini butuh tindakan.
-          if (o.paymentNote != null && o.paymentNote!.isNotEmpty) ...[
-            _Alert('⚠️ Pembayaran perlu ditindaklanjuti. ${o.paymentNote}',
+          // T-6: hanya catatan yang MASIH perlu tindakan; refund pesanan
+          // ditutup lewat "Refund sudah dibayar".
+          if (o.catatanTerbuka.isNotEmpty) ...[
+            _Alert('⚠️ Pembayaran perlu ditindaklanjuti.\n• '
+                '${o.catatanTerbuka.join('\n• ')}',
                 tone: MasPillTone.warn),
+            if (o.perluRefund) ...[
+              const SizedBox(height: 8),
+              MasButton(
+                label: 'Refund sudah dibayar…',
+                primary: false,
+                expand: true,
+                height: 40,
+                loading: _busy,
+                onTap: _busy ? null : _refundDibayar,
+              ),
+            ],
+            const SizedBox(height: 14),
+          ],
+          if (o.status == 'batal' && o.alasanBatalLabel != null) ...[
+            _Alert(
+                'Alasan batal: ${o.alasanBatalLabel}'
+                '${o.alasanBatalKet != null ? ' — ${o.alasanBatalKet}' : ''}'
+                '${o.alasanBatalOleh != null ? '\n(oleh ${o.alasanBatalOleh}'
+                    '${o.alasanBatalWaktu != null ? ', ${o.alasanBatalWaktu} UTC' : ''})' : ''}',
+                tone: MasPillTone.danger),
             const SizedBox(height: 14),
           ],
 
