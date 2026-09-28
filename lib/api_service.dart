@@ -1953,6 +1953,19 @@ class ApiService {
         body: {'catatan': catatan},
       );
 
+  /// Tindakan manual di Accurate sudah dikerjakan (audit S-5/S-21) — padanan
+  /// web `adminAccurateBeres`. Pesanan batal: keterangan wajib (>= 10 karakter);
+  /// pesanan lunas tanpa penawaran: nomor dokumen yang dibuat manual wajib.
+  static Future<void> adminAccurateBeres(String code,
+          {String dokumen = '', String keterangan = ''}) =>
+      _Api.post(
+        '/api/admin/orders/${Uri.encodeComponent(code)}/accurate-beres',
+        body: {
+          'dokumen': dokumen.isEmpty ? null : dokumen,
+          'keterangan': keterangan.isEmpty ? null : keterangan,
+        },
+      );
+
   /// Lepas tahanan kirim pesanan yang dananya ditarik (audit 2026-09-28 T-5)
   /// — padanan web `adminLepasTahan`. Alasan wajib (>= 10 karakter).
   static Future<void> adminLepasTahan(String code, String alasan) => _Api.post(

@@ -1471,7 +1471,7 @@ class PesananBermasalah {
   static const kunci = [
     'uang_perlu_dicek', 'kendala_gudang', 'bayar_macet',
     'belum_diambil', 'lunas_belum_dikirim', 'penawaran_gagal', 'retur_accurate',
-    'kirim_lama',
+    'kirim_lama', 'accurate_batal',
   ];
 
   int get jumlah => daftar.values.fold(0, (n, l) => n + l.length);
@@ -1658,6 +1658,11 @@ class OrderDetail extends OrderSummary {
   final String? penawaranNumber;
   final String? penawaranNote;
 
+  /// Audit S-5/S-21 (admin): tindakan manual di Accurate yang masih ditunggu —
+  /// pesanan batal yang penawarannya masih hidup / pesanan lunas tanpa penawaran.
+  final bool accuratePerluTutup;
+  final bool penawaranPerluManual;
+
   /// Hanya detail pesanan CABANG — identitas pengirim di surat jalan & label paket.
   final String gudangFisik;
   final String gudangFisikPic;
@@ -1744,6 +1749,8 @@ class OrderDetail extends OrderSummary {
     this.penawaranStatus,
     this.penawaranNumber,
     this.penawaranNote,
+    this.accuratePerluTutup = false,
+    this.penawaranPerluManual = false,
     this.gudangFisik = '',
     this.gudangFisikPic = '',
     this.gudangFisikPostal = '',
@@ -1823,6 +1830,8 @@ class OrderDetail extends OrderSummary {
         penawaranStatus: _sOrNull(j['penawaran_status']),
         penawaranNumber: _sOrNull(j['penawaran_number']),
         penawaranNote: _sOrNull(j['penawaran_note']),
+        accuratePerluTutup: _b(j['accurate_perlu_tutup']),
+        penawaranPerluManual: _b(j['penawaran_perlu_manual']),
         gudangFisik: _s(j['gudang_fisik']),
         gudangFisikPic: _s(j['gudang_fisik_pic']),
         gudangFisikPostal: _s(j['gudang_fisik_postal']),
