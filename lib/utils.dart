@@ -92,3 +92,9 @@ String stockLabel(int stok) {
   if (stok <= 5) return 'Menipis';
   return 'Tersedia';
 }
+
+/// Keterangan di bawah harga etalase & detail part (audit 2026-09-28 S-18):
+/// harga katalog BELUM termasuk PPN — PPN 12% (DPP 11/12) ditambahkan saat
+/// checkout. Tanpa ini pembeli kaget total checkout lebih besar dari harga
+/// yang dipajang. Paritas web `KET_HARGA_BELUM_PPN` (lib/order-ui.ts).
+const kKetHargaBelumPpn = 'Belum termasuk PPN 12%';

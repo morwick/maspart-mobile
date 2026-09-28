@@ -1198,6 +1198,11 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
               ]),
               const SizedBox(height: 8),
               Text(_hargaStr, style: masMono(size: 17, weight: FontWeight.w600, color: m.brand700)),
+              // S-18: harga katalog = SEBELUM PPN; PPN ditambahkan di checkout.
+              if (hasPrice(_hargaStr)) ...[
+                const SizedBox(height: 3),
+                Text(kKetHargaBelumPpn, style: TextStyle(fontSize: 11, color: m.ink400)),
+              ],
             ]),
           ),
         ),

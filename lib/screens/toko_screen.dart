@@ -810,6 +810,9 @@ class _ProductCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         color: m.brand700,
                       )),
+                  // S-18: harga etalase = SEBELUM PPN (paritas web).
+                  Text(kKetHargaBelumPpn,
+                      style: TextStyle(fontSize: 10, color: m.ink400)),
                   // Baris ala Shopee: ★ rata-rata · terjual · stok.
                   Wrap(
                     spacing: 4,

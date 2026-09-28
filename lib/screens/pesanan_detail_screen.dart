@@ -47,6 +47,11 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
   String? _senderPlace;
   bool _checking = false;
 
+  /// Galat cek status pembayaran (rate-limit, gateway, koneksi) — dulu
+  /// ditelan diam-diam sehingga pembeli mengira pembayarannya hilang (audit
+  /// 2026-09-28 KL-11). Hilang lagi begitu cek berikutnya berhasil.
+  String? _galatBayar;
+
   /// Perjalanan paket dari kurir — hanya ada setelah admin mengisi resi.
   TrackingResult? _track;
   bool _melacak = false;
@@ -165,19 +170,41 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
     if (outcome == SnapOutcome.gagal) {
       setState(() => _error = 'Pembayaran dibatalkan atau gagal. Coba lagi.');
     }
-    // Apa pun hasilnya, tanyakan ke server — itulah kebenarannya.
-    await _checkPayment();
+    // Apa pun hasilnya, tanyakan ke server — itulah kebenarannya. Snap bilang
+    // "selesai" tapi server belum melihat uangnya → beri tahu pembeli.
+    await _checkPayment(manual: outcome == SnapOutcome.selesai);
     await _load();
   }
 
-  Future<void> _checkPayment() async {
+  /// Tanya status pembayaran ke server. [manual] = pembeli sendiri yang
+  /// meminta (tombol Cek Status / kembali dari halaman bayar) → selalu diberi
+  /// umpan balik, termasuk "belum terdeteksi". Polling otomatis cukup diam
+  /// bila tak ada yang berubah.
+  Future<void> _checkPayment({bool manual = false}) async {
     if (_checking) return;
     setState(() => _checking = true);
     try {
       final r = await ApiService.paymentStatus(_code);
-      if (r.paid && mounted) await _load();
-    } on ApiException {
-      /* diamkan — polling berikutnya mencoba lagi */
+      if (!mounted) return;
+      // KL-11: dulu hanya dimuat ulang saat `paid` — pesanan yang auto-batal
+      // (kedaluwarsa) tetap tampil "Menunggu Pembayaran" & polling jalan terus.
+      final berubah = r.status.isNotEmpty && r.status != _order?.status;
+      if (r.paid || berubah) await _load();
+      if (!mounted) return;
+      final err = r.error;
+      setState(() => _galatBayar = (err != null && err.isNotEmpty) ? err : null);
+      if (manual && !r.paid && (err == null || err.isEmpty)) {
+        AppNav.of(context).toast(
+            'Pembayaran belum terdeteksi — tunggu beberapa saat lalu cek lagi.');
+      }
+    } on ApiException catch (e) {
+      // Polling berikutnya tetap mencoba; galatnya ditampilkan supaya pembeli
+      // tahu status belum bisa dicek (mis. koneksi / terlalu sering).
+      if (mounted) setState(() => _galatBayar = e.message);
+    } catch (_) {
+      if (mounted && manual) {
+        setState(() => _galatBayar = 'Status pembayaran gagal dicek. Coba lagi.');
+      }
     } finally {
       if (mounted) setState(() => _checking = false);
     }
@@ -276,7 +303,15 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
       await action();
       await _load();
     } on ApiException catch (e) {
+      // Galat jaringan sudah berpesan jelas dari ApiService ("Koneksi terputus
+      // — periksa daftar Pesanan…"): aksinya bisa saja sudah tercatat, jadi
+      // pembeli diminta memeriksa (tarik untuk memuat ulang), bukan menekan
+      // ulang membabi buta (audit 2026-09-28 KL-5).
       if (mounted) setState(() => _error = e.message.isNotEmpty ? e.message : gagal);
+    } catch (_) {
+      // Apa pun selain ApiException (mis. gagal membaca file bukti) tak boleh
+      // lolos tanpa pesan.
+      if (mounted) setState(() => _error = gagal);
     } finally {
       if (mounted) setState(() => _busy = null);
     }
@@ -1009,10 +1044,15 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                   height: 38,
                   expand: true,
                   loading: _checking,
-                  onTap: _checkPayment,
+                  onTap: () => _checkPayment(manual: true),
                 ),
                 const SizedBox(height: 10),
                 _alert(m, 'Status diperbarui otomatis setelah pembayaran masuk.'),
+              ],
+
+              if (_galatBayar != null) ...[
+                const SizedBox(height: 10),
+                _alert(m, _galatBayar!, tone: MasPillTone.warn),
               ],
 
               if (o.status == 'menunggu_verifikasi')

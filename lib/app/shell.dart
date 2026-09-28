@@ -100,6 +100,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool _updateDismissed = false; // user menutup banner
   String _downloadUrl = 'https://maspart.tech/download';
 
+  /// Pesan server saat request mana pun dibalas 426 (versi di bawah minimum).
+  /// Non-null = halaman Perbarui WAJIB, apa pun kata /api/app/meta — server
+  /// sudah menolak versi ini, jadi layar lain pasti gagal (audit 2026-09-28 KL-3).
+  String? _pesanDitolak = ApiService.perluPerbarui.value;
+
   /// Versi terpasang, untuk kaki drawer. Kosong = belum terbaca.
   String _appVersion = '';
 
@@ -125,6 +130,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _cart.addListener(_onCartChanged);
     Push.tautanTertunda.addListener(_bukaTautanPush);
+    ApiService.perluPerbarui.addListener(_onVersiDitolak);
+    if (_pesanDitolak != null) _forceUpdate = true;
     _loadCachedConfig();
     _loadSession();
     PackageInfo.fromPlatform().then((i) {
@@ -211,13 +218,28 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       installed = info.version; // versionName, mis. "2.1.4"
     } catch (_) {}
     final v = meta.version;
-    if (!mounted || v.latestName.isEmpty || installed.isEmpty) return;
+    if (!mounted) return;
+    // URL unduh tetap dipakai walau nama versi kosong — halaman Perbarui dari
+    // 426 butuh tautan yang benar.
+    if (v.downloadUrl.isNotEmpty) setState(() => _downloadUrl = v.downloadUrl);
+    if (v.latestName.isEmpty || installed.isEmpty) return;
     setState(() {
-      _downloadUrl = v.downloadUrl;
       _updateAvailable = compareVersion(v.latestName, installed) > 0;
-      _forceUpdate = v.force &&
-          v.minName.isNotEmpty &&
-          compareVersion(installed, v.minName) < 0;
+      // 426 dari server MENANG atas meta (yang bisa basi / tanpa force).
+      _forceUpdate = _pesanDitolak != null ||
+          (v.force &&
+              v.minName.isNotEmpty &&
+              compareVersion(installed, v.minName) < 0);
+    });
+  }
+
+  /// Server membalas 426 pada request mana pun → halaman Perbarui wajib.
+  void _onVersiDitolak() {
+    final pesan = ApiService.perluPerbarui.value;
+    if (!mounted || pesan == null) return;
+    setState(() {
+      _pesanDitolak = pesan;
+      _forceUpdate = true;
     });
   }
 
@@ -234,6 +256,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _cart.removeListener(_onCartChanged);
     Push.tautanTertunda.removeListener(_bukaTautanPush);
+    ApiService.perluPerbarui.removeListener(_onVersiDitolak);
     super.dispose();
   }
 
@@ -743,8 +766,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     dismissible
                         ? 'Ada pembaruan MasPart dengan fitur & perbaikan terbaru. '
                             'Perbarui sekarang untuk pengalaman terbaik.'
-                        : 'Versi aplikasi Anda sudah tidak didukung lagi. '
-                            'Perbarui untuk melanjutkan memakai aplikasi.',
+                        // Pesan 426 dari server (bila ada) lebih spesifik.
+                        : _pesanDitolak ??
+                            'Versi aplikasi Anda sudah tidak didukung lagi. '
+                                'Perbarui untuk melanjutkan memakai aplikasi.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                         fontSize: 14, height: 1.55, color: Colors.white.withValues(alpha: 0.85)),

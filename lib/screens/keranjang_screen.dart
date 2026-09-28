@@ -83,6 +83,13 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   bool _busy = false;
   String? _error;
 
+  /// S-16 (audit 2026-09-28): kunci idempotensi percobaan checkout terakhir
+  /// yang jawabannya TAK PASTI (koneksi putus / 5xx — server bisa saja sudah
+  /// membuat pesanannya). Dipakai ulang hanya bila isi pesanannya persis sama,
+  /// sehingga server mengembalikan pesanan yang sama, bukan pesanan & VA kedua.
+  String? _idemKey;
+  String? _idemSig;
+
   Timer? _ongkirDebounce;
   Timer? _pickupDebounce;
 
@@ -575,6 +582,21 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     }
     final tampil = _totalTampil;
 
+    // Kunci lama hanya untuk permintaan IDENTIK setelah percobaan tanpa jawaban
+    // pasti; selain itu percobaan baru = kunci baru (paritas web).
+    final sig = [
+      for (final i in beli) '${i.partNumber}x${i.qty}',
+      _noteCtl.text.trim(), _ambilSendiri, _rate?.courier, _rate?.service,
+      _ongkir, _poinPakai, _vKode.join(','), tampil,
+      _nameCtl.text.trim(), _phoneCtl.text.trim(), _addressCtl.text.trim(),
+      _postalCtl.text.trim(), _lat, _lon,
+    ].join('|');
+    final idemKey = (_idemKey != null && _idemSig == sig)
+        ? _idemKey!
+        : ApiService.kunciIdempoten();
+    _idemKey = null;
+    _idemSig = null;
+
     setState(() {
       _busy = true;
       _error = null;
@@ -582,6 +604,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
 
     try {
       final res = await ApiService.createOrder(
+        idempotencyKey: idemKey,
         items: [
           for (final i in beli)
             CartLine(partNumber: i.partNumber, qty: i.qty, name: i.name),
@@ -589,7 +612,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         note: _noteCtl.text.trim(),
         courier: _ambilSendiri ? null : _rate?.courier,
         courierService: _ambilSendiri ? null : _rate?.service,
-        shippingCost: _ongkir.toDouble(),
+        shippingCost: _ongkir,
         pointRedeem: _poinPakai,
         voucherCodes: _vKode,
         expectedTotal: tampil,
@@ -633,7 +656,20 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       });
     } on ApiException catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.message);
+      // Tanpa jawaban pasti → simpan kunci untuk klik ulang yang sama.
+      if (e.isJaringan || e.statusCode >= 500) {
+        _idemKey = idemKey;
+        _idemSig = sig;
+      }
+      setState(() => _error = e.isJaringan
+          ? 'Koneksi terputus sebelum pesanan terkonfirmasi — pesanan mungkin '
+              'sudah terbuat. Periksa Pesanan Saya dulu sebelum menekan Proses '
+              'Pembelian lagi.'
+          : e.message);
+      if (e.isJaringan) {
+        await _cariPesananTerbuat(tampil, beli.map((i) => i.partNumber).toList());
+        return;
+      }
       if (e.statusCode == 409) {
         // T-13: tagihan berubah (harga / ongkir / voucher / poin) — pesanan
         // BELUM dibuat. Muat ulang semua angka supaya pembeli melihat total baru
@@ -644,6 +680,59 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// S-16: setelah koneksi putus, cari pesanan BELUM DIBAYAR yang baru saja
+  /// terbuat dengan total yang sama → tawarkan membukanya, supaya pembeli tak
+  /// memesan (dan membayar) dua kali. Gagal mencari → cukup pesan galatnya.
+  Future<void> _cariPesananTerbuat(int total, List<String> pnDipesan) async {
+    List<OrderSummary> daftar;
+    try {
+      daftar = await ApiService.myOrders();
+    } catch (_) {
+      return;
+    }
+    final batas = DateTime.now().toUtc().subtract(const Duration(minutes: 30));
+    OrderSummary? calon;
+    for (final o in daftar) {
+      final dibuat = DateTime.tryParse(o.createdAt)?.toUtc();
+      if (o.status == 'menunggu_pembayaran' &&
+          o.total.round() == total &&
+          dibuat != null &&
+          dibuat.isAfter(batas)) {
+        calon = o;
+        break;
+      }
+    }
+    if (calon == null || !mounted) return;
+    final kode = calon.orderCode;
+    final buka = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Pesanan sudah terbuat'),
+        content: Text('Pesanan $kode senilai ${formatRupiah(total)} ternyata sudah '
+            'tercatat sebelum koneksi terputus. Buka pesanan itu untuk membayar — '
+            'jangan memesan lagi supaya tidak tertagih dua kali.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Nanti')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Buka Pesanan')),
+        ],
+      ),
+    );
+    if (buka != true || !mounted) return;
+    _idemKey = null;
+    _idemSig = null;
+    if (_lintasGudang) {
+      await _cart.removeAll(pnDipesan);
+    } else {
+      await _cart.clear();
+    }
+    if (!mounted) return;
+    AppNav.of(context).go(MasScreen.pesananDetail, part: {'order_code': kode});
   }
 
   Future<void> _openMap() async {
