@@ -102,3 +102,50 @@ Future<String?> tanyaResiKirim(BuildContext context, String kode) async {
   ctl.dispose();
   return ok == true ? resi : null;
 }
+
+/// S-19: admin menyelesaikan pesanan Ambil di Toko TANPA serah terima gudang
+/// (tanpa kode ambil & foto) — alasan wajib (min. 10 karakter), dicatat di
+/// pesanan. Null = dibatalkan. Padanan web: prompt alasan di admin/orders.
+Future<String?> tanyaAlasanSelesaiPickup(BuildContext context, String kode) async {
+  final ctl = TextEditingController();
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setLocal) => AlertDialog(
+        title: const Text('Selesai tanpa serah terima',
+            style: TextStyle(fontSize: 16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Pesanan $kode biasanya diselesaikan gudang lewat "Serahkan & '
+              'Selesai" (kode ambil + foto pengambil). Tulis alasan menyelesaikan '
+              'dari sini — dicatat di pesanan.',
+              style: const TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 10),
+            MasInput(
+              controller: ctl,
+              hint: 'Alasan (min. 10 karakter)',
+              maxLines: 3,
+              onChanged: (_) => setLocal(() {}),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Batal')),
+          TextButton(
+            onPressed: ctl.text.trim().length >= 10 ? () => Navigator.pop(ctx, true) : null,
+            child: const Text('Lanjut'),
+          ),
+        ],
+      ),
+    ),
+  );
+  final alasan = ctl.text.trim();
+  ctl.dispose();
+  return ok == true ? alasan : null;
+}

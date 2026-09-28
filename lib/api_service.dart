@@ -1751,10 +1751,17 @@ class ApiService {
   }
 
   /// T-11: `trackingNo` = resi saat admin menandai 'dikirim' pesanan kurir (wajib).
-  static Future<void> setOrderStatus(String code, String status, {String? trackingNo}) =>
+  /// S-19: `alasanSelesai` = alasan admin menyelesaikan pesanan Ambil di Toko
+  /// tanpa serah terima gudang (wajib, min. 10 karakter — dicatat di pesanan).
+  static Future<void> setOrderStatus(String code, String status,
+          {String? trackingNo, String? alasanSelesai}) =>
       _Api.put(
         '/api/admin/orders/${Uri.encodeComponent(code)}/status',
-        body: {'status': status, if (trackingNo != null) 'tracking_no': trackingNo},
+        body: {
+          'status': status,
+          if (trackingNo != null) 'tracking_no': trackingNo,
+          if (alasanSelesai != null) 'alasan_selesai': alasanSelesai,
+        },
       );
 
   /// T-11: koreksi resi pesanan yang SUDAH dikirim — tercatat & pembeli
