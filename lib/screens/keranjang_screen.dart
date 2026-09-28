@@ -314,8 +314,17 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         // checkout ditolak server dengan alasan yang tak terlihat di layar.
         if (!p.tersedia) _ambilSendiri = false;
       });
-    } on ApiException {
-      if (mounted) setState(() => _pickup = null);
+    } catch (_) {
+      // R-6 (KL-10, paritas web): info pickup gagal dimuat → pilihan Ambil di
+      // Toko disembunyikan, jadi modenya WAJIB kembali ke Kirim — dulu hanya
+      // `_pickup` yang dikosongkan dan mode ambil sendiri terkunci tanpa tombol
+      // untuk keluar (checkout lalu ditolak server).
+      if (mounted) {
+        setState(() {
+          _pickup = null;
+          _ambilSendiri = false;
+        });
+      }
     }
   }
 
@@ -567,6 +576,18 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     if (!_gatewayOn) {
       setState(() =>
           _error = 'Pembayaran online (VA/QRIS) belum aktif. Hubungi admin.');
+      return;
+    }
+
+    // R-6: jaring terakhir — mode Ambil di Toko tanpa info pickup yang
+    // mengizinkannya (pilihannya tak terlihat di layar) kembali ke Kirim.
+    if (_ambilSendiri && !(_pickup?.tersedia ?? false)) {
+      setState(() {
+        _ambilSendiri = false;
+        _error = 'Ambil di Toko tidak tersedia untuk alamat ini — pesanan akan '
+            'dikirim. Pilih kurir dulu.';
+      });
+      _scheduleOngkir();
       return;
     }
 
