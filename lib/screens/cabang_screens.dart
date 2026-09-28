@@ -443,6 +443,9 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
       // periksa daftar Pesanan…": statusnya bisa saja sudah tersimpan, jadi
       // petugas memeriksa dulu sebelum menekan ulang (audit 2026-09-28 KL-5).
       if (mounted) setState(() => _error = e.message);
+      // QA2-G3: 409 = status berubah di sela (pesanan DIBATALKAN / dana
+      // ditarik) → tampilkan status sebenarnya; pesan galat tetap terlihat.
+      if (mounted && e.statusCode == 409) await _load();
     } catch (_) {
       if (mounted) {
         setState(() => _error = 'Status gagal diubah. Muat ulang pesanan lalu coba lagi.');
@@ -566,10 +569,17 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
       return;
     }
 
+    // KL-6 (paritas web): 'selesai' menutup pesanan & tak bisa diurungkan.
     final ok = await _confirm(
       'Tandai ${orderStatusLabel(next, pickup: o.pickup)}',
-      'Ubah status pesanan $_code menjadi '
-          '"${orderStatusLabel(next, pickup: o.pickup)}"?',
+      next == 'selesai' && !o.pickup
+          ? 'Tandai $_code SELESAI?\n\n'
+              'Lakukan HANYA bila barang terbukti sudah diterima pembeli (cek lacak resi).\n'
+              '• Poin pembeli dari pesanan ini dicairkan.\n'
+              '• Batas waktu pengajuan retur mulai berjalan.\n'
+              '• Status tidak bisa dikembalikan dari aplikasi.'
+          : 'Ubah status pesanan $_code menjadi '
+              '"${orderStatusLabel(next, pickup: o.pickup)}"?',
     );
     if (ok != true) return;
     await _setStatus(next);
@@ -1392,12 +1402,29 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
               if (pickup)
                 ..._serahTerimaForm(m, o)
               else ...[
-                MasButton(
-                  label: _busy ? 'Memproses…' : '✓ Tandai Selesai',
-                  expand: true,
-                  loading: _busy,
-                  onTap: _busy ? null : () => _lanjutkan(o),
-                ),
+                // QA2-G1: pembeli belum terima / paket hilang / resi tak dikenal →
+                // hanya admin (dengan alasan) yang boleh menutupnya.
+                if ((o.tahanSelesai ?? '').isNotEmpty)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: m.danger50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '${o.tahanSelesai} Pesanan ini hanya bisa ditandai selesai '
+                      'oleh admin setelah dicek.',
+                      style: TextStyle(fontSize: 12.5, color: m.danger600, height: 1.4),
+                    ),
+                  )
+                else
+                  MasButton(
+                    label: _busy ? 'Memproses…' : '✓ Tandai Selesai',
+                    expand: true,
+                    loading: _busy,
+                    onTap: _busy ? null : () => _lanjutkan(o),
+                  ),
                 const SizedBox(height: 6),
                 // T-11: resi salah ketik — tercatat & pembeli dikabari.
                 Center(

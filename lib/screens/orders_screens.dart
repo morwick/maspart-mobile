@@ -595,6 +595,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     if (status == 'selesai' && o != null && o.pickup) {
       alasanSelesai = await tanyaAlasanSelesaiPickup(context, _code);
       if (alasanSelesai == null || !mounted) return;
+    } else if (status == 'selesai' && o != null && (o.tahanSelesai ?? '').isNotEmpty) {
+      // QA2-G1: kendala pengiriman / resi tak dikenal → selesai hanya dengan alasan.
+      alasanSelesai = await tanyaAlasanSelesaiPickup(context, _code,
+          judul: 'Pesanan tertahan',
+          pesan: '${o.tahanSelesai} Tetap tandai $_code selesai? Tulis alasannya '
+              '(mis. paket sudah diterima, dikonfirmasi pembeli lewat chat) — dicatat '
+              'di pesanan.');
+      if (alasanSelesai == null || !mounted) return;
     }
     await _jalankanStatus(nav, status,
         trackingNo: resi, alasanSelesai: alasanSelesai, abaikanKendala: abaikan);

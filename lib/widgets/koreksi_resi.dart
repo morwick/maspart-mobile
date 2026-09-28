@@ -153,22 +153,26 @@ Future<String?> tanyaAbaikanKendala(
   return ok == true ? alasan : null;
 }
 
-Future<String?> tanyaAlasanSelesaiPickup(BuildContext context, String kode) async {
+/// [judul]/[pesan] opsional — dipakai juga untuk pesanan kurir yang tertahan
+/// kendala pengiriman / resi tak dikenal (QA2-G1).
+Future<String?> tanyaAlasanSelesaiPickup(BuildContext context, String kode,
+    {String? judul, String? pesan}) async {
   final ctl = TextEditingController();
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => StatefulBuilder(
       builder: (ctx, setLocal) => AlertDialog(
-        title: const Text('Selesai tanpa serah terima',
-            style: TextStyle(fontSize: 16)),
+        title: Text(judul ?? 'Selesai tanpa serah terima',
+            style: const TextStyle(fontSize: 16)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Pesanan $kode biasanya diselesaikan gudang lewat "Serahkan & '
-              'Selesai" (kode ambil + foto pengambil). Tulis alasan menyelesaikan '
-              'dari sini — dicatat di pesanan.',
+              pesan ??
+                  'Pesanan $kode biasanya diselesaikan gudang lewat "Serahkan & '
+                      'Selesai" (kode ambil + foto pengambil). Tulis alasan menyelesaikan '
+                      'dari sini — dicatat di pesanan.',
               style: const TextStyle(fontSize: 13),
             ),
             const SizedBox(height: 10),
