@@ -1453,10 +1453,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           // selesai otomatis sampai admin menutupnya).
           if ((o.kendalaNote ?? '').isNotEmpty &&
               (o.status == 'diproses' || o.kendalaKirim)) ...[
+            // R-7 (paritas web admin): waktu laporan + akibat membatalkan.
             _Alert(
                 '⚠️ ${o.kendalaKirim ? 'Kendala pengiriman' : 'Kendala dari gudang'}'
                 '${o.kendalaBy != null ? ' (${o.kendalaBy})' : ''}: ${o.kendalaNote}'
-                '${o.kendalaKirim ? '\nSelesai otomatis DITAHAN — cek paket ke ekspedisi.' : ''}',
+                '${(o.kendalaAt ?? '').isNotEmpty ? ' · ${fmtDate(o.kendalaAt)}' : ''}'
+                '${o.kendalaKirim ? '\nSelesai otomatis DITAHAN — cek paket ke ekspedisi; setelah beres, tutup kendalanya.' : ''}'
+                '${!o.kendalaKirim && o.status == 'diproses' ? '\nPesanan sudah lunas. Bila dibatalkan, pesanan otomatis ditandai perlu refund ke pembeli.' : ''}',
                 tone: MasPillTone.warn),
             if (o.kendalaKirim) ...[
               const SizedBox(height: 8),

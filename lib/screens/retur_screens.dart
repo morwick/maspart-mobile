@@ -286,7 +286,31 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
   bool _tanpaVideo = false;
   bool _kirim = false;
 
+  /// R-3 (audit 2026-09-28): perkiraan refund dari SERVER untuk (barang, qty) —
+  /// dulu harga × qty (tanpa PPN, tanpa potongan voucher/poin). Paritas web.
+  PerkiraanRefund? _perkiraan;
+  bool _perkiraanGagal = false;
+  String _perkiraanKunci = '';
+
   String get _code => '${widget.args['order_code'] ?? ''}';
+
+  Future<void> _muatPerkiraan(String pn, int qty) async {
+    final kunci = '$pn|$qty';
+    try {
+      final p = await ApiService.perkiraanRefund(_code, pn, qty);
+      if (!mounted || _perkiraanKunci != kunci) return;
+      setState(() {
+        _perkiraan = p;
+        _perkiraanGagal = false;
+      });
+    } catch (_) {
+      if (!mounted || _perkiraanKunci != kunci) return;
+      setState(() {
+        _perkiraan = null;
+        _perkiraanGagal = true;
+      });
+    }
+  }
 
   @override
   void initState() {
@@ -1092,6 +1116,19 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
   // ── 3. Solusi ──
   List<Widget> _langkahSolusi(MasColors m, ReturConfig cfg) {
     final item = _item;
+    if (_solusi == 'refund' && item != null) {
+      // Barang/qty berubah (pembeli kembali ke langkah 1) → hitung ulang.
+      final kunci = '${item.partNumber}|$_qty';
+      if (kunci != _perkiraanKunci) {
+        _perkiraanKunci = kunci;
+        _perkiraan = null;
+        _perkiraanGagal = false;
+        final pn = item.partNumber;
+        final qty = _qty;
+        WidgetsBinding.instance.addPostFrameCallback((_) => _muatPerkiraan(pn, qty));
+      }
+    }
+    final perkiraan = _perkiraan;
     return [
       _judul(m, 'Solusi yang Anda inginkan',
           'Keputusan akhir mengikuti hasil verifikasi & pemeriksaan gudang.'),
@@ -1109,18 +1146,32 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
       if (_solusi == 'refund' && item != null)
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text.rich(
-            TextSpan(children: [
-              const TextSpan(text: 'Perkiraan refund: '),
-              TextSpan(
-                  text: formatRupiah(item.price * _qty),
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
-              TextSpan(
-                  text: ' ($_qty × ${formatRupiah(item.price)}). Ongkir & potongan voucher/poin '
-                      'dihitung admin saat refund disetujui.'),
-            ]),
-            style: TextStyle(fontSize: 12.5, color: m.ink600, height: 1.4),
-          ),
+          child: perkiraan != null
+              ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text.rich(
+                    TextSpan(children: [
+                      const TextSpan(text: 'Perkiraan refund: '),
+                      TextSpan(
+                          text: formatRupiah(perkiraan.perkiraan),
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      TextSpan(text: ' untuk $_qty pcs.'),
+                    ]),
+                    style: TextStyle(fontSize: 12.5, color: m.ink600, height: 1.4),
+                  ),
+                  if (perkiraan.catatan.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(perkiraan.catatan,
+                          style: TextStyle(fontSize: 11.5, color: m.ink500, height: 1.4)),
+                    ),
+                ])
+              : Text(
+                  _perkiraanGagal
+                      ? 'Perkiraan refund belum bisa dihitung. Nilai refund (termasuk PPN, '
+                          'setelah potongan voucher/poin, tanpa ongkir) ditentukan admin.'
+                      : 'Menghitung perkiraan refund…',
+                  style: TextStyle(fontSize: 12.5, color: m.ink600, height: 1.4),
+                ),
         ),
     ];
   }

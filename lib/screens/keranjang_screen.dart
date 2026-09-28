@@ -83,6 +83,13 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   bool _busy = false;
   String? _error;
 
+  /// R-5 (KL-15, paritas web `kurirPilihan`): kurir + layanan yang DIPILIH
+  /// SENDIRI oleh pembeli. Hitung ulang tarif (ubah qty/alamat) dulu diam-diam
+  /// memindahkan pilihan ke yang termurah; kini dipertahankan selama masih
+  /// tersedia, dan bila hilang pembeli diberi tahu lewat [_kurirInfo].
+  ({String courier, String service, String nama})? _kurirPilihan;
+  String? _kurirInfo;
+
   /// S-16 (audit 2026-09-28): kunci idempotensi percobaan checkout terakhir
   /// yang jawabannya TAK PASTI (koneksi putus / 5xx — server bisa saja sudah
   /// membuat pesanannya). Dipakai ulang hanya bila isi pesanannya persis sama,
@@ -314,8 +321,17 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         // checkout ditolak server dengan alasan yang tak terlihat di layar.
         if (!p.tersedia) _ambilSendiri = false;
       });
-    } on ApiException {
-      if (mounted) setState(() => _pickup = null);
+    } catch (_) {
+      // R-6 (KL-10, paritas web): info pickup gagal dimuat → pilihan Ambil di
+      // Toko disembunyikan, jadi modenya WAJIB kembali ke Kirim — dulu hanya
+      // `_pickup` yang dikosongkan dan mode ambil sendiri terkunci tanpa tombol
+      // untuk keluar (checkout lalu ditolak server).
+      if (mounted) {
+        setState(() {
+          _pickup = null;
+          _ambilSendiri = false;
+        });
+      }
     }
   }
 
@@ -342,14 +358,29 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       );
       if (!mounted) return;
       final sorted = [...r.rates]..sort((a, b) => a.price.compareTo(b.price));
+      final pilihan = _kurirPilihan;
+      ShippingRate? sama;
+      if (pilihan != null) {
+        for (final x in r.rates) {
+          if (x.courier == pilihan.courier && x.service == pilihan.service) {
+            sama = x;
+            break;
+          }
+        }
+      }
       setState(() {
         _rateErr = r.error;
         _rates = r.rates;
         _kelompok = r.kelompok;
         _katPilih = null;
-        // Termurah jadi default supaya pembeli tak checkout tanpa kurir karena
-        // lupa memilih; dia tetap bebas mengganti.
-        _rate = sorted.isNotEmpty ? sorted.first : null;
+        // Kurir pilihan pembeli dipertahankan bila masih ada (R-5); selain itu
+        // termurah jadi default supaya pembeli tak checkout tanpa kurir karena
+        // lupa memilih — dia tetap bebas mengganti.
+        _rate = sama ?? (sorted.isNotEmpty ? sorted.first : null);
+        _kurirInfo = (pilihan != null && sama == null && sorted.isNotEmpty)
+            ? 'Kurir pilihan Anda (${pilihan.nama} · ${pilihan.service}) tidak '
+                'tersedia untuk alamat/berat ini — dipilih yang termurah.'
+            : null;
       });
     } on ApiException catch (e) {
       if (mounted) setState(() => _rateErr = e.message);
@@ -567,6 +598,18 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     if (!_gatewayOn) {
       setState(() =>
           _error = 'Pembayaran online (VA/QRIS) belum aktif. Hubungi admin.');
+      return;
+    }
+
+    // R-6: jaring terakhir — mode Ambil di Toko tanpa info pickup yang
+    // mengizinkannya (pilihannya tak terlihat di layar) kembali ke Kirim.
+    if (_ambilSendiri && !(_pickup?.tersedia ?? false)) {
+      setState(() {
+        _ambilSendiri = false;
+        _error = 'Ambil di Toko tidak tersedia untuk alamat ini — pesanan akan '
+            'dikirim. Pilih kurir dulu.';
+      });
+      _scheduleOngkir();
       return;
     }
 
@@ -1268,6 +1311,12 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
               style: TextStyle(fontSize: 11.5, color: m.ink500),
             ),
         ],
+        // R-5: kurir pilihan pembeli hilang setelah hitung ulang → beri tahu.
+        if (!_ambilSendiri && _kurirInfo != null) ...[
+          const SizedBox(height: 10),
+          Text('⚠️ $_kurirInfo',
+              style: TextStyle(fontSize: 12, color: m.warn600, height: 1.4)),
+        ],
         if (_rateErr != null) ...[
           const SizedBox(height: 10),
           _alert(m, _rateErr!),
@@ -1369,9 +1418,23 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     setState(() {
       _katPilih = kode;
       if (isi.isNotEmpty && isi.first.kategori != _rate?.kategori) {
-        _rate = isi.first;
+        _pilihRateTanpaSetState(isi.first);
       }
     });
+  }
+
+  /// Pembeli memilih kurir sendiri → diingat (R-5) supaya hitung ulang tarif
+  /// tak menggantinya diam-diam.
+  void _pilihRate(ShippingRate r) => setState(() => _pilihRateTanpaSetState(r));
+
+  void _pilihRateTanpaSetState(ShippingRate r) {
+    _rate = r;
+    _kurirPilihan = (
+      courier: r.courier,
+      service: r.service,
+      nama: r.courierName.isNotEmpty ? r.courierName : r.courier.toUpperCase(),
+    );
+    _kurirInfo = null;
   }
 
   static const _bulan = [
@@ -1449,7 +1512,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: GestureDetector(
-        onTap: () => setState(() => _rate = r),
+        onTap: () => _pilihRate(r),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(

@@ -1531,6 +1531,15 @@ class ApiService {
       ReturPesanan.fromJson(_Api._obj(
           await _Api.get('/api/orders/${Uri.encodeComponent(code)}/returns')));
 
+  /// Perkiraan refund dari server untuk form retur (R-3) — paritas web
+  /// `getPerkiraanRefund`. Galat (server lama 404, data tak terbaca 400) →
+  /// ApiException; layar menampilkan keterangan tanpa angka.
+  static Future<PerkiraanRefund> perkiraanRefund(
+          String code, String pn, int qty) async =>
+      PerkiraanRefund.fromJson(_Api._obj(await _Api.get(
+          '/api/orders/${Uri.encodeComponent(code)}/returns/perkiraan',
+          query: {'part_number': pn, 'qty': qty})));
+
   /// body = AjukanReturBody web: part_number, qty, reason, reason_detail,
   /// pn_dipesan, pn_diterima, description, requested_resolution,
   /// unboxing_video_url, video_meta {durasi?, ukuran?, direkam_at?, nama?},

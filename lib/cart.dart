@@ -35,7 +35,8 @@ class CartItem {
         name: '${j['name'] ?? ''}',
         harga: '${j['harga'] ?? ''}',
         berat: (j['berat'] as num?)?.toInt() ?? 0,
-        qty: (j['qty'] as num?)?.toInt() ?? 1,
+        // R-4: keranjang tersimpan lama bisa berisi 0 / negatif / pecahan.
+        qty: normQty(j['qty']),
       );
 
   Map<String, dynamic> toJson() => {
@@ -53,6 +54,26 @@ class CartItem {
         berat: berat,
         qty: qty ?? this.qty,
       );
+}
+
+/// Qty keranjang maksimum per barang — paritas web `QTY_MAKS` (lib/cart.ts).
+const kQtyMaks = 99999;
+
+/// Qty keranjang SELALU bilangan bulat 1..[kQtyMaks] (audit 2026-09-28 R-4 /
+/// KL-14, paritas web `normQty`): pecahan dibulatkan ke bawah; kosong/NaN/
+/// negatif/nol → 1; terlalu besar → [kQtyMaks].
+int normQty(Object? q) {
+  num? n;
+  if (q is num) {
+    n = q;
+  } else if (q != null) {
+    n = num.tryParse('$q'.trim());
+  }
+  if (n == null || n.isNaN) return 1;
+  if (n.isInfinite) return n > 0 ? kQtyMaks : 1;
+  final b = n.floor();
+  if (b < 1) return 1;
+  return b > kQtyMaks ? kQtyMaks : b;
 }
 
 /// Alamat penerima yang diingat antar-pesanan, supaya pembeli tak perlu
@@ -170,9 +191,9 @@ class CartStore extends ChangeNotifier {
   Future<void> add(CartItem item, {int qty = 1}) async {
     final i = _items.indexWhere((e) => e.partNumber == item.partNumber);
     if (i >= 0) {
-      _items[i] = _items[i].copyWith(qty: _items[i].qty + qty);
+      _items[i] = _items[i].copyWith(qty: normQty(_items[i].qty + qty));
     } else {
-      _items.add(item.copyWith(qty: qty));
+      _items.add(item.copyWith(qty: normQty(qty)));
     }
     await _save();
   }
@@ -183,10 +204,10 @@ class CartStore extends ChangeNotifier {
   Future<void> addMany(Iterable<CartItem> items) async {
     for (final item in items) {
       if (item.partNumber.isEmpty) continue;
-      final qty = item.qty < 1 ? 1 : item.qty;
+      final qty = normQty(item.qty);
       final i = _items.indexWhere((e) => e.partNumber == item.partNumber);
       if (i >= 0) {
-        _items[i] = _items[i].copyWith(qty: _items[i].qty + qty);
+        _items[i] = _items[i].copyWith(qty: normQty(_items[i].qty + qty));
       } else {
         _items.add(item.copyWith(qty: qty));
       }
@@ -197,7 +218,7 @@ class CartStore extends ChangeNotifier {
   Future<void> setQty(String pn, int qty) async {
     final i = _items.indexWhere((e) => e.partNumber == pn);
     if (i < 0) return;
-    _items[i] = _items[i].copyWith(qty: qty < 1 ? 1 : qty);
+    _items[i] = _items[i].copyWith(qty: normQty(qty));
     await _save();
   }
 
