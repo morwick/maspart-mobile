@@ -2391,10 +2391,15 @@ class CartGudangItem {
   final double harga;
   final String hargaDisplay;
   final int berat;
+  /// Bisa DIKIRIM kurir.
   final bool bisaDibeli;
 
-  /// 'harga belum tersedia' | 'berat belum ditetapkan' | 'stok habis'
+  /// 'harga belum tersedia' | 'berat belum ditetapkan …' | 'stok habis'
   final String alasan;
+
+  /// Audit R-19: terhalang BERAT saja (belum ada berat SIMS / berat masih
+  /// diverifikasi admin) → tetap bisa dibeli dengan Ambil di Toko.
+  final bool hanyaAmbil;
 
   const CartGudangItem({
     required this.partNumber,
@@ -2404,6 +2409,7 @@ class CartGudangItem {
     this.berat = 0,
     this.bisaDibeli = false,
     this.alasan = '',
+    this.hanyaAmbil = false,
   });
 
   factory CartGudangItem.fromJson(Map<String, dynamic> j) => CartGudangItem(
@@ -2414,6 +2420,7 @@ class CartGudangItem {
         berat: _i(j['berat']),
         bisaDibeli: _b(j['bisa_dibeli']),
         alasan: _s(j['alasan']),
+        hanyaAmbil: _b(j['hanya_ambil']),
       );
 }
 
