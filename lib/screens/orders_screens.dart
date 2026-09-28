@@ -613,6 +613,84 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  /// Lepas tahanan kirim (audit 2026-09-28 T-5) — padanan web: dana pembeli
+  /// tercatat sudah ditarik (refund/chargeback) sehingga gudang dilarang
+  /// mengirim. Hanya bila tetap harus dikirim; alasan wajib (≥ 10 karakter).
+  Future<void> _lepasTahan() async {
+    final nav = AppNav.of(context);
+    final alasanCtl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final m = ctx.mas;
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            final alasanCukup =
+                alasanCtl.text.trim().replaceAll(RegExp(r'\s+'), ' ').length >= 10;
+            return AlertDialog(
+              title: const Text('Lepas tahanan', style: TextStyle(fontSize: 16)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Dana pembeli tercatat sudah DITARIK kembali (refund/'
+                      'chargeback). Melepas tahanan membuat gudang bisa mengirim '
+                      'barang lagi. Biasanya pesanan seperti ini dibatalkan.',
+                      style: TextStyle(fontSize: 12.5, color: m.warn600),
+                    ),
+                    const SizedBox(height: 12),
+                    Text('Alasan (mis. refund keliru, dana sudah ditagih ulang)',
+                        style: TextStyle(fontSize: 12, color: m.ink600)),
+                    const SizedBox(height: 5),
+                    MasInput(
+                      controller: alasanCtl,
+                      hint: 'Minimal 10 karakter',
+                      height: 40,
+                      onChanged: (_) => setLocal(() {}),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Batal')),
+                TextButton(
+                  onPressed:
+                      alasanCukup ? () => Navigator.pop(ctx, true) : null,
+                  child: const Text('Lepas tahanan'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    final alasan = alasanCtl.text.trim();
+    alasanCtl.dispose();
+    if (ok != true || !mounted) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ApiService.adminLepasTahan(_code, alasan);
+      if (!mounted) return;
+      setState(() => _busy = false);
+      nav.toast('Tahanan dilepas — gudang bisa melanjutkan pesanan ini.');
+      await _load();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _busy = false;
+      });
+    }
+  }
+
   Future<void> _launch(String url) async {
     final nav = AppNav.of(context);
     final uri = Uri.tryParse(url);
@@ -657,6 +735,25 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           if (o.paymentNote != null && o.paymentNote!.isNotEmpty) ...[
             _Alert('⚠️ Pembayaran perlu ditindaklanjuti. ${o.paymentNote}',
                 tone: MasPillTone.warn),
+            const SizedBox(height: 14),
+          ],
+
+          // Audit 2026-09-28 T-5: dana ditarik → gudang dilarang mengirim
+          // sampai admin melepas tahanan (dengan alasan) atau membatalkan.
+          if (o.tahanKirim) ...[
+            _Alert(
+                '⛔ Pengiriman DITAHAN. ${o.alasanTahan ?? ''} Biasanya pesanan '
+                'ini dibatalkan. Bila tetap harus dikirim (mis. refund keliru & '
+                'dana sudah ditagih ulang), lepas tahanan dengan alasan.'),
+            const SizedBox(height: 8),
+            MasButton(
+              label: 'Lepas tahanan…',
+              primary: false,
+              expand: true,
+              height: 40,
+              loading: _busy,
+              onTap: _busy ? null : _lepasTahan,
+            ),
             const SizedBox(height: 14),
           ],
 
@@ -1081,8 +1178,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           label: orderStatusLabel(s),
                           primary: false,
                           height: 36,
-                          // Status yang sedang berjalan tak perlu di-set ulang.
-                          onTap: _busy || o.status == s ? null : () => _setStatus(s),
+                          // Status yang sedang berjalan tak perlu di-set ulang;
+                          // dikirim/selesai terkunci selama pengiriman DITAHAN (T-5).
+                          onTap: _busy ||
+                                  o.status == s ||
+                                  (o.tahanKirim && (s == 'dikirim' || s == 'selesai'))
+                              ? null
+                              : () => _setStatus(s),
                         ),
                     ],
                   ),

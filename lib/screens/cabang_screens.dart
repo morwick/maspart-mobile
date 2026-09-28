@@ -517,6 +517,10 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
   Future<void> _lanjutkan(OrderDetail o) async {
     final next = _nextStatus(o.status);
     if (next == null) return;
+    if (o.tahanKirim) {
+      setState(() => _error = o.alasanTahan ?? 'Pesanan ditahan — hubungi admin.');
+      return;
+    }
 
     // Tahanan stok aplikasi dilepas saat 'dikirim' → stok ikut Accurate. Kalau
     // Pengiriman Pesanan belum dibuat di Accurate, barang bisa terjual dua kali.
@@ -616,6 +620,10 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
   Future<void> _serahTerima() async {
     final foto = _stFoto;
     if (foto == null) return;
+    if (_order?.tahanKirim ?? false) {
+      setState(() => _error = _order?.alasanTahan ?? 'Pesanan ditahan — hubungi admin.');
+      return;
+    }
     final ok = await _confirm(
       'Serahkan & Selesai',
       'Barang pesanan $_code sudah diserahkan ke pengambil? Foto disimpan '
@@ -1148,6 +1156,13 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
     if (o.status == 'batal') {
       body = _alert(m,
           'Pesanan dibatalkan admin. Kembalikan barang yang sudah diambil ke raknya.');
+    } else if (o.tahanKirim) {
+      // Audit 2026-09-28 T-5: dana pembeli sudah dikembalikan (refund/chargeback)
+      // → tak ada tombol kirim/serahkan sampai admin melepas tahanan.
+      body = _alert(
+        m,
+        '⛔ PESANAN DITAHAN. ${o.alasanTahan ?? 'Dana pembeli sudah dikembalikan — hubungi admin.'}',
+      );
     } else if (!lunas) {
       body = _alert(
         m,

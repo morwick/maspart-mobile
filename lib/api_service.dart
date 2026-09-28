@@ -1715,6 +1715,13 @@ class ApiService {
         body: {'status': status},
       );
 
+  /// Lepas tahanan kirim pesanan yang dananya ditarik (audit 2026-09-28 T-5)
+  /// — padanan web `adminLepasTahan`. Alasan wajib (>= 10 karakter).
+  static Future<void> adminLepasTahan(String code, String alasan) => _Api.post(
+        '/api/admin/orders/${Uri.encodeComponent(code)}/lepas-tahan',
+        body: {'alasan': alasan},
+      );
+
   /// Lunasi MANUAL pesanan yang dibayar di luar Midtrans (audit 2026-09-28
   /// T-4) — padanan web `adminLunasiManual`. Server mengecek Midtrans dulu &
   /// menutup tagihannya; `pesan` terisi bila pembeli ternyata sudah membayar

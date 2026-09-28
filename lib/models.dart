@@ -1553,6 +1553,12 @@ class OrderDetail extends OrderSummary {
   /// Batas ambil pesanan Ambil di Toko yang 'siap diambil' (dihitung server).
   final String? batasAmbilAt;
 
+  /// Audit 2026-09-28 T-5: dana pembeli sudah ditarik kembali (refund/
+  /// chargeback penuh) → gudang DILARANG mengirim/menyerahkan sampai admin
+  /// melepas tahanan. `alasanTahan` = teks untuk banner.
+  final bool tahanKirim;
+  final String? alasanTahan;
+
   /// Bukti serah terima Ambil di Toko (migrasi 043): foto orang yang mengambil
   /// barang, nama pengambil (opsional) & waktu diambil — diisi gudang saat
   /// barang diserahkan, sekaligus menandai pesanan selesai.
@@ -1628,6 +1634,8 @@ class OrderDetail extends OrderSummary {
     this.pickupLon,
     this.pickupPic,
     this.batasAmbilAt,
+    this.tahanKirim = false,
+    this.alasanTahan,
     this.pickupProofUrl,
     this.pickedUpBy,
     this.pickedUpAt,
@@ -1689,6 +1697,8 @@ class OrderDetail extends OrderSummary {
         pickupLon: _dOrNull(j['pickup_lon']),
         pickupPic: _sOrNull(j['pickup_pic']),
         batasAmbilAt: _sOrNull(j['batas_ambil_at']),
+        tahanKirim: _b(j['tahan_kirim']),
+        alasanTahan: _sOrNull(j['alasan_tahan']),
         pickupProofUrl: _sOrNull(j['pickup_proof_url']),
         pickedUpBy: _sOrNull(j['picked_up_by']),
         pickedUpAt: _sOrNull(j['picked_up_at']),
