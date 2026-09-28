@@ -359,6 +359,8 @@ class _BermasalahScreenState extends State<BermasalahScreen> {
     'lunas_belum_dikirim': ('Lunas, belum dikirim',
         'Sudah lunas beberapa hari tapi belum dikirim — pembeli menunggu.'),
     'penawaran_gagal': ('Penawaran Accurate gagal', 'Pesanan lunas belum tercatat di Accurate.'),
+    'retur_accurate': ('Retur: dokumen Accurate belum dibuat',
+        'Retur Penjualan / Pengiriman pengganti belum dibuat di Accurate — stok & omzet belum dikoreksi.'),
   };
 
   @override
@@ -452,11 +454,14 @@ class _BermasalahScreenState extends State<BermasalahScreen> {
                 const MasPill(label: 'Perlu refund', tone: MasPillTone.danger, height: 20),
                 const SizedBox(width: 6),
               ],
-              MasPill(
-                label: orderStatusLabel(o.status),
-                tone: orderStatusTone(o.status),
-                height: 20,
-              ),
+              if (o.returnCode.isNotEmpty)
+                const MasPill(label: 'Retur', tone: MasPillTone.warn, height: 20)
+              else
+                MasPill(
+                  label: orderStatusLabel(o.status),
+                  tone: orderStatusTone(o.status),
+                  height: 20,
+                ),
             ]),
             const SizedBox(height: 6),
             Row(children: [
@@ -469,8 +474,9 @@ class _BermasalahScreenState extends State<BermasalahScreen> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12, color: m.ink600)),
               ),
-              Text(formatRupiah(o.total),
-                  style: masMono(size: 13, weight: FontWeight.w700, color: m.brand700)),
+              if (o.returnCode.isEmpty)
+                Text(formatRupiah(o.total),
+                    style: masMono(size: 13, weight: FontWeight.w700, color: m.brand700)),
             ]),
             if (o.catatan.isNotEmpty) ...[
               const SizedBox(height: 6),

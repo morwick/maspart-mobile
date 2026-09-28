@@ -1209,7 +1209,13 @@ class _KartuRetur extends StatelessWidget {
           ]),
         ),
         const SizedBox(width: 8),
-        ReturBadge(status: r.status, label: r.statusLabel),
+        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          ReturBadge(status: r.status, label: r.statusLabel),
+          if (gudang && r.accurateBelum > 0) ...[
+            const SizedBox(height: 4),
+            const MasPill(label: 'Accurate belum', tone: MasPillTone.warn, height: 19),
+          ],
+        ]),
       ]),
     );
   }
@@ -1912,13 +1918,14 @@ class _CabangReturDetailScreenState extends State<CabangReturDetailScreen> {
     }
   }
 
-  Future<void> _aksi(String aksi, {String? note}) async {
+  Future<void> _aksi(String aksi, {String? note, String? jenis, String? dokumen}) async {
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      final r = await ApiService.branchAksiRetur(_code, aksi, note: note);
+      final r = await ApiService.branchAksiRetur(_code, aksi,
+          note: note, jenis: jenis, dokumen: dokumen);
       if (!mounted) return;
       setState(() {
         _r = r;
@@ -1930,6 +1937,50 @@ class _CabangReturDetailScreenState extends State<CabangReturDetailScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// T-8 (paritas web ReturKelola): tandai dokumen Accurate sudah dibuat.
+  Future<void> _accurateBeres(ReturTindakanAccurate t) async {
+    final ctl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final m = ctx.mas;
+        return StatefulBuilder(
+          builder: (ctx, setLocal) => AlertDialog(
+            title: const Text('Dokumen Accurate sudah dibuat', style: TextStyle(fontSize: 16)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(t.label, style: TextStyle(fontSize: 12.5, color: m.ink600)),
+                const SizedBox(height: 8),
+                MasInput(
+                  controller: ctl,
+                  hint: 'Nomor dokumen Accurate',
+                  mono: true,
+                  height: 40,
+                  onChanged: (_) => setLocal(() {}),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Batal')),
+              TextButton(
+                onPressed: ctl.text.trim().length >= 3 ? () => Navigator.pop(ctx, true) : null,
+                child: const Text('Simpan'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    final dok = ctl.text.trim();
+    ctl.dispose();
+    if (ok != true || !mounted) return;
+    await _aksi('accurate_beres', jenis: t.jenis, dokumen: dok);
   }
 
   @override
@@ -2046,6 +2097,37 @@ class _CabangReturDetailScreenState extends State<CabangReturDetailScreen> {
           ),
           const SizedBox(height: 12),
 
+          // T-8: dokumen Accurate yang ditimbulkan retur ini.
+          if (r.tindakanAccurate.isNotEmpty) ...[
+            MasCard(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                const ReturJudul('🧾 Dokumen Accurate'),
+                for (final t in r.tindakanAccurate) ...[
+                  Text('${t.beres ? '✓' : '⚠️'} ${t.label}',
+                      style: TextStyle(
+                          fontSize: 12.5, color: t.beres ? m.ink500 : m.ink800, height: 1.4)),
+                  const SizedBox(height: 4),
+                  if (t.beres)
+                    Text('Nomor dokumen: ${t.dokumen ?? '-'}',
+                        style: masMono(size: 11.5, color: m.ink500))
+                  else
+                    MasButton(
+                      label: 'Sudah dibuat di Accurate…',
+                      primary: false,
+                      expand: true,
+                      height: 38,
+                      onTap: _busy ? null : () => _accurateBeres(t),
+                    ),
+                  const SizedBox(height: 10),
+                ],
+                Text(
+                    'Stok & omzet di aplikasi mengikuti Accurate — selama dokumennya belum '
+                    'dibuat, stok barang retur/pengganti belum benar.',
+                    style: TextStyle(fontSize: 11.5, color: m.ink400)),
+              ]),
+            ),
+            const SizedBox(height: 12),
+          ],
           MasCard(
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               const ReturJudul('🎥 Video Unboxing & Foto Bukti'),

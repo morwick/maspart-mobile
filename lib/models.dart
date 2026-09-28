@@ -1435,6 +1435,9 @@ class PesananMasalah {
   final String catatan;
   final bool perluRefund;
 
+  /// T-8: baris retur (kategori retur_accurate).
+  final String returnCode;
+
   const PesananMasalah({
     required this.orderCode,
     this.pembeli = '',
@@ -1444,6 +1447,7 @@ class PesananMasalah {
     this.umurHari,
     this.catatan = '',
     this.perluRefund = false,
+    this.returnCode = '',
   });
 
   factory PesananMasalah.fromJson(Map<String, dynamic> j) => PesananMasalah(
@@ -1455,6 +1459,7 @@ class PesananMasalah {
         umurHari: _iOrNull(j['umur_hari']),
         catatan: _s(j['catatan']),
         perluRefund: _b(j['perlu_refund']),
+        returnCode: _s(j['return_code']),
       );
 }
 
@@ -1465,7 +1470,7 @@ class PesananBermasalah {
 
   static const kunci = [
     'uang_perlu_dicek', 'kendala_gudang', 'bayar_macet',
-    'belum_diambil', 'lunas_belum_dikirim', 'penawaran_gagal',
+    'belum_diambil', 'lunas_belum_dikirim', 'penawaran_gagal', 'retur_accurate',
   ];
 
   int get jumlah => daftar.values.fold(0, (n, l) => n + l.length);
@@ -4917,6 +4922,9 @@ class ReturRingkas {
   final String statusLabel;
   final bool perluPeriksa;
   final int jumlahPeringatan;
+
+  /// T-8: dokumen Accurate yang belum ditandai dibuat (admin/gudang saja).
+  final int accurateBelum;
   final String submittedAt;
   final String updatedAt;
 
@@ -4936,6 +4944,7 @@ class ReturRingkas {
     this.statusLabel = '',
     this.perluPeriksa = false,
     this.jumlahPeringatan = 0,
+    this.accurateBelum = 0,
     this.submittedAt = '',
     this.updatedAt = '',
   });
@@ -4956,6 +4965,7 @@ class ReturRingkas {
         statusLabel: _s(j['status_label'], _s(j['status'])),
         perluPeriksa: _b(j['perlu_periksa']),
         jumlahPeringatan: _i(j['jumlah_peringatan']),
+        accurateBelum: _i(j['accurate_belum']),
         submittedAt: _s(j['submitted_at']),
         updatedAt: _s(j['updated_at']),
       );
@@ -5066,6 +5076,23 @@ class ReturVideoMeta {
       );
 }
 
+/// T-8: satu tindakan manual di Accurate (Retur Penjualan / Pengiriman pengganti).
+class ReturTindakanAccurate {
+  final String jenis;
+  final String label;
+  final bool beres;
+  final String? dokumen;
+  const ReturTindakanAccurate(
+      {required this.jenis, this.label = '', this.beres = false, this.dokumen});
+
+  factory ReturTindakanAccurate.fromJson(Map<String, dynamic> j) => ReturTindakanAccurate(
+        jenis: _s(j['jenis']),
+        label: _s(j['label']),
+        beres: _b(j['beres']),
+        dokumen: _kosongNull(j['dokumen']),
+      );
+}
+
 class ReturDetail extends ReturRingkas {
   final int id;
   final double price;
@@ -5096,6 +5123,9 @@ class ReturDetail extends ReturRingkas {
   final String tujuanGudang;
   final String tujuanPic;
 
+  /// T-8: tindakan manual di Accurate yang ditimbulkan retur (admin/gudang).
+  final List<ReturTindakanAccurate> tindakanAccurate;
+
   const ReturDetail({
     required super.returnCode,
     super.orderCode,
@@ -5112,6 +5142,7 @@ class ReturDetail extends ReturRingkas {
     super.statusLabel,
     super.perluPeriksa,
     super.jumlahPeringatan,
+    super.accurateBelum,
     super.submittedAt,
     super.updatedAt,
     this.id = 0,
@@ -5142,6 +5173,7 @@ class ReturDetail extends ReturRingkas {
     this.bisaBatal = false,
     this.tujuanGudang = '',
     this.tujuanPic = '',
+    this.tindakanAccurate = const [],
   });
 
   factory ReturDetail.fromJson(Map<String, dynamic> j) {
@@ -5164,6 +5196,7 @@ class ReturDetail extends ReturRingkas {
       statusLabel: r.statusLabel,
       perluPeriksa: r.perluPeriksa,
       jumlahPeringatan: r.jumlahPeringatan,
+      accurateBelum: r.accurateBelum,
       submittedAt: r.submittedAt,
       updatedAt: r.updatedAt,
       id: _i(j['id']),
@@ -5196,6 +5229,7 @@ class ReturDetail extends ReturRingkas {
       bisaBatal: _b(j['bisa_batal']),
       tujuanGudang: _s(tujuan['gudang']),
       tujuanPic: _s(tujuan['pic']),
+      tindakanAccurate: _list(j['tindakan_accurate'], ReturTindakanAccurate.fromJson),
     );
   }
 }
