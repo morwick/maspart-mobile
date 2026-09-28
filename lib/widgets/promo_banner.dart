@@ -47,6 +47,12 @@ class PromoSlide {
   final String? image;
   final bool plain;
 
+  /// Materi HP (rasio 2:1) untuk slide `plain` — padanan `imageMobile` web.
+  /// Di layar ≤ 640 px banner beralih ke kotak 2:1 berisi materi ini; materi
+  /// 4:1 di HP hanya jadi pita kecil berteks tak terbaca. Hanya dipakai bila
+  /// SEMUA slide punya (campuran → tetap 4:1).
+  final String? imageMobile;
+
   /// Teks syarat/periode kecil di pojok kanan bawah (opsional).
   final String? footnote;
 
@@ -61,6 +67,7 @@ class PromoSlide {
     this.tujuan,
     this.image,
     this.plain = false,
+    this.imageMobile,
     this.footnote,
   });
 }
@@ -72,19 +79,41 @@ const List<PromoSlide> kPromoSlides = [
   PromoSlide(
     id: 'sinotruk-howo',
     title:
-        'Sparepart truck Sinotruk HOWO berkualitas & terpercaya — OEM, ready stock',
+        'Sparepart truk Sinotruk HOWO berkualitas & terpercaya — part OEM, ready stock',
     tujuan: MasScreen.toko,
-    tone: (Color(0xFF0B1A2E), Color(0xFF123A63)),
-    image: 'assets/promo/sparepart-truck.webp',
+    tone: (Color(0xFFE3F4E6), Color(0xFFFFFFFF)),
+    image: 'assets/promo/sparepart-truk-hijau.webp',
+    imageMobile: 'assets/promo/sparepart-truk-hijau-hp.webp',
     plain: true,
   ),
   PromoSlide(
     id: 'harga-murah',
     title:
-        'Belanja sparepart truck Sinotruk HOWO, harga lebih murah dan mudah dicari di MasPart',
+        'Belanja sparepart truk, harga lebih murah — lebih dari 2.000 part tersedia di MasPart',
     tujuan: MasScreen.toko,
-    tone: (Color(0xFFD7D7D8), Color(0xFFF2F4F6)),
-    image: 'assets/promo/harga-lebih-murah.webp',
+    tone: (Color(0xFF01470B), Color(0xFF026A0E)),
+    image: 'assets/promo/harga-murah-hijau.webp',
+    imageMobile: 'assets/promo/harga-murah-hijau-hp.webp',
+    plain: true,
+  ),
+  PromoSlide(
+    id: 'poin',
+    title:
+        'Setiap belanja dapat Poin MasPart — 1 poin untuk setiap belanja Rp 10.000, cair setelah pesanan selesai',
+    tujuan: MasScreen.poin,
+    tone: (Color(0xFFFFD21F), Color(0xFFFFBF00)),
+    image: 'assets/promo/poin-maspart.webp',
+    imageMobile: 'assets/promo/poin-maspart-hp.webp',
+    plain: true,
+  ),
+  PromoSlide(
+    id: 'ambil-di-toko',
+    title:
+        'Ambil sendiri di gudang, ongkir Rp 0 — pilih Ambil di Toko saat checkout, untuk alamat di sekitar gudang MasPart',
+    tujuan: MasScreen.toko,
+    tone: (Color(0xFF01470B), Color(0xFF026A0E)),
+    image: 'assets/promo/ambil-di-toko.webp',
+    imageMobile: 'assets/promo/ambil-di-toko-hp.webp',
     plain: true,
   ),
 ];
@@ -186,13 +215,21 @@ class _PromoBannerState extends State<PromoBanner> {
     if (_n == 0) return const SizedBox.shrink();
     final m = context.mas;
     final layar = MediaQuery.sizeOf(context).width;
+    // Kotak 2:1 + materi HP hanya bila SEMUA slide punya — rasio kotak
+    // berlaku untuk seluruh carousel (sama dengan `punyaHp` web).
+    final punyaHp = widget.slides
+        .every((s) => s.plain && s.image != null && s.imageMobile != null);
+    final modeHp = punyaHp && layar <= 640;
 
     return Padding(
       padding: const EdgeInsets.only(top: 14),
       child: LayoutBuilder(builder: (context, c) {
         final w = c.maxWidth;
-        // Rasio materi 4:1, lantai 168 px (sama dengan web).
-        final h = math.max(w / 4, 168.0);
+        // Rasio materi 4:1, lantai 168 px (sama dengan web); materi HP 2:1.
+        // Lantai hanya untuk slide gradien — materi jadi selalu tepat 4:1.
+        final h = modeHp
+            ? w / 2
+            : (punyaHp ? w / 4 : math.max(w / 4, 168.0));
         return Container(
           height: h,
           decoration: BoxDecoration(
@@ -216,34 +253,40 @@ class _PromoBannerState extends State<PromoBanner> {
                       w: w,
                       h: h,
                       layar: layar,
+                      hp: modeHp,
                     ),
                   ),
                 ),
                 if (_n > 1) ...[
-                  Positioned(
-                    left: 10,
-                    top: 0,
-                    bottom: 0,
-                    child: Center(
-                      child: _NavBtn(
-                        icon: Icons.chevron_left_rounded,
-                        label: 'Banner sebelumnya',
-                        onTap: () => _ke(_i - 1),
+                  // Panah hanya di layar lebar (sama dengan web `.promo-nav`):
+                  // di HP cukup geser jari & titik, dan di materi 2:1 panah
+                  // kiri menutupi judul.
+                  if (layar > 640) ...[
+                    Positioned(
+                      left: 10,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: _NavBtn(
+                          icon: Icons.chevron_left_rounded,
+                          label: 'Banner sebelumnya',
+                          onTap: () => _ke(_i - 1),
+                        ),
                       ),
                     ),
-                  ),
-                  Positioned(
-                    right: 10,
-                    top: 0,
-                    bottom: 0,
-                    child: Center(
-                      child: _NavBtn(
-                        icon: Icons.chevron_right_rounded,
-                        label: 'Banner berikutnya',
-                        onTap: () => _ke(_i + 1),
+                    Positioned(
+                      right: 10,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: _NavBtn(
+                          icon: Icons.chevron_right_rounded,
+                          label: 'Banner berikutnya',
+                          onTap: () => _ke(_i + 1),
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                   // Titik indikator — yang aktif memanjang.
                   Positioned(
                     left: 15,
@@ -325,11 +368,16 @@ class _Slide extends StatelessWidget {
   /// Lebar layar (padanan media query web: 640 / 900 px).
   final double layar;
 
+  /// Kotak sedang 2:1 → slide `plain` memakai `imageMobile` (lihat
+  /// `modeHp` di atas).
+  final bool hp;
+
   const _Slide({
     required this.s,
     required this.w,
     required this.h,
     required this.layar,
+    required this.hp,
   });
 
   @override
@@ -343,11 +391,13 @@ class _Slide extends StatelessWidget {
       // Materi jadi: tone = warna dasar (tak berkedip putih selagi dimuat /
       // bila gagal). Di layar < 900 px materi 4:1 dibuat `contain` supaya
       // judul yang tercetak di paruh kiri tak terpotong (lihat globals.css).
+      // Mode HP: kotak sudah 2:1 = rasio materi HP → `cover` pas.
+      final pakaiHp = hp && s.imageMobile != null;
       badan = Container(
         color: c0,
         child: _gambar(
-          img,
-          fit: layar < 900 ? BoxFit.contain : BoxFit.cover,
+          pakaiHp ? s.imageMobile! : img,
+          fit: pakaiHp || layar >= 900 ? BoxFit.cover : BoxFit.contain,
           width: double.infinity,
           height: double.infinity,
         ),
