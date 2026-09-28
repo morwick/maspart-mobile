@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/mas_theme.dart';
 import '../widgets/mas_ui.dart';
 import '../widgets/login_backdrop.dart';
@@ -41,12 +42,31 @@ class _LoginScreenState extends State<LoginScreen> {
   String _googleClientId = '';
   bool _googleBusy = false;
 
+  /// Tautan unduh APK (dari /api/app/meta) untuk tombol "Perbarui Aplikasi"
+  /// saat server menolak versi ini (426).
+  String _downloadUrl = 'https://maspart.tech/download';
+
+  Future<void> _bukaUnduhan() async {
+    final uri = Uri.tryParse(_downloadUrl);
+    if (uri == null) return;
+    try {
+      if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return;
+    } catch (_) {/* jatuh ke pesan di bawah */}
+    if (mounted) setState(() => _error = 'Buka $_downloadUrl di browser untuk mengunduh versi terbaru.');
+  }
+
   @override
   void initState() {
     super.initState();
     _restoreLast();
     ApiService.appMeta().then((meta) {
-      if (mounted) setState(() => _googleClientId = meta.googleClientId);
+      if (!mounted) return;
+      setState(() {
+        _googleClientId = meta.googleClientId;
+        if (meta.version.downloadUrl.isNotEmpty) {
+          _downloadUrl = meta.version.downloadUrl;
+        }
+      });
     }).catchError((_) {});
     PackageInfo.fromPlatform().then((i) {
       if (mounted) setState(() => _version = 'v${i.version}');
@@ -326,6 +346,23 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 4),
                 _errorBanner(context, _error!),
               ],
+              // 426: server menolak versi APK ini. Shell (yang punya halaman
+              // Perbarui) belum ada di layar login → tawarkan unduhan langsung
+              // di sini (audit 2026-09-28 KL-3).
+              ValueListenableBuilder<String?>(
+                valueListenable: ApiService.perluPerbarui,
+                builder: (context, pesan, _) => pesan == null
+                    ? const SizedBox.shrink()
+                    : Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: MasButton(
+                          label: 'Perbarui Aplikasi',
+                          icon: Icons.system_update_alt_rounded,
+                          expand: true,
+                          onTap: _bukaUnduhan,
+                        ),
+                      ),
+              ),
               const SizedBox(height: 16),
 
               MasButton(label: 'Masuk', onTap: _submit, expand: true, height: 52, loading: _loading),

@@ -1560,8 +1560,14 @@ class OrderDetail extends OrderSummary {
   final String? pickedUpBy;
   final String? pickedUpAt;
 
-  /// Mis. dibayar setelah order batal → perlu refund.
+  /// Catatan pembayaran INTERNAL (mis. "Midtrans: refund — … Tahan pengiriman
+  /// / cek pesanan"). ⛔ JANGAN tampilkan ke pembeli — pakai [pesanPembayaran].
   final String? paymentNote;
+
+  /// Kalimat pembayaran yang AMAN untuk pembeli (backend baru, audit
+  /// 2026-09-28 KL-11). Null di backend lama → pembeli tak melihat catatan apa
+  /// pun selain teks bawaan layar.
+  final String? pesanPembayaran;
 
   /// Penawaran Penjualan Accurate otomatis: created | skip | failed.
   final String? penawaranStatus;
@@ -1632,6 +1638,7 @@ class OrderDetail extends OrderSummary {
     this.pickedUpBy,
     this.pickedUpAt,
     this.paymentNote,
+    this.pesanPembayaran,
     this.penawaranStatus,
     this.penawaranNumber,
     this.penawaranNote,
@@ -1693,6 +1700,7 @@ class OrderDetail extends OrderSummary {
         pickedUpBy: _sOrNull(j['picked_up_by']),
         pickedUpAt: _sOrNull(j['picked_up_at']),
         paymentNote: _sOrNull(j['payment_note']),
+        pesanPembayaran: _sOrNull(j['pesan_pembayaran']),
         penawaranStatus: _sOrNull(j['penawaran_status']),
         penawaranNumber: _sOrNull(j['penawaran_number']),
         penawaranNote: _sOrNull(j['penawaran_note']),

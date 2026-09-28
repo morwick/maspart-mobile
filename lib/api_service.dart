@@ -8,9 +8,14 @@
 // • Method lama (login/searchPart/searchByImage/…) dipertahankan apa adanya
 //   supaya layar yang sudah jalan tidak perlu diubah.
 
+import 'dart:async' show TimeoutException;
 import 'dart:convert';
+import 'dart:io' show IOException;
+import 'dart:math' show Random;
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:http/http.dart' as http;
+import 'package:package_info_plus/package_info_plus.dart';
 import 'config.dart';
 import 'auth_storage.dart';
 import 'device_id.dart';
@@ -22,11 +27,27 @@ export 'models.dart';
 class ApiException implements Exception {
   final int statusCode;
   final String message;
-  ApiException(this.statusCode, this.message);
+
+  /// `detail` MENTAH dari body FastAPI bila berupa OBJEK — mis. 409 "tagihan
+  /// berubah" membawa {pesan, total_baru, subtotal, ongkir, ppn, …}. Null bila
+  /// `detail` berupa string/daftar atau body bukan JSON: pemanggil WAJIB tetap
+  /// jalan dengan [message] saja (audit 2026-09-28 KL-4).
+  final Map<String, dynamic>? detail;
+
+  ApiException(this.statusCode, this.message, {this.detail});
 
   /// Sesi tidak berlaku lagi (token kedaluwarsa / akun dipakai di perangkat
   /// lain). Layar bisa memakai ini untuk melempar user ke halaman login.
   bool get isAuth => statusCode == 401;
+
+  /// Galat JARINGAN (timeout, soket putus, TLS gagal) — tak ada jawaban HTTP.
+  /// ⚠️ Request tulis bisa SAJA sudah diproses server sebelum koneksi putus;
+  /// karena itu checkout memeriksa daftar pesanan, bukan langsung mengulang
+  /// (audit 2026-09-28 KL-5).
+  bool get isJaringan => statusCode == 0;
+
+  /// Server menolak versi aplikasi ini (HTTP 426) — wajib perbarui (KL-3).
+  bool get perluPerbarui => statusCode == 426;
 
   @override
   String toString() => 'ApiException($statusCode): $message';
@@ -74,6 +95,83 @@ class _Api {
   /// aplikasi di-minimize — layarnya memperingatkan user soal ini.
   static const _timeoutExploded = Duration(minutes: 20);
 
+  /// Batas tunggu BUAT PESANAN. Sengaja < TTL idempotensi server (90 dtk):
+  /// dulu 180 dtk, sehingga pembeli yang menekan "Proses" lagi setelah
+  /// timeout sudah di luar jendela idempotensi → pesanan GANDA (audit
+  /// 2026-09-28 KL-5). Membuat pesanan normalnya selesai < 30 dtk.
+  static const _timeoutCheckout = Duration(seconds: 75);
+
+  /// Pesan galat jaringan umum (baca data, simpan hal non-pesanan).
+  static const pesanPutus =
+      'Koneksi terputus — periksa internet lalu coba lagi.';
+
+  /// Pesan galat jaringan untuk request yang MENGUBAH pesanan (buat, bayar,
+  /// batal, ubah status): hasilnya tak diketahui — bisa saja sudah tersimpan
+  /// di server — jadi pengguna diarahkan memeriksa dulu, bukan mengulang
+  /// membabi buta (audit 2026-09-28 KL-5).
+  static const pesanPutusPesanan =
+      'Koneksi terputus — periksa daftar Pesanan sebelum mencoba lagi.';
+
+  /// Header versi aplikasi, dibaca SEKALI dari PackageInfo lalu di-cache.
+  /// Server memakainya untuk menolak APK di bawah versi minimum (426) —
+  /// APK 2.2.5+18 menghitung total tanpa PPN eksklusif, jadi harus bisa
+  /// dibedakan dari APK baru (audit 2026-09-28 KL-3).
+  static Map<String, String>? _versi;
+
+  static Future<Map<String, String>> _versiHeader() async {
+    final ada = _versi;
+    if (ada != null) return ada;
+    try {
+      final i = await PackageInfo.fromPlatform();
+      final v = <String, String>{
+        if (i.version.isNotEmpty) 'X-App-Version': i.version,
+        if (i.buildNumber.isNotEmpty) 'X-App-Build': i.buildNumber,
+      };
+      _versi = v;
+      return v;
+    } catch (_) {
+      // PackageInfo gagal (sangat jarang) → kirim tanpa header; server lama
+      // tak peduli, server baru memperlakukannya seperti versi tak dikenal.
+      return const <String, String>{};
+    }
+  }
+
+  /// Header baku SEMUA request API: versi aplikasi (+ token & JSON bila ada).
+  static Future<Map<String, String>> _headers(
+    String? token, {
+    bool json = false,
+    Map<String, String>? extra,
+  }) async {
+    final versi = await _versiHeader();
+    return <String, String>{
+      ...versi,
+      if (token != null) 'Authorization': 'Bearer $token',
+      if (json) 'Content-Type': 'application/json',
+      ...?extra,
+    };
+  }
+
+  /// Jalankan satu request HTTP; galat JARINGAN (timeout, soket/DNS putus,
+  /// TLS gagal, klien ditutup) diubah jadi `ApiException(0, …)` supaya layar
+  /// yang hanya menangkap ApiException tak bocor galat mentah — dulu
+  /// TimeoutException di checkout lolos tanpa pesan (audit 2026-09-28 KL-5).
+  static Future<http.Response> _kirim(
+    Future<http.Response> Function() kirim,
+    Duration timeout,
+    String? pesan,
+  ) async {
+    try {
+      return await kirim().timeout(timeout);
+    } on TimeoutException {
+      throw ApiException(0, pesan ?? pesanPutus);
+    } on IOException {
+      // SocketException, HandshakeException, TlsException, HttpException.
+      throw ApiException(0, pesan ?? pesanPutus);
+    } on http.ClientException {
+      throw ApiException(0, pesan ?? pesanPutus);
+    }
+  }
+
   static Future<String> _token() async {
     final t = await AuthStorage.getToken();
     if (t == null) throw ApiException(401, 'Belum login');
@@ -91,12 +189,19 @@ class _Api {
   }
 
   /// Ambil pesan error yang bisa dibaca manusia dari body FastAPI.
-  /// `detail` bisa berupa string, atau list error validasi Pydantic.
+  /// `detail` bisa berupa string, list error validasi Pydantic, atau (backend
+  /// baru, audit 2026-09-28) OBJEK berkalimat di `pesan`.
   static String _errorMessage(http.Response r) {
     try {
       final data = jsonDecode(utf8.decode(r.bodyBytes));
       final detail = data is Map ? data['detail'] : null;
       if (detail is String && detail.trim().isNotEmpty) return detail;
+      if (detail is Map) {
+        for (final k in const ['pesan', 'message', 'msg']) {
+          final v = detail[k];
+          if (v is String && v.trim().isNotEmpty) return v;
+        }
+      }
       if (detail is List) {
         final msgs = detail
             .map((d) => (d is Map ? d['msg'] : null)?.toString())
@@ -107,7 +212,30 @@ class _Api {
     } catch (_) {
       /* body bukan JSON — pakai pesan default di bawah */
     }
-    return 'HTTP ${r.statusCode}';
+    return switch (r.statusCode) {
+      426 => 'Versi aplikasi ini sudah tidak didukung — perbarui aplikasi '
+          'MasPart untuk melanjutkan.',
+      429 => 'Terlalu sering — tunggu sebentar lalu coba lagi.',
+      _ => 'HTTP ${r.statusCode}',
+    };
+  }
+
+  /// `detail` objek dari body galat (lihat [ApiException.detail]); null bila
+  /// bukan objek. Tak pernah melempar.
+  static Map<String, dynamic>? _detailOf(http.Response r) {
+    try {
+      final data = jsonDecode(utf8.decode(r.bodyBytes));
+      final d = data is Map ? data['detail'] : null;
+      return d is Map ? d.cast<String, dynamic>() : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 426 = versi APK di bawah minimum server → kabari shell supaya halaman
+  /// "Perbarui" wajib tampil (audit 2026-09-28 KL-3).
+  static void _cekVersiDitolak(int status, String msg) {
+    if (status == 426) ApiService.perluPerbarui.value = msg;
   }
 
   /// Terjemahkan response gagal jadi ApiException. 401 juga membuang token
@@ -123,7 +251,8 @@ class _Api {
         msg.startsWith('HTTP ') ? 'Sesi habis. Login ulang.' : msg,
       );
     }
-    throw ApiException(r.statusCode, msg);
+    _cekVersiDitolak(r.statusCode, msg);
+    throw ApiException(r.statusCode, msg, detail: _detailOf(r));
   }
 
   static Future<dynamic> _decode(http.Response r) async {
@@ -137,35 +266,43 @@ class _Api {
 
   // ── Verb ────────────────────────────────────────────────────────────
 
+  // [pesanPutus] = pesan galat jaringan khusus (mis. [pesanPutusPesanan] untuk
+  // request yang mengubah pesanan); null → [pesanPutus] umum.
+
   static Future<dynamic> get(
     String path, {
     Map<String, dynamic>? query,
     Duration? timeout,
+    String? pesanPutus,
   }) async {
-    final token = await _token();
-    final r = await http
-        .get(_uri(path, query), headers: {'Authorization': 'Bearer $token'})
-        .timeout(timeout ?? _timeout);
+    final h = await _headers(await _token());
+    final r = await _kirim(
+      () => http.get(_uri(path, query), headers: h),
+      timeout ?? _timeout,
+      pesanPutus,
+    );
     return _decode(r);
   }
 
+  /// [headers] tambahan (mis. `Idempotency-Key` checkout).
   static Future<dynamic> post(
     String path, {
     Object? body,
     Map<String, dynamic>? query,
     Duration? timeout,
+    String? pesanPutus,
+    Map<String, String>? headers,
   }) async {
-    final token = await _token();
-    final r = await http
-        .post(
-          _uri(path, query),
-          headers: {
-            'Authorization': 'Bearer $token',
-            if (body != null) 'Content-Type': 'application/json',
-          },
-          body: body == null ? null : jsonEncode(body),
-        )
-        .timeout(timeout ?? _timeout);
+    final h = await _headers(await _token(), json: body != null, extra: headers);
+    final r = await _kirim(
+      () => http.post(
+        _uri(path, query),
+        headers: h,
+        body: body == null ? null : jsonEncode(body),
+      ),
+      timeout ?? _timeout,
+      pesanPutus,
+    );
     return _decode(r);
   }
 
@@ -173,18 +310,18 @@ class _Api {
     String path, {
     Object? body,
     Map<String, dynamic>? query,
+    String? pesanPutus,
   }) async {
-    final token = await _token();
-    final r = await http
-        .put(
-          _uri(path, query),
-          headers: {
-            'Authorization': 'Bearer $token',
-            if (body != null) 'Content-Type': 'application/json',
-          },
-          body: body == null ? null : jsonEncode(body),
-        )
-        .timeout(_timeout);
+    final h = await _headers(await _token(), json: body != null);
+    final r = await _kirim(
+      () => http.put(
+        _uri(path, query),
+        headers: h,
+        body: body == null ? null : jsonEncode(body),
+      ),
+      _timeout,
+      pesanPutus,
+    );
     return _decode(r);
   }
 
@@ -192,18 +329,18 @@ class _Api {
     String path, {
     Object? body,
     Map<String, dynamic>? query,
+    String? pesanPutus,
   }) async {
-    final token = await _token();
-    final r = await http
-        .patch(
-          _uri(path, query),
-          headers: {
-            'Authorization': 'Bearer $token',
-            if (body != null) 'Content-Type': 'application/json',
-          },
-          body: body == null ? null : jsonEncode(body),
-        )
-        .timeout(_timeout);
+    final h = await _headers(await _token(), json: body != null);
+    final r = await _kirim(
+      () => http.patch(
+        _uri(path, query),
+        headers: h,
+        body: body == null ? null : jsonEncode(body),
+      ),
+      _timeout,
+      pesanPutus,
+    );
     return _decode(r);
   }
 
@@ -212,18 +349,18 @@ class _Api {
     Object? body,
     Map<String, dynamic>? query,
     Duration? timeout,
+    String? pesanPutus,
   }) async {
-    final token = await _token();
-    final r = await http
-        .delete(
-          _uri(path, query),
-          headers: {
-            'Authorization': 'Bearer $token',
-            if (body != null) 'Content-Type': 'application/json',
-          },
-          body: body == null ? null : jsonEncode(body),
-        )
-        .timeout(timeout ?? _timeout);
+    final h = await _headers(await _token(), json: body != null);
+    final r = await _kirim(
+      () => http.delete(
+        _uri(path, query),
+        headers: h,
+        body: body == null ? null : jsonEncode(body),
+      ),
+      timeout ?? _timeout,
+      pesanPutus,
+    );
     return _decode(r);
   }
 
@@ -233,10 +370,12 @@ class _Api {
     Map<String, dynamic>? query,
     Duration? timeout,
   }) async {
-    final token = await _token();
-    final r = await http
-        .get(_uri(path, query), headers: {'Authorization': 'Bearer $token'})
-        .timeout(timeout ?? _timeoutLong);
+    final h = await _headers(await _token());
+    final r = await _kirim(
+      () => http.get(_uri(path, query), headers: h),
+      timeout ?? _timeoutLong,
+      null,
+    );
     if (r.statusCode < 200 || r.statusCode >= 300) await _throw(r);
     return r.bodyBytes;
   }
@@ -247,17 +386,16 @@ class _Api {
     Map<String, dynamic>? query,
     Duration? timeout,
   }) async {
-    final token = await _token();
-    final r = await http
-        .post(
-          _uri(path, query),
-          headers: {
-            'Authorization': 'Bearer $token',
-            if (body != null) 'Content-Type': 'application/json',
-          },
-          body: body == null ? null : jsonEncode(body),
-        )
-        .timeout(timeout ?? _timeoutLong);
+    final h = await _headers(await _token(), json: body != null);
+    final r = await _kirim(
+      () => http.post(
+        _uri(path, query),
+        headers: h,
+        body: body == null ? null : jsonEncode(body),
+      ),
+      timeout ?? _timeoutLong,
+      null,
+    );
     if (r.statusCode < 200 || r.statusCode >= 300) await _throw(r);
     return r.bodyBytes;
   }
@@ -272,18 +410,24 @@ class _Api {
     String method = 'POST',
     bool expectBytes = false,
     Duration? timeout,
+    String? pesanPutus,
   }) async {
     final token = await _token();
     final req = http.MultipartRequest(method, _uri(path, query))
-      ..headers['Authorization'] = 'Bearer $token'
+      ..headers.addAll(await _headers(token))
       ..fields.addAll(fields);
     for (final f in files) {
       req.files.add(
         http.MultipartFile.fromBytes(f.field, f.bytes, filename: f.filename),
       );
     }
-    final streamed = await req.send().timeout(timeout ?? _timeoutLong);
-    final r = await http.Response.fromStream(streamed);
+    // Kirim + baca jawaban dalam satu pagar: body yang putus di tengah juga
+    // galat jaringan, bukan crash.
+    final r = await _kirim(
+      () async => http.Response.fromStream(await req.send()),
+      timeout ?? _timeoutLong,
+      pesanPutus,
+    );
     if (r.statusCode < 200 || r.statusCode >= 300) await _throw(r);
     if (expectBytes) return r.bodyBytes;
     if (r.bodyBytes.isEmpty) return null;
@@ -308,29 +452,34 @@ class ApiService {
   // Auth
   // ────────────────────────────────────────────────────────────────────
 
+  /// POST ke endpoint masuk (TANPA token). Jangan pakai `_Api._throw`: 401 di
+  /// sini berarti "password salah", bukan "sesi habis" — dan tak ada token
+  /// untuk dibuang. 426 tetap menandai "wajib perbarui" (audit 2026-09-28 KL-3).
+  static Future<http.Response> _postMasuk(
+      String path, Map<String, dynamic> body) async {
+    final h = await _Api._headers(null,
+        json: true, extra: {'User-Agent': DeviceId.userAgent()});
+    final r = await _Api._kirim(
+      () => http.post(_Api._uri(path), headers: h, body: jsonEncode(body)),
+      _Api._timeout,
+      null,
+    );
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+      final msg = _Api._errorMessage(r);
+      _Api._cekVersiDitolak(r.statusCode, msg);
+      throw ApiException(r.statusCode, msg, detail: _Api._detailOf(r));
+    }
+    return r;
+  }
+
   /// Login. Menyimpan JWT ke AuthStorage dan mengembalikan tokennya.
   static Future<String> login(String username, String password) async {
-    final r = await http
-        .post(
-          _Api._uri('/api/auth/login'),
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': DeviceId.userAgent(),
-          },
-          body: jsonEncode({
-            'username': username,
-            'password': password,
-            // Kunci ke perangkat pertama (Menu Control → Sesi) — paritas web.
-            'device_id': await DeviceId.get(),
-          }),
-        )
-        .timeout(_Api._timeout);
-
-    if (r.statusCode < 200 || r.statusCode >= 300) {
-      // Jangan pakai _throw: 401 di sini berarti "password salah", bukan
-      // "sesi habis" — dan tidak ada token untuk dibuang.
-      throw ApiException(r.statusCode, _Api._errorMessage(r));
-    }
+    final r = await _postMasuk('/api/auth/login', {
+      'username': username,
+      'password': password,
+      // Kunci ke perangkat pertama (Menu Control → Sesi) — paritas web.
+      'device_id': await DeviceId.get(),
+    });
 
     final data = TokenResponse.fromJson(_Api._obj(jsonDecode(r.body)));
     await AuthStorage.saveToken(data.accessToken);
@@ -339,24 +488,12 @@ class ApiService {
 
   /// Login yang mengembalikan token + profil user sekaligus.
   static Future<TokenResponse> loginFull(String username, String password) async {
-    final r = await http
-        .post(
-          _Api._uri('/api/auth/login'),
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': DeviceId.userAgent(),
-          },
-          body: jsonEncode({
-            'username': username,
-            'password': password,
-            // Kunci ke perangkat pertama (Menu Control → Sesi) — paritas web.
-            'device_id': await DeviceId.get(),
-          }),
-        )
-        .timeout(_Api._timeout);
-    if (r.statusCode < 200 || r.statusCode >= 300) {
-      throw ApiException(r.statusCode, _Api._errorMessage(r));
-    }
+    final r = await _postMasuk('/api/auth/login', {
+      'username': username,
+      'password': password,
+      // Kunci ke perangkat pertama (Menu Control → Sesi) — paritas web.
+      'device_id': await DeviceId.get(),
+    });
     final data = TokenResponse.fromJson(_Api._obj(jsonDecode(r.body)));
     await AuthStorage.saveToken(data.accessToken);
     return data;
@@ -366,22 +503,10 @@ class ApiService {
   /// Client ID Web backend). Akun baru otomatis role pembeli (`created`).
   static Future<({TokenResponse token, bool created})> loginGoogle(
       String idToken) async {
-    final r = await http
-        .post(
-          _Api._uri('/api/auth/google'),
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': DeviceId.userAgent(),
-          },
-          body: jsonEncode({
-            'credential': idToken,
-            'device_id': await DeviceId.get(),
-          }),
-        )
-        .timeout(_Api._timeout);
-    if (r.statusCode < 200 || r.statusCode >= 300) {
-      throw ApiException(r.statusCode, _Api._errorMessage(r));
-    }
+    final r = await _postMasuk('/api/auth/google', {
+      'credential': idToken,
+      'device_id': await DeviceId.get(),
+    });
     final j = _Api._obj(jsonDecode(r.body));
     final data = TokenResponse.fromJson(j);
     await AuthStorage.saveToken(data.accessToken);
@@ -416,11 +541,33 @@ class ApiService {
   /// token tetap dikirim bila ada.
   static Future<AppMeta> appMeta() async {
     final token = await AuthStorage.getToken();
-    final r = await http
-        .get(_Api._uri('/api/app/meta'),
-            headers: token == null ? null : {'Authorization': 'Bearer $token'})
-        .timeout(_Api._timeout);
+    final h = await _Api._headers(token);
+    final r = await _Api._kirim(
+      () => http.get(_Api._uri('/api/app/meta'), headers: h),
+      _Api._timeout,
+      null,
+    );
     return AppMeta.fromJson(_Api._obj(await _Api._decode(r)));
+  }
+
+  /// Terisi PESAN saat server membalas 426 (versi APK di bawah minimum).
+  /// Shell mendengarkannya untuk memunculkan halaman "Perbarui" yang tak bisa
+  /// ditutup; layar login menampilkan tombol unduh (audit 2026-09-28 KL-3).
+  static final ValueNotifier<String?> perluPerbarui =
+      ValueNotifier<String?>(null);
+
+  /// Kunci idempotensi acak (UUID v4) untuk header `Idempotency-Key`.
+  /// Satu kunci = satu PERCOBAAN checkout; dipakai ulang hanya saat pembeli
+  /// mengulang isi keranjang yang SAMA setelah galat jaringan, supaya server
+  /// mengembalikan pesanan yang sama alih-alih membuat baru (KL-5).
+  static String kunciIdempoten() {
+    final r = Random.secure();
+    final b = List<int>.generate(16, (_) => r.nextInt(256));
+    b[6] = (b[6] & 0x0f) | 0x40; // versi 4
+    b[8] = (b[8] & 0x3f) | 0x80; // varian RFC 4122
+    final h = b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
+    return '${h.substring(0, 8)}-${h.substring(8, 12)}-'
+        '${h.substring(12, 16)}-${h.substring(16, 20)}-${h.substring(20)}';
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -1108,12 +1255,20 @@ class ApiService {
 
   /// Buat pesanan. INGAT: satu pesanan = satu gudang. Keranjang yang barangnya
   /// tersebar di beberapa gudang harus dipesan bergantian per gudang.
+  ///
+  /// [expectedTotal] = total yang DILIHAT pembeli. Backend baru membalas 409
+  /// (detail objek `{pesan, total_baru, …}` atau string) bila tagihannya
+  /// ternyata beda — pesanan tak dibuat (audit 2026-09-28 KL-4); backend lama
+  /// mengabaikan field ini. [idempotencyKey] → header `Idempotency-Key` (KL-5).
+  /// Galat jaringan → `ApiException(0, pesanPutusPesanan)`.
   static Future<CreatedOrder> createOrder({
     required List<CartLine> items,
     String? note,
     String? courier,
     String? courierService,
-    double? shippingCost,
+    int? shippingCost,
+    int? expectedTotal,
+    String? idempotencyKey,
     int? weightGrams,
     String? paymentMethod,
     String? paymentChannel,
@@ -1140,7 +1295,10 @@ class ApiService {
         'note': ?note,
         'courier': ?courier,
         'courier_service': ?courierService,
+        // INT, bukan double: backend `shipping_cost: int` (Pydantic menolak
+        // 12000.5) — ongkir rupiah selalu bulat (KL-4).
         'shipping_cost': ?shippingCost,
+        'expected_total': ?expectedTotal,
         'weight_grams': ?weightGrams,
         'payment_method': ?paymentMethod,
         'payment_channel': ?paymentChannel,
@@ -1156,7 +1314,12 @@ class ApiService {
         // berlaku lagi menolak pesanan (tagihan = yang dilihat pembeli).
         'voucher_codes': voucherCodes,
       },
-      timeout: _Api._timeoutLong,
+      headers: {
+        if (idempotencyKey != null && idempotencyKey.isNotEmpty)
+          'Idempotency-Key': idempotencyKey,
+      },
+      timeout: _Api._timeoutCheckout,
+      pesanPutus: _Api.pesanPutusPesanan,
     );
     return CreatedOrder.fromJson(_Api._obj(data));
   }
@@ -1272,10 +1435,12 @@ class ApiService {
 
   /// Pembeli mengonfirmasi barang sudah diterima.
   static Future<void> confirmOrder(String code) =>
-      _Api.post('/api/orders/${Uri.encodeComponent(code)}/confirm');
+      _Api.post('/api/orders/${Uri.encodeComponent(code)}/confirm',
+          pesanPutus: _Api.pesanPutusPesanan);
 
   static Future<void> cancelOrder(String code) =>
-      _Api.post('/api/orders/${Uri.encodeComponent(code)}/cancel');
+      _Api.post('/api/orders/${Uri.encodeComponent(code)}/cancel',
+          pesanPutus: _Api.pesanPutusPesanan);
 
   /// Unggah bukti transfer manual.
   static Future<String> uploadProof(
@@ -1286,6 +1451,7 @@ class ApiService {
     final data = _Api._obj(await _Api.multipart(
       '/api/orders/${Uri.encodeComponent(code)}/proof',
       files: [(field: 'file', bytes: bytes, filename: filename)],
+      pesanPutus: _Api.pesanPutusPesanan,
     ));
     return data['url']?.toString() ?? '';
   }
@@ -1507,7 +1673,7 @@ class ApiService {
       });
       final req = http.MultipartRequest(
           'POST', _Api._uri('/api/returns/$jenis'))
-        ..headers['Authorization'] = 'Bearer $token'
+        ..headers.addAll(await _Api._headers(token))
         ..files.add(http.MultipartFile('file', dihitung, length,
             filename: filename));
       http.Response r;
@@ -1522,7 +1688,7 @@ class ApiService {
         client.close();
       }
       if (r.statusCode < 200 || r.statusCode >= 300) {
-        if (r.statusCode == 401) await _Api._throw(r);
+        if (r.statusCode == 401 || r.statusCode == 426) await _Api._throw(r);
         final msg = _Api._errorMessage(r);
         throw ApiException(r.statusCode,
             msg.startsWith('HTTP ') ? 'Unggah gagal (HTTP ${r.statusCode})' : msg);
@@ -1646,6 +1812,7 @@ class ApiService {
       _Api.put(
         '/api/branch/orders/${Uri.encodeComponent(code)}/status',
         body: {'status': status, 'tracking_no': ?trackingNo},
+        pesanPutus: _Api.pesanPutusPesanan,
       );
 
   /// Serah terima pesanan Ambil di Toko: unggah foto orang yang mengambil
@@ -1664,6 +1831,7 @@ class ApiService {
       '/api/branch/orders/${Uri.encodeComponent(code)}/serah-terima',
       files: [(field: 'file', bytes: bytes, filename: filename)],
       fields: {if (n.isNotEmpty) 'nama': n},
+      pesanPutus: _Api.pesanPutusPesanan,
     ));
     return '${data['url'] ?? ''}';
   }
@@ -1713,6 +1881,7 @@ class ApiService {
   static Future<void> setOrderStatus(String code, String status) => _Api.put(
         '/api/admin/orders/${Uri.encodeComponent(code)}/status',
         body: {'status': status},
+        pesanPutus: _Api.pesanPutusPesanan,
       );
 
   static Future<SalesRecap> salesRecap() async =>
@@ -2445,8 +2614,7 @@ class ApiService {
   }) async {
     final token = await _Api._token();
     final req = http.Request('POST', _Api._uri('/api/ai/chat-stream'))
-      ..headers['Authorization'] = 'Bearer $token'
-      ..headers['Content-Type'] = 'application/json'
+      ..headers.addAll(await _Api._headers(token, json: true))
       ..body = jsonEncode({
         'messages': messages,
         'sheet_id': sheetId ?? '',
@@ -2613,7 +2781,7 @@ class ApiService {
   }) async {
     final token = await _Api._token();
     final req = http.MultipartRequest('POST', _Api._uri('/api/ai/chat-sheet'))
-      ..headers['Authorization'] = 'Bearer $token'
+      ..headers.addAll(await _Api._headers(token))
       ..fields['messages'] = jsonEncode(messages)
       ..fields['conversation_id'] = conversationId ?? ''
       ..fields['stream'] = 'true'

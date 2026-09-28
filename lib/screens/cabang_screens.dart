@@ -423,7 +423,14 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
           trackingNo: trackingNo);
       await _load();
     } on ApiException catch (e) {
+      // Galat jaringan kini ApiException(0) berpesan "Koneksi terputus —
+      // periksa daftar Pesanan…": statusnya bisa saja sudah tersimpan, jadi
+      // petugas memeriksa dulu sebelum menekan ulang (audit 2026-09-28 KL-5).
       if (mounted) setState(() => _error = e.message);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = 'Status gagal diubah. Muat ulang pesanan lalu coba lagi.');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
