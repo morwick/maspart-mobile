@@ -1684,6 +1684,10 @@ class OrderDetail extends OrderSummary {
   /// terbuka → 'dikirim' hanya boleh dengan alasan "abaikan kendala".
   final bool kendalaTahanKirim;
 
+  /// QA2-G1: pesanan kurir tertahan (pembeli belum terima / paket hilang / resi
+  /// tak dikenal kurir) — gudang tak boleh menandai selesai; admin wajib alasan.
+  final String? tahanSelesai;
+
   /// T-10 (pembeli): laporan "belum terima barang" miliknya sedang dicek.
   final bool laporanBelumDiterima;
 
@@ -1768,6 +1772,7 @@ class OrderDetail extends OrderSummary {
     this.kendalaBy,
     this.kendalaKirim = false,
     this.kendalaTahanKirim = false,
+    this.tahanSelesai,
     this.laporanBelumDiterima = false,
     this.penilaian,
     this.retur,
@@ -1851,6 +1856,7 @@ class OrderDetail extends OrderSummary {
         kendalaBy: _sOrNull(j['kendala_by']),
         kendalaKirim: _b(j['kendala_kirim']),
         kendalaTahanKirim: _b(j['kendala_tahan_kirim']),
+        tahanSelesai: _sOrNull(j['tahan_selesai']),
         laporanBelumDiterima: _b(j['laporan_belum_diterima']),
         penilaian: j['penilaian'] is Map
             ? Penilaian.fromJson((j['penilaian'] as Map).cast<String, dynamic>())
