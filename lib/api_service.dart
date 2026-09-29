@@ -1287,6 +1287,7 @@ class ApiService {
     double? recipientLon,
     int pointRedeem = 0,
     List<String> voucherCodes = const [],
+    bool buatBaru = false,
   }) async {
     final data = await _Api.post(
       '/api/orders',
@@ -1321,6 +1322,10 @@ class ApiService {
         // Hanya KODE — potongannya dihitung ulang server; voucher yang tak
         // berlaku lagi menolak pesanan (tagihan = yang dilihat pembeli).
         'voucher_codes': voucherCodes,
+        // QA e2e 2026-09-29 #5: server menolak (409 `pesanan_serupa`) bila
+        // pesanan belum-bayar dgn isi sama sudah ada; true = pembeli memilih
+        // "Tetap buat pesanan baru" di dialog.
+        if (buatBaru) 'buat_baru': true,
       },
       headers: {
         if (idempotencyKey != null && idempotencyKey.isNotEmpty)

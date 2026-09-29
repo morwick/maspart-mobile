@@ -150,12 +150,42 @@ class CartStore extends ChangeNotifier {
   /// Muat keranjang milik [username]. Panggil sekali setelah login / saat
   /// shell dibangun — mengganti user akan memuat ulang keranjangnya sendiri.
   Future<void> load(String username) async {
-    final u = username.isEmpty ? 'anon' : username;
+    final nama = username.trim().toLowerCase();
+    final u = nama.isEmpty ? 'anon' : nama;
     if (_loaded && u == _username) return;
     _username = u;
     final prefs = await SharedPreferences.getInstance();
+    // Kunci kini huruf kecil (username token = huruf kecil). Keranjang & alamat
+    // lama yang tersimpan dengan ejaan asli (username /me, mis. "Linda")
+    // dipindah sekali ke kunci huruf kecil agar tak hilang.
+    await _pindahKunciLama(prefs, _key);
+    await _pindahKunciLama(prefs, _alamatKey);
     _items = _decode(prefs.getString(_key));
     _loaded = true;
+    notifyListeners();
+  }
+
+  static Future<void> _pindahKunciLama(
+      SharedPreferences prefs, String kunci) async {
+    if (prefs.containsKey(kunci)) return;
+    for (final k in prefs.getKeys()) {
+      if (k != kunci && k.toLowerCase() == kunci) {
+        final v = prefs.getString(k);
+        if (v != null) await prefs.setString(kunci, v);
+        await prefs.remove(k);
+        return;
+      }
+    }
+  }
+
+  /// Logout: lupakan keranjang akun ini dari MEMORI (isinya tetap tersimpan di
+  /// kunci akunnya). Tanpa ini singleton membawa barang akun A ke akun B yang
+  /// login sesudahnya — dan barang tambahan B ikut tersimpan ke kunci A
+  /// (QA e2e 2026-09-29 #14).
+  void reset() {
+    _username = 'anon';
+    _items = [];
+    _loaded = false;
     notifyListeners();
   }
 

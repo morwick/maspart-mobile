@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'config.dart';
@@ -40,6 +42,27 @@ class AuthStorage {
     final t = await _storage.read(key: AppConfig.tokenStorageKey);
     _memory = t;
     return t;
+  }
+
+  /// Username pemilik token (klaim `sub` JWT), huruf kecil — sama dengan yang
+  /// dipakai server (`deps.get_current_user`). Dibaca TANPA memanggil server,
+  /// supaya data per-akun (keranjang, kunci checkout) langsung memakai akun yang
+  /// benar walau `/api/auth/me` gagal (QA e2e 2026-09-29 #14). '' bila tak ada
+  /// token / token bukan JWT. ⚠️ Hanya untuk memilih kunci penyimpanan lokal,
+  /// BUKAN bukti identitas (tanda tangan tak diperiksa).
+  static Future<String> usernameToken() async {
+    try {
+      final t = await getToken();
+      if (t == null) return '';
+      final bagian = t.split('.');
+      if (bagian.length != 3) return '';
+      final isi = jsonDecode(
+          utf8.decode(base64Url.decode(base64Url.normalize(bagian[1]))));
+      if (isi is! Map) return '';
+      return (isi['sub'] ?? '').toString().trim().toLowerCase();
+    } catch (_) {
+      return '';
+    }
   }
 
   static Future<void> clearToken() async {

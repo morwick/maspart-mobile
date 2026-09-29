@@ -1594,6 +1594,11 @@ class _ReturDetailScreenState extends State<ReturDetailScreen> {
   final List<({String url, String jenis})> _bukti = [];
   int? _unggah; // progres unggah berjalan (null = tidak ada)
 
+  /// QA e2e 2026-09-29 #12: TRUE selama SELURUH berkas pilihan diunggah —
+  /// `_unggah` sempat null di antara dua berkas, dan "Kirim Bukti Tambahan"
+  /// yang ditekan di celah itu mengirim bukti setengah (berkas sisanya hilang).
+  bool _mengunggah = false;
+
   Timer? _poll;
 
   String get _code => '${widget.args['return_code'] ?? ''}';
@@ -1693,6 +1698,16 @@ class _ReturDetailScreenState extends State<ReturDetailScreen> {
       return;
     }
     final video = pilihan.startsWith('video');
+    if (files.isEmpty) return;
+    setState(() => _mengunggah = true);
+    try {
+      await _unggahSemua(files, video);
+    } finally {
+      if (mounted) setState(() => _mengunggah = false);
+    }
+  }
+
+  Future<void> _unggahSemua(List<XFile> files, bool video) async {
     for (final f in files) {
       if (!mounted) return;
       final nama = _namaFile(f, cadangan: video ? '' : 'jpg');
@@ -1911,7 +1926,7 @@ class _ReturDetailScreenState extends State<ReturDetailScreen> {
             label: _unggah != null ? 'Mengunggah… $_unggah%' : '+ Foto / Video',
             primary: false,
             height: 36,
-            onTap: _unggah != null ? null : _pilihBukti,
+            onTap: (_unggah != null || _mengunggah) ? null : _pilihBukti,
           ),
           const SizedBox(width: 10),
           if (_bukti.isNotEmpty)
@@ -1936,7 +1951,7 @@ class _ReturDetailScreenState extends State<ReturDetailScreen> {
             label: 'Kirim Bukti Tambahan',
             height: 38,
             loading: _busy,
-            onTap: (_busy || _bukti.isEmpty || _unggah != null)
+            onTap: (_busy || _bukti.isEmpty || _unggah != null || _mengunggah)
                 ? null
                 : () => _jalankan(
                       () => ApiService.tambahBuktiRetur(

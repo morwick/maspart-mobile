@@ -2090,6 +2090,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     );
   }
 
+  /// Status berikutnya yang sah dari [status] menurut alur resmi, atau null.
+  static String? _langkahBerikut(String status) {
+    final i = kOrderFlow.indexOf(status);
+    if (i < 0 || i + 1 >= kOrderFlow.length) return null;
+    return kOrderFlow[i + 1];
+  }
+
   Widget _aksi(MasColors m, OrderDetail o) => MasSectionCard(
         title: 'Ubah Status',
         children: [
@@ -2141,6 +2148,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           // dikirim/selesai terkunci selama pengiriman DITAHAN (T-5).
                           onTap: _busy ||
                                   o.status == s ||
+                                  // QA e2e 2026-09-29 #26: hanya langkah
+                                  // berikutnya yang sah (server
+                                  // _ALLOWED_TRANSITIONS: diproses→dikirim→
+                                  // selesai); batal/selesai/menunggu_verifikasi
+                                  // dulu menawarkan tombol yang pasti ditolak.
+                                  _langkahBerikut(o.status) != s ||
                                   (o.tahanKirim && (s == 'dikirim' || s == 'selesai')) ||
                                   // Wajib video packing belum terpenuhi (2026-09-29).
                                   (s == 'dikirim' && !o.pickup &&

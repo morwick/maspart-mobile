@@ -15,12 +15,15 @@
 //    voucher diskon − potongan poin. Ongkir tidak kena PPN (lihat order_ui).
 
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api_service.dart';
 import '../app/nav.dart';
+import '../auth_storage.dart';
 import '../cart.dart';
 import '../order_ui.dart';
 import '../theme/mas_theme.dart';
@@ -93,6 +96,10 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   bool _ambilSendiri = false;
 
   bool _gatewayOn = false;
+
+  /// #11: `/payments/methods` GAGAL dimuat (bukan "gateway mati") — dulu
+  /// dianggap belum aktif dan checkout tertutup sampai layar dibuka ulang.
+  bool _gatewayGagal = false;
   bool _busy = false;
   String? _error;
 
@@ -107,8 +114,11 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   /// yang jawabannya TAK PASTI (koneksi putus / 5xx — server bisa saja sudah
   /// membuat pesanannya). Dipakai ulang hanya bila isi pesanannya persis sama,
   /// sehingga server mengembalikan pesanan yang sama, bukan pesanan & VA kedua.
-  String? _idemKey;
-  String? _idemSig;
+  ///
+  /// QA e2e 2026-09-29 #5: disimpan di SharedPreferences (per akun, ≤24 jam),
+  /// bukan cuma di memori — aplikasi yang dimatikan saat "Memproses…" dulu
+  /// kehilangan kuncinya, lalu Proses ulang membuat pesanan & VA kedua.
+  static const _idemTtl = Duration(hours: 24);
 
   Timer? _ongkirDebounce;
   Timer? _pickupDebounce;
@@ -290,13 +300,72 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     _scheduleOngkir();
   }
 
-  Future<void> _loadGateway() async {
+  /// [coba] = percobaan ke berapa; galat sesaat diulang otomatis 2× (#11).
+  Future<void> _loadGateway({int coba = 0}) async {
     try {
       final m = await ApiService.paymentMethods();
-      if (mounted) setState(() => _gatewayOn = m.gatewayAvailable);
-    } on ApiException {
-      if (mounted) setState(() => _gatewayOn = false);
+      if (mounted) {
+        setState(() {
+          _gatewayOn = m.gatewayAvailable;
+          _gatewayGagal = false;
+        });
+      }
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _gatewayOn = false;
+        _gatewayGagal = true;
+      });
+      if (!e.isAuth && coba < 2) {
+        await Future<void>.delayed(Duration(seconds: 2 * (coba + 1)));
+        if (mounted && !_gatewayOn) await _loadGateway(coba: coba + 1);
+      }
     }
+  }
+
+  // ── Kunci idempotensi tersimpan (#5) ────────────────────────────────
+
+  Future<String> _idemPrefKey() async =>
+      'maspart_checkout_idem_${await AuthStorage.usernameToken()}';
+
+  /// Kunci tersimpan untuk [sig] yang masih berlaku, atau null.
+  Future<String?> _idemAmbil(String sig) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(await _idemPrefKey());
+      if (raw == null || raw.isEmpty) return null;
+      final j = jsonDecode(raw);
+      if (j is! Map) return null;
+      final at = DateTime.fromMillisecondsSinceEpoch(
+          (j['at'] as num?)?.toInt() ?? 0);
+      if (DateTime.now().difference(at) > _idemTtl) return null;
+      if (j['sig'] != sig) return null;
+      final k = (j['key'] ?? '').toString();
+      return k.isEmpty ? null : k;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _idemSimpan(String sig, String key) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        await _idemPrefKey(),
+        jsonEncode({
+          'sig': sig,
+          'key': key,
+          'at': DateTime.now().millisecondsSinceEpoch,
+        }),
+      );
+    } catch (_) {/* tak fatal: server tetap punya dedupe sidik jari */}
+  }
+
+  Future<void> _idemBuang() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(await _idemPrefKey());
+    } catch (_) {}
   }
 
   /// Segarkan keadaan tiap item dari server, lalu hitung ulang berat + ongkir.
@@ -552,8 +621,10 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   }
 
   /// Part yang tak bisa dibeli (harga/berat/stok) → blokir checkout.
+  /// QA e2e 2026-09-29 #9: hanya barang yang IKUT dipesan kali ini — barang
+  /// gudang lain ditahan untuk transaksi berikutnya, tak boleh menghalangi.
   List<CartItem> get _blokir =>
-      _cart.items.where((i) => !_bisaBeli(i)).toList();
+      _itemsBeli.where((i) => !_bisaBeli(i)).toList();
 
   int get _subtotal =>
       _itemsBeli.fold(0, (n, i) => n + _hargaOf(i) * i.qty);
@@ -678,6 +749,9 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         if (_poinPakai > _poinMaks) _poinPakai = _poinMaks;
       });
     } on ApiException {
+      // #8: gagal → subtotal ini boleh dicoba lagi pada penyegaran berikutnya
+      // (dulu tanda tangannya tertinggal dan poin tak pernah ditawarkan lagi).
+      _poinSigSubtotal = -1;
       if (!mounted) return;
       // Gagal tahu batasnya → jangan tawarkan sama sekali.
       setState(() { _poinMaks = 0; _poinPakai = 0; });
@@ -698,7 +772,9 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
 
   // ── Checkout ────────────────────────────────────────────────────────
 
-  Future<void> _process() async {
+  /// [buatBaru] = pembeli memilih "Tetap buat pesanan baru" setelah server
+  /// menemukan pesanan belum-bayar berisi sama (409 `pesanan_serupa`).
+  Future<void> _process({bool buatBaru = false}) async {
     final nav = AppNav.of(context);
     final beli = _itemsBeli;
     if (beli.isEmpty) return;
@@ -722,9 +798,16 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           'Lengkapi alamat penerima (nama, no. HP, alamat, kode pos) dulu.');
       return;
     }
+    if (!_gatewayOn && _gatewayGagal) {
+      // #11: galat sesaat saat membuka keranjang — cek sekali lagi dulu.
+      await _loadGateway(coba: 2);
+      if (!mounted) return;
+    }
     if (!_gatewayOn) {
-      setState(() =>
-          _error = 'Pembayaran online (VA/QRIS) belum aktif. Hubungi admin.');
+      setState(() => _error = _gatewayGagal
+          ? 'Metode pembayaran belum bisa dicek (koneksi bermasalah). Coba lagi '
+              'sebentar.'
+          : 'Pembayaran online (VA/QRIS) belum aktif. Hubungi admin.');
       return;
     }
 
@@ -761,11 +844,14 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       _nameCtl.text.trim(), _phoneCtl.text.trim(), _addressCtl.text.trim(),
       _postalCtl.text.trim(), _lat, _lon,
     ].join('|');
-    final idemKey = (_idemKey != null && _idemSig == sig)
-        ? _idemKey!
-        : ApiService.kunciIdempoten();
-    _idemKey = null;
-    _idemSig = null;
+    // Kunci disimpan SEBELUM dikirim: aplikasi yang mati di tengah permintaan
+    // tetap memakai kunci yang sama saat pembeli menekan Proses lagi (#5).
+    final lama = buatBaru ? null : await _idemAmbil(sig);
+    final idemKey = lama ?? ApiService.kunciIdempoten();
+    await _idemSimpan(sig, idemKey);
+    if (!mounted) return;
+    final pnDipesan = beli.map((i) => i.partNumber).toList();
+    var ulangBaru = false;
 
     setState(() {
       _busy = true;
@@ -800,7 +886,9 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         // dari titik ini (paritas web `recipient_lat/lon`).
         recipientLat: _lat,
         recipientLon: _lon,
+        buatBaru: buatBaru,
       );
+      await _idemBuang();
 
       await _cart.saveAddress(SavedAddress(
         name: _nameCtl.text.trim(),
@@ -810,26 +898,46 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       ));
 
       // Hanya item yang JADI dipesan yang keluar dari keranjang — part gudang
-      // lain tetap tersimpan untuk transaksi berikutnya.
-      if (_lintasGudang) {
-        await _cart.removeAll(beli.map((i) => i.partNumber));
-      } else {
-        await _cart.clear();
-      }
+      // lain (dan barang yang ditambahkan sementara itu) tetap tersimpan.
+      await _cart.removeAll(pnDipesan);
 
-      if (!mounted) return;
-      // LANGSUNG ke pembayaran — jangan biarkan pembeli mencari tombol Bayar.
-      nav.go(MasScreen.pesananDetail, part: {
+      final ke = {
         'order_code': res.orderCode,
         'payment_url': res.payment?.url ?? '',
         'autopay': true,
-      });
+      };
+      if (!mounted) {
+        // #28: pembeli sudah meninggalkan keranjang saat pesanan selesai
+        // dibuat — jangan diam; beri jalan ke pembayarannya.
+        nav.toast('Pesanan ${res.orderCode} sudah dibuat — segera bayar.',
+            actionLabel: 'Bayar',
+            onAction: () => nav.go(MasScreen.pesananDetail, part: ke));
+        return;
+      }
+      // LANGSUNG ke pembayaran — jangan biarkan pembeli mencari tombol Bayar.
+      nav.go(MasScreen.pesananDetail, part: ke);
     } on ApiException catch (e) {
+      // Jawaban pasti (4xx) = pesanan TIDAK dibuat → kunci tak perlu dipakai
+      // ulang. Tanpa jawaban pasti (jaringan / 5xx) kunci tetap tersimpan.
+      if (!(e.isJaringan || e.statusCode >= 500)) await _idemBuang();
+      final kode = '${e.detail?['kode'] ?? ''}';
+      final kodePesanan = '${e.detail?['order_code'] ?? ''}';
+      if (e.statusCode == 409 &&
+          kode == 'pesanan_sudah_dibayar' &&
+          kodePesanan.isNotEmpty) {
+        // Percobaan checkout ini ternyata sudah jadi pesanan yang LUNAS
+        // (mis. dibayar dari layar lain) → barangnya keluar dari keranjang.
+        await _cart.removeAll(pnDipesan);
+        nav.toast(e.message);
+        nav.go(MasScreen.pesananDetail, part: {'order_code': kodePesanan});
+        return;
+      }
       if (!mounted) return;
-      // Tanpa jawaban pasti → simpan kunci untuk klik ulang yang sama.
-      if (e.isJaringan || e.statusCode >= 500) {
-        _idemKey = idemKey;
-        _idemSig = sig;
+      if (e.statusCode == 409 &&
+          kode == 'pesanan_serupa' &&
+          kodePesanan.isNotEmpty) {
+        ulangBaru = await _tawarPesananSerupa(e, kodePesanan, pnDipesan);
+        return;
       }
       setState(() => _error = e.isJaringan
           ? 'Koneksi terputus sebelum pesanan terkonfirmasi — pesanan mungkin '
@@ -837,19 +945,76 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
               'Pembelian lagi.'
           : e.message);
       if (e.isJaringan) {
-        await _cariPesananTerbuat(tampil, beli.map((i) => i.partNumber).toList());
+        await _cariPesananTerbuat(tampil, pnDipesan);
         return;
       }
-      if (e.statusCode == 409) {
-        // T-13: tagihan berubah (harga / ongkir / voucher / poin) — pesanan
-        // BELUM dibuat. Muat ulang semua angka supaya pembeli melihat total baru
-        // sebelum menekan Proses lagi.
-        await _refreshServerState();
-        if (mounted && !_ambilSendiri) await _cekOngkir();
+      if (e.statusCode == 409 || e.statusCode == 400) {
+        // T-13 / QA e2e 2026-09-29 #8: tagihan berubah, stok kurang, voucher
+        // terpakai / tak berlaku, poin tak cukup — pesanan BELUM dibuat.
+        // Muat ulang SEMUA komponen tagihan (harga, stok, ongkir, voucher,
+        // poin) supaya Proses berikutnya lolos atau alasannya terlihat;
+        // dulu batas poin & voucher tertahan tanda tangan lama → galat sama
+        // berulang tanpa akhir.
+        await _segarkanTagihan();
       }
     } finally {
       if (mounted) setState(() => _busy = false);
+      // Di finally, bukan sesudah try: cabang `pesanan_serupa` keluar lewat
+      // `return` di dalam catch.
+      if (ulangBaru && mounted) unawaited(_process(buatBaru: true));
     }
+  }
+
+  /// Paksa semua angka tagihan diambil ulang dari server.
+  Future<void> _segarkanTagihan() async {
+    _poinSigSubtotal = -1;
+    _vSigDiminta = '';
+    await _refreshServerState();
+    if (!mounted) return;
+    if (!_ambilSendiri) await _cekOngkir();
+    if (!mounted) return;
+    await _refreshVoucher();
+    if (!mounted) return;
+    await _refreshPoin();
+  }
+
+  /// 409 `pesanan_serupa`: server menemukan pesanan BELUM DIBAYAR berisi sama
+  /// (refresh / app dimatikan / Kembali saat Proses). Tawarkan membukanya;
+  /// true = pembeli sengaja ingin pesanan BARU (dikirim ulang `buat_baru`).
+  Future<bool> _tawarPesananSerupa(
+      ApiException e, String kodePesanan, List<String> pnDipesan) async {
+    final total = (e.detail?['total'] as num?)?.round();
+    final pilih = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Pesanan serupa belum dibayar'),
+        content: Text(e.message.isNotEmpty
+            ? e.message
+            : 'Pesanan $kodePesanan'
+                '${total != null ? ' senilai ${formatRupiah(total)}' : ''} berisi '
+                'barang yang sama dan belum dibayar.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Batal')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, 'baru'),
+              child: const Text('Tetap buat pesanan baru')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, 'buka'),
+              child: Text('Buka pesanan $kodePesanan')),
+        ],
+      ),
+    );
+    if (!mounted) return false;
+    if (pilih == 'baru') return true;
+    if (pilih == 'buka') {
+      await _cart.removeAll(pnDipesan);
+      if (!mounted) return false;
+      AppNav.of(context)
+          .go(MasScreen.pesananDetail, part: {'order_code': kodePesanan});
+    }
+    return false;
   }
 
   /// S-16: setelah koneksi putus, cari pesanan BELUM DIBAYAR yang baru saja
@@ -894,13 +1059,8 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       ),
     );
     if (buka != true || !mounted) return;
-    _idemKey = null;
-    _idemSig = null;
-    if (_lintasGudang) {
-      await _cart.removeAll(pnDipesan);
-    } else {
-      await _cart.clear();
-    }
+    await _idemBuang();
+    await _cart.removeAll(pnDipesan);
     if (!mounted) return;
     AppNav.of(context).go(MasScreen.pesananDetail, part: {'order_code': kode});
   }
@@ -1757,7 +1917,13 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
               'atau kartu. Pembayaran terverifikasi otomatis.',
               style: TextStyle(fontSize: 12.5, color: m.ink600, height: 1.5),
             )
-          else
+          else if (_gatewayGagal) ...[
+            _alert(m, 'Metode pembayaran belum bisa dimuat — periksa koneksi.'),
+            TextButton(
+              onPressed: () => _loadGateway(coba: 2),
+              child: const Text('Coba lagi'),
+            ),
+          ] else
             _alert(m, 'Pembayaran online belum aktif. Hubungi admin.'),
         ]),
       );

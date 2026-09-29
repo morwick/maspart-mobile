@@ -447,6 +447,24 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
       // QA2-G3: 409 = status berubah di sela (pesanan DIBATALKAN / dana
       // ditarik) → tampilkan status sebenarnya; pesan galat tetap terlihat.
       if (mounted && e.statusCode == 409) await _load();
+      // QA e2e 2026-09-29 #15: server kini MENOLAK "selesai" untuk pesanan
+      // kurir yang belum dinyatakan terkirim oleh ekspedisi — tampilkan
+      // alasannya di dialog, jangan hanya teks galat yang mudah terlewat.
+      if (mounted && e.statusCode == 409 && status == 'selesai') {
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Belum bisa diselesaikan',
+                style: TextStyle(fontSize: 16)),
+            content: Text(e.message, style: const TextStyle(fontSize: 13.5)),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Mengerti')),
+            ],
+          ),
+        );
+      }
     } catch (_) {
       if (mounted) {
         setState(() => _error = 'Status gagal diubah. Muat ulang pesanan lalu coba lagi.');
@@ -581,7 +599,8 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
       'Tandai ${orderStatusLabel(next, pickup: o.pickup)}',
       next == 'selesai' && !o.pickup
           ? 'Tandai $_code SELESAI?\n\n'
-              'Lakukan HANYA bila barang terbukti sudah diterima pembeli (cek lacak resi).\n'
+              'Lakukan HANYA bila barang terbukti sudah diterima pembeli (cek lacak resi) — '
+              'server menolak bila ekspedisi belum menyatakan paket terkirim.\n'
               '• Poin pembeli dari pesanan ini dicairkan.\n'
               '• Batas waktu pengajuan retur mulai berjalan.\n'
               '• Status tidak bisa dikembalikan dari aplikasi.'

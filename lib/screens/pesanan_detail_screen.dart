@@ -109,6 +109,11 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
       setState(() {
         _order = o;
         _loaded = true;
+        // #27: peringatan "pembayaran gagal" dari Snap basi begitu pesanan
+        // tak lagi menunggu pembayaran (sudah lunas / batal).
+        if (_error == _pesanSnapGagal && o.status != 'menunggu_pembayaran') {
+          _error = null;
+        }
       });
       _syncPolling();
       _resolveSender();
@@ -157,8 +162,14 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
     _autopayDone = true;
     final url = '${widget.args['payment_url'] ?? ''}';
     if (widget.args['autopay'] != true || url.isEmpty) return;
+    // QA e2e 2026-09-29 #13: hanya pesanan yang MASIH menunggu pembayaran —
+    // detail yang dibangun ulang (Kembali dari layar lain) untuk pesanan yang
+    // sudah lunas/batal dulu membuka Midtrans lagi.
+    if (_order?.status != 'menunggu_pembayaran') return;
     await _openSnap(url);
   }
+
+  static const _pesanSnapGagal = 'Pembayaran dibatalkan atau gagal. Coba lagi.';
 
   Future<void> _openSnap(String url) async {
     final outcome = await Navigator.of(context).push<SnapOutcome>(
@@ -168,7 +179,7 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
     );
     if (!mounted) return;
     if (outcome == SnapOutcome.gagal) {
-      setState(() => _error = 'Pembayaran dibatalkan atau gagal. Coba lagi.');
+      setState(() => _error = _pesanSnapGagal);
     }
     // Apa pun hasilnya, tanyakan ke server — itulah kebenarannya. Snap bilang
     // "selesai" tapi server belum melihat uangnya → beri tahu pembeli.
@@ -190,6 +201,9 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
       // (kedaluwarsa) tetap tampil "Menunggu Pembayaran" & polling jalan terus.
       final berubah = r.status.isNotEmpty && r.status != _order?.status;
       if (r.paid || berubah) await _load();
+      if (mounted && r.paid && _error == _pesanSnapGagal) {
+        setState(() => _error = null);
+      }
       if (!mounted) return;
       final err = r.error;
       setState(() => _galatBayar = (err != null && err.isNotEmpty) ? err : null);
@@ -277,11 +291,10 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
           'membatalkan setelah transfer dapat membuat dana tertahan.',
     );
     if (ok != true) return;
+    // R-24: batal ditolak karena pesanan ternyata SUDAH dibayar → _run memuat
+    // ulang pesanan sesudah galat (pesan galat tetap tampil).
     await _run('cancel', () => ApiService.cancelOrder(_code),
         gagal: 'Gagal membatalkan pesanan.');
-    // R-24: batal ditolak karena pesanan ternyata SUDAH dibayar → statusnya
-    // baru saja berubah di server; muat ulang (pesan galat tetap tampil).
-    if (mounted && _error != null) await _load();
   }
 
   Future<void> _doUploadProof() async {
@@ -311,6 +324,10 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
       // pembeli diminta memeriksa (tarik untuk memuat ulang), bukan menekan
       // ulang membabi buta (audit 2026-09-28 KL-5).
       if (mounted) setState(() => _error = e.message.isNotEmpty ? e.message : gagal);
+      // QA e2e 2026-09-29: aksi ditolak biasanya karena status pesanan sudah
+      // berubah di server (selesai otomatis, dibatalkan admin, lunas) → muat
+      // ulang supaya tombol basi hilang. Pesan galatnya tetap tampil.
+      if (mounted && !e.isAuth) await _load();
     } catch (_) {
       // Apa pun selain ApiException (mis. gagal membaca file bukti) tak boleh
       // lolos tanpa pesan.
@@ -1152,18 +1169,22 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                   .contains(o.status)) ...[
                 // Bukti transfer manual HANYA untuk order non-gateway —
                 // pembayaran Midtrans terverifikasi otomatis lewat webhook.
+                // QA e2e 2026-09-29 #1: dan hanya selama MENUNGGU PEMBAYARAN;
+                // bukti yang sudah terkirim cukup ditampilkan tautannya.
                 if (!gateway) ...[
-                  const SizedBox(height: 10),
-                  MasButton(
-                    label: _busy == 'proof'
-                        ? 'Mengunggah…'
-                        : '📎 Upload Bukti Transfer',
-                    primary: false,
-                    height: 38,
-                    expand: true,
-                    loading: _busy == 'proof',
-                    onTap: _busy != null ? null : _doUploadProof,
-                  ),
+                  if (o.status == 'menunggu_pembayaran') ...[
+                    const SizedBox(height: 10),
+                    MasButton(
+                      label: _busy == 'proof'
+                          ? 'Mengunggah…'
+                          : '📎 Upload Bukti Transfer',
+                      primary: false,
+                      height: 38,
+                      expand: true,
+                      loading: _busy == 'proof',
+                      onTap: _busy != null ? null : _doUploadProof,
+                    ),
+                  ],
                   if (o.paymentProofUrl != null &&
                       o.paymentProofUrl!.isNotEmpty) ...[
                     const SizedBox(height: 6),
@@ -1175,16 +1196,28 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                     ),
                   ],
                 ],
-                const SizedBox(height: 10),
-                Center(
-                  child: TextButton(
-                    onPressed: _busy != null ? null : _doCancel,
-                    child: Text(
-                      _busy == 'cancel' ? 'Membatalkan…' : 'Batalkan Pesanan',
-                      style: TextStyle(fontSize: 13, color: m.danger600),
+                // #6: bukti transfer sudah dikirim (uang diklaim sudah masuk)
+                // → pembatalan lewat admin supaya dananya dikembalikan.
+                if (o.status == 'menunggu_pembayaran' &&
+                    (o.paymentProofUrl ?? '').isEmpty) ...[
+                  const SizedBox(height: 10),
+                  Center(
+                    child: TextButton(
+                      onPressed: _busy != null ? null : _doCancel,
+                      child: Text(
+                        _busy == 'cancel' ? 'Membatalkan…' : 'Batalkan Pesanan',
+                        style: TextStyle(fontSize: 13, color: m.danger600),
+                      ),
                     ),
                   ),
-                ),
+                ] else if (o.status == 'menunggu_verifikasi') ...[
+                  const SizedBox(height: 8),
+                  _alert(
+                    m,
+                    'Bukti bayar sudah dikirim. Ingin membatalkan? Hubungi admin '
+                    'supaya dana Anda dikembalikan.',
+                  ),
+                ],
               ],
             ],
           ),
