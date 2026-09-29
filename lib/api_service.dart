@@ -1981,6 +1981,8 @@ class ApiService {
           'keterangan': keterangan.isEmpty ? null : keterangan,
           'final': finalRefund,
         },
+        // Hasil tak diketahui saat koneksi putus → periksa dulu, jangan catat dua kali.
+        pesanPutus: _Api.pesanPutusPesanan,
       );
 
   /// Pesanan Bermasalah (T-7) — padanan web /admin/bermasalah.
