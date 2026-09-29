@@ -1867,9 +1867,13 @@ class ApiService {
         const [];
   }
 
-  static Future<List<ChatMessage>> branchChat(String buyer) async {
+  /// [gudang] = `gudang_key` thread (akun pemegang beberapa gudang); kosong =
+  /// gudang bawaan akun (perilaku lama).
+  static Future<List<ChatMessage>> branchChat(String buyer,
+      {String gudang = ''}) async {
     final data = _Api._obj(
-      await _Api.get('/api/chat/branch/${Uri.encodeComponent(buyer)}'),
+      await _Api.get('/api/chat/branch/${Uri.encodeComponent(buyer)}',
+          query: gudang.isEmpty ? null : {'gudang': gudang}),
     );
     return (data['messages'] as List?)
             ?.whereType<Map>()
@@ -1878,9 +1882,12 @@ class ApiService {
         const [];
   }
 
-  static Future<void> sendBranchChat(String buyer, String body) => _Api.post(
+  static Future<void> sendBranchChat(String buyer, String body,
+          {String gudang = ''}) =>
+      _Api.post(
         '/api/chat/branch/${Uri.encodeComponent(buyer)}',
         body: {'body': body},
+        query: gudang.isEmpty ? null : {'gudang': gudang},
       );
 
   /// Admin: SEMUA thread chat gudang lintas gudang (masukan penguji 2026-09-29).
@@ -1915,10 +1922,20 @@ class ApiService {
   // Cabang: pesanan masuk & penjualan
   // ────────────────────────────────────────────────────────────────────
 
-  static Future<({String branch, List<OrderSummary> orders})> branchOrders() async {
+  /// `branch` = gabungan nama gudang akun ini ("Jakarta, Pekanbaru");
+  /// `branches` = daftarnya (satu akun boleh memegang beberapa gudang).
+  static Future<({String branch, List<String> branches, List<OrderSummary> orders})>
+      branchOrders() async {
     final data = _Api._obj(await _Api.get('/api/branch/orders'));
+    final branch = data['branch']?.toString() ?? '';
+    final branches = (data['branches'] as List?)
+            ?.map((e) => e.toString())
+            .where((e) => e.isNotEmpty)
+            .toList() ??
+        (branch.isEmpty ? const <String>[] : [branch]);
     return (
-      branch: data['branch']?.toString() ?? '',
+      branch: branch,
+      branches: branches,
       orders: (data['orders'] as List?)
               ?.whereType<Map>()
               .map((e) => OrderSummary.fromJson(e.cast<String, dynamic>()))

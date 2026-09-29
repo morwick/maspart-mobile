@@ -103,6 +103,9 @@ class CabangPesananScreen extends StatefulWidget {
 
 class _CabangPesananScreenState extends State<CabangPesananScreen> {
   String _branch = '';
+
+  /// Gudang yang dipegang akun ini — satu akun boleh memegang beberapa gudang.
+  List<String> _branches = const [];
   List<OrderSummary> _orders = [];
   bool _loading = true;
   String? _error;
@@ -134,6 +137,7 @@ class _CabangPesananScreenState extends State<CabangPesananScreen> {
       if (!mounted) return;
       setState(() {
         _branch = d.branch;
+        _branches = d.branches;
         _orders = d.orders;
         _loading = false;
       });
@@ -176,7 +180,11 @@ class _CabangPesananScreenState extends State<CabangPesananScreen> {
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                _branch.isNotEmpty ? 'Gudang $_branch' : 'Gudang cabang Anda',
+                _branches.length > 1
+                    ? '${_branches.length} gudang: ${_branches.join(", ")}'
+                    : _branch.isNotEmpty
+                        ? 'Gudang $_branch'
+                        : 'Gudang cabang Anda',
                 style: TextStyle(
                     fontSize: 13, fontWeight: FontWeight.w600, color: m.ink900),
               ),
@@ -266,6 +274,18 @@ class _CabangPesananScreenState extends State<CabangPesananScreen> {
                   style: masMono(
                       size: 14, weight: FontWeight.w700, color: m.brand700)),
             ]),
+            if (_branches.length > 1 && o.gudang.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Row(children: [
+                Icon(Icons.warehouse_outlined, size: 13, color: m.ink400),
+                const SizedBox(width: 5),
+                Text('Gudang ${o.gudang}',
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: m.ink700)),
+              ]),
+            ],
             const SizedBox(height: 6),
             Row(children: [
               Expanded(
@@ -1984,6 +2004,10 @@ class _CabangChatScreenState extends State<CabangChatScreen> {
 
   /// Username pembeli yang percakapannya sedang dibuka; null = daftar thread.
   String? _open;
+
+  /// `gudang_key` thread yang dibuka — akun pemegang beberapa gudang bisa
+  /// punya thread pembeli yang sama di tiap gudang. '' = gudang bawaan akun.
+  String _openGudang = '';
   bool _loading = true;
   String? _error;
   Timer? _poll;
@@ -1993,6 +2017,7 @@ class _CabangChatScreenState extends State<CabangChatScreen> {
     super.initState();
     final b = '${widget.args['buyer'] ?? ''}'.trim().toLowerCase();
     if (b.isNotEmpty) _open = b;
+    _openGudang = '${widget.args['gudang'] ?? ''}'.trim().toLowerCase();
     _load();
     // Ikut web: daftar percakapan disegarkan tiap 15 detik supaya pertanyaan
     // pembeli yang baru masuk terlihat tanpa perlu tarik-untuk-muat-ulang.
@@ -2037,6 +2062,13 @@ class _CabangChatScreenState extends State<CabangChatScreen> {
     final m = context.mas;
     final nav = AppNav.of(context);
     final open = _open;
+    final gudangOpen = _openGudang;
+    final labelOpen = _threads
+            .where((t) =>
+                t.buyerUsername == open && t.gudangKey == gudangOpen)
+            .map((t) => t.gudangLabel)
+            .firstOrNull ??
+        '';
 
     if (open != null) {
       return Column(children: [
@@ -2056,7 +2088,10 @@ class _CabangChatScreenState extends State<CabangChatScreen> {
               },
             ),
             Expanded(
-              child: Text('Pembeli $open',
+              child: Text(
+                  labelOpen.isNotEmpty && _multiGudang
+                      ? 'Pembeli $open · Gudang $labelOpen'
+                      : 'Pembeli $open',
                   style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -2069,10 +2104,11 @@ class _CabangChatScreenState extends State<CabangChatScreen> {
         // juga tidak memberinya.
         Expanded(
           child: ChatThreadView(
-            key: ValueKey(open),
+            key: ValueKey('$gudangOpen/$open'),
             me: nav.username,
-            fetch: () => ApiService.branchChat(open),
-            send: (body) => ApiService.sendBranchChat(open, body),
+            fetch: () => ApiService.branchChat(open, gudang: gudangOpen),
+            send: (body) =>
+                ApiService.sendBranchChat(open, body, gudang: gudangOpen),
           ),
         ),
       ]);
@@ -2116,8 +2152,16 @@ class _CabangChatScreenState extends State<CabangChatScreen> {
     );
   }
 
+  /// Thread berasal dari lebih dari satu gudang → label gudang ditampilkan.
+  bool get _multiGudang =>
+      _threads.map((t) => t.gudangKey).where((k) => k.isNotEmpty).toSet().length >
+      1;
+
   Widget _threadRow(MasColors m, ChatThreadSummary t) => InkWell(
-        onTap: () => setState(() => _open = t.buyerUsername),
+        onTap: () => setState(() {
+          _open = t.buyerUsername;
+          _openGudang = t.gudangKey;
+        }),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
@@ -2141,6 +2185,12 @@ class _CabangChatScreenState extends State<CabangChatScreen> {
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                           color: m.ink900)),
+                  if (_multiGudang && t.gudangLabel.isNotEmpty)
+                    Text('Gudang ${t.gudangLabel}',
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: m.brand700)),
                   const SizedBox(height: 2),
                   Text(t.last,
                       maxLines: 1,
