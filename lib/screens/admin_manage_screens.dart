@@ -2314,6 +2314,10 @@ class _GudangScreenState extends State<GudangScreen> {
   final Map<String, TextEditingController> _pic = {};
   final Map<String, TextEditingController> _key = {};
 
+  /// Akun staf untuk dropdown Key/Akun (paritas web). null = gagal dimuat →
+  /// kolom kembali jadi isian teks agar admin tetap bisa menyimpan.
+  List<AdminUser>? _akun;
+
   bool _loading = true;
   bool _busy = false;
   String? _error;
@@ -2348,8 +2352,23 @@ class _GudangScreenState extends State<GudangScreen> {
     });
     try {
       final g = await ApiService.adminGudang();
+      List<AdminUser>? akun;
+      try {
+        // Key/Akun = username staf cabang aktif (role 'user'); admin & pembeli
+        // tak memproses pesanan cabang, 'mas' melihat semua gudang.
+        akun = (await ApiService.listUsers())
+            .where((u) =>
+                u.role == 'user' &&
+                u.isActive &&
+                u.username.toLowerCase() != 'mas')
+            .toList()
+          ..sort((a, b) => a.username.compareTo(b.username));
+      } on ApiException {
+        akun = null;
+      }
       if (!mounted) return;
       setState(() {
+        _akun = akun;
         _buangController();
         _rows = g.map(_GudangRow.from).toList();
         for (final r in _rows) {
@@ -2627,12 +2646,15 @@ class _GudangScreenState extends State<GudangScreen> {
             const SizedBox(height: 12),
             const MasEyebrow('Key / akun cabang'),
             const SizedBox(height: 6),
-            _Field(
-              controller: _key[r.label]!,
-              hint: 'mis. jakarta',
-              mono: true,
-              onChanged: (v) => r.key = v.trim().toLowerCase(),
-            ),
+            if (_akun != null)
+              _pilihAkun(r, _akun!)
+            else
+              _Field(
+                controller: _key[r.label]!,
+                hint: 'mis. jakarta',
+                mono: true,
+                onChanged: (v) => r.key = v.trim().toLowerCase(),
+              ),
           ],
 
           const SizedBox(height: 10),
@@ -2642,6 +2664,67 @@ class _GudangScreenState extends State<GudangScreen> {
           ),
         ]),
       );
+
+  /// Dropdown akun staf cabang. Akun yang sudah memegang gudang utama lain
+  /// dinonaktifkan (backend menolak satu key dipakai dua gudang).
+  Widget _pilihAkun(_GudangRow r, List<AdminUser> akun) {
+    final m = context.mas;
+    final ada = akun.any((u) => u.username.toLowerCase() == r.key);
+    return Container(
+      height: 42,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: m.paper,
+        borderRadius: BorderRadius.circular(MasRadii.input),
+        border: Border.all(color: m.ink200),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: r.key,
+          isExpanded: true,
+          icon: Icon(Icons.keyboard_arrow_down_rounded,
+              size: 18, color: m.ink500),
+          style: TextStyle(fontSize: 13, color: m.ink800),
+          dropdownColor: m.paper,
+          items: [
+            const DropdownMenuItem(value: '', child: Text('— pilih akun —')),
+            if (r.key.isNotEmpty && !ada)
+              DropdownMenuItem(
+                value: r.key,
+                child: Text('${r.key} (akun tak ditemukan)',
+                    overflow: TextOverflow.ellipsis),
+              ),
+            for (final u in akun)
+              () {
+                final nama = u.username.toLowerCase();
+                final dipakai = _rows
+                    .where((x) =>
+                        x.label != r.label && x.selectable && x.key == nama)
+                    .firstOrNull;
+                return DropdownMenuItem(
+                  value: nama,
+                  enabled: dipakai == null,
+                  child: Text(
+                    dipakai == null
+                        ? u.username
+                        : '${u.username} (dipakai ${dipakai.display})',
+                    overflow: TextOverflow.ellipsis,
+                    style: dipakai == null ? null : TextStyle(color: m.ink400),
+                  ),
+                );
+              }(),
+          ],
+          onChanged: (v) {
+            if (v == null) return;
+            setState(() {
+              r.key = v;
+              _key[r.label]?.text = v;
+            });
+          },
+        ),
+      ),
+    );
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════
