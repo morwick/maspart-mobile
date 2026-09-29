@@ -688,9 +688,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         // Pintasan keranjang hanya berarti untuk pembeli.
                         cartCount: isBuyer ? _cart.count : 0,
                         onCart: isBuyer ? () => _go(MasScreen.keranjang) : null,
-                        // Lonceng notifikasi (status return) — pembeli saja,
-                        // paritas web NotifBell.
-                        showNotif: isBuyer,
+                        // Lonceng notifikasi — semua akun (paritas web): admin
+                        // dapat kabar pesanan lunas & kasus bermasalah, cabang
+                        // dapat pesanan baru (masukan penguji 2026-09-29).
+                        showNotif: true,
                       ),
                       Expanded(
                         child: KeyedSubtree(

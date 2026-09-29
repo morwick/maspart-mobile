@@ -53,6 +53,7 @@ class _PoinScreenState extends State<PoinScreen> {
   List<PoinBaris> _riwayat = [];
   bool _loading = true;
   String? _error;
+  bool _galatJaringan = false;
 
   @override
   void initState() {
@@ -78,6 +79,9 @@ class _PoinScreenState extends State<PoinScreen> {
       if (!mounted) return;
       setState(() {
         _error = e.message;
+        // "Periksa koneksi" hanya untuk galat jaringan/server (paritas web,
+        // masukan penguji 2026-09-29) — bukan untuk jawaban jelas server.
+        _galatJaringan = e.statusCode == 0 || e.statusCode >= 500;
         _loading = false;
       });
     } catch (_) {
@@ -85,6 +89,7 @@ class _PoinScreenState extends State<PoinScreen> {
       if (!mounted) return;
       setState(() {
         _error = 'Gagal memuat poin.';
+        _galatJaringan = true;
         _loading = false;
       });
     }
@@ -135,7 +140,7 @@ class _PoinScreenState extends State<PoinScreen> {
                         fontWeight: FontWeight.w600,
                         color: m.ink800)),
                 const SizedBox(height: 4),
-                Text('$_error Periksa koneksi Anda lalu coba lagi.',
+                Text('$_error${_galatJaringan ? ' Periksa koneksi Anda lalu coba lagi.' : ''}',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                         fontSize: 12.5, color: m.ink500, height: 1.5)),

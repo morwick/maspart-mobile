@@ -323,10 +323,11 @@ class _OrdersScreenState extends State<OrdersScreen> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12, color: m.ink600)),
               ),
-              // Bukti transfer manual: penanda cepat bahwa ada yang bisa dicek.
+              // Bukti PEMBAYARAN (transfer pembeli / foto struk Lunasi manual) —
+              // paritas web "Bukti Bayar" (masukan penguji 2026-09-29).
               if (o.paymentProofUrl != null && o.paymentProofUrl!.isNotEmpty)
                 const MasPill(
-                    label: 'ada bukti', tone: MasPillTone.info, height: 19),
+                    label: 'bukti bayar', tone: MasPillTone.info, height: 19),
             ]),
             const SizedBox(height: 6),
             Text('Dibuat ${fmtDate(o.createdAt)}',

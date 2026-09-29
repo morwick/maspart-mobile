@@ -2413,6 +2413,10 @@ class CartGudangItem {
   /// diverifikasi admin) → tetap bisa dibeli dengan Ambil di Toko.
   final bool hanyaAmbil;
 
+  /// Sisa stok gudang pemenuh (masukan penguji 2026-09-29): qty > stok →
+  /// server memberi alasan "stok tinggal N" dan keranjang menawarkan "Jadikan N".
+  final int stok;
+
   const CartGudangItem({
     required this.partNumber,
     this.gudang = '',
@@ -2422,6 +2426,7 @@ class CartGudangItem {
     this.bisaDibeli = false,
     this.alasan = '',
     this.hanyaAmbil = false,
+    this.stok = 0,
   });
 
   factory CartGudangItem.fromJson(Map<String, dynamic> j) => CartGudangItem(
@@ -2433,6 +2438,7 @@ class CartGudangItem {
         bisaDibeli: _b(j['bisa_dibeli']),
         alasan: _s(j['alasan']),
         hanyaAmbil: _b(j['hanya_ambil']),
+        stok: _i(j['stok']),
       );
 }
 

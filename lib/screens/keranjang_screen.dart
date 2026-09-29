@@ -26,6 +26,7 @@ import '../order_ui.dart';
 import '../theme/mas_theme.dart';
 import '../utils.dart';
 import '../widgets/voucher_tiket.dart';
+import '../widgets/alamat_form.dart';
 import '../widgets/mas_ui.dart';
 import 'pilih_lokasi_screen.dart';
 
@@ -49,6 +50,18 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   /// alamat → pilihan "Kirim ke". Kosong bila fitur profil belum aktif.
   List<Alamat> _alamatList = [];
   int? _alamatId;
+
+  /// Masukan penguji 2026-09-29 (paritas web): gudang acuan (harga, stok,
+  /// ongkir) diturunkan server dari alamat PROFIL — alamat yang cuma diketik di
+  /// keranjang diabaikan, jadi tanpa alamat profil semua permintaan dibalas 409.
+  /// Alamat pertama WAJIB disimpan lewat lembar "Tambah Alamat" di sini.
+  /// 'gagal' = daftar alamat tak terbaca → perilaku lama (form bebas).
+  String _alamatStatus = 'muat'; // muat | ok | gagal
+  bool _alamatBusy = false;
+  bool get _tanpaAlamat => _alamatStatus == 'ok' && _alamatList.isEmpty;
+  bool get _alamatSiap =>
+      _alamatStatus == 'gagal' ||
+      (_alamatStatus == 'ok' && _alamatList.isNotEmpty);
 
   /// Titik peta penerima (dari alamat tersimpan / peta) — ikut dikirim ke cek
   /// Ambil di Toko supaya jarak dihitung dari titik, bukan tebakan kode pos.
@@ -147,7 +160,10 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     try {
       final list = await ApiService.listAlamat();
       if (!mounted) return;
-      setState(() => _alamatList = list);
+      setState(() {
+        _alamatList = list;
+        _alamatStatus = 'ok';
+      });
       Alamat? utama;
       for (final x in list) {
         if (x.isDefault) utama = x;
@@ -155,8 +171,106 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       utama ??= list.isNotEmpty ? list.first : null;
       if (utama != null) _pakaiAlamat(utama);
     } catch (_) {
-      /* fitur profil belum aktif / offline */
+      /* fitur profil belum aktif / offline → perilaku lama */
+      if (mounted) setState(() => _alamatStatus = 'gagal');
     }
+    // Keadaan server baru bisa dibaca setelah status alamat diketahui.
+    _refreshServerState();
+  }
+
+  /// Lembar "Tambah Alamat" (paritas web): isian keranjang tak hilang karena
+  /// tak pindah halaman. Alamat pertama otomatis jadi alamat utama.
+  Future<void> _tambahAlamat() async {
+    final pertama = _tanpaAlamat;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final m = ctx.mas;
+        String? err;
+        var tertutup = false;
+        return StatefulBuilder(builder: (ctx, setLocal) {
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            child: Container(
+              constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.92),
+              decoration: BoxDecoration(
+                color: m.paper,
+                borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(MasRadii.sheet)),
+              ),
+              child: SafeArea(
+                top: false,
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(pertama ? 'Tambah Alamat Pengiriman' : 'Tambah Alamat Baru',
+                          style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: m.ink900)),
+                      if (pertama) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Alamat ini disimpan ke profil sebagai alamat utama — '
+                          'lain kali tak perlu diisi lagi.',
+                          style: TextStyle(fontSize: 12.5, color: m.ink500),
+                        ),
+                      ],
+                      if (err != null) ...[
+                        const SizedBox(height: 8),
+                        Text(err ?? '', style: TextStyle(fontSize: 12.5, color: m.danger600)),
+                      ],
+                      const SizedBox(height: 12),
+                      AlamatForm(
+                        prefillNama: _nameCtl.text.trim(),
+                        prefillTelepon: _phoneCtl.text.trim(),
+                        forceDefault: pertama,
+                        submitting: _alamatBusy,
+                        submitLabel: 'Simpan & pakai alamat ini',
+                        onCancel: () => Navigator.pop(ctx),
+                        onSubmit: (body) async {
+                          setLocal(() => _alamatBusy = true);
+                          try {
+                            final sebelum = {for (final a in _alamatList) a.id};
+                            await ApiService.createAlamat(body);
+                            final list = await ApiService.listAlamat();
+                            if (!mounted) return;
+                            Alamat? baru;
+                            for (final a in list) {
+                              if (!sebelum.contains(a.id)) baru = a;
+                            }
+                            setState(() {
+                              _alamatList = list;
+                              _alamatStatus = 'ok';
+                            });
+                            if (baru != null) _pakaiAlamat(baru);
+                            tertutup = true;
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            // Gudang acuan baru diketahui → harga/stok/berat dihitung ulang.
+                            _lastBeliSig = '';
+                            _refreshServerState();
+                          } on ApiException catch (e) {
+                            if (!tertutup) setLocal(() => err = e.message);
+                          } finally {
+                            _alamatBusy = false;
+                            if (!tertutup && ctx.mounted) setLocal(() {});
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        });
+      },
+    );
   }
 
   void _pakaiAlamat(Alamat a) {
@@ -198,6 +312,8 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       });
       return;
     }
+    // Tanpa alamat profil server pasti menjawab 409 — tunggu alamat disimpan.
+    if (!_alamatSiap) return;
     try {
       final r = await ApiService.cartGudang(
         [for (final i in items) CartLine(partNumber: i.partNumber, qty: i.qty)],
@@ -266,6 +382,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   /// kurir. Debounce 900 ms supaya tak menembak tiap ketikan.
   void _scheduleOngkir({bool lambat = false}) {
     _ongkirDebounce?.cancel();
+    if (!_alamatSiap) return;
     if (_itemsBeli.isNotEmpty &&
         _weightGrams > 0 &&
         _postalCtl.text.trim().length >= 5) {
@@ -282,6 +399,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     // alamat terisi — kode pos belum 5 digit tak boleh menahan cek jarak.
     // Syarat tak terpenuhi → info lama dibuang, jangan nyangkut di layar.
     final bisaCekPickup = _itemsBeli.isNotEmpty &&
+        _alamatSiap &&
         ((_lat != null && _lon != null) ||
             _postalCtl.text.trim().length >= 5 ||
             _addressCtl.text.trim().isNotEmpty);
@@ -584,6 +702,11 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     final nav = AppNav.of(context);
     final beli = _itemsBeli;
     if (beli.isEmpty) return;
+
+    if (_tanpaAlamat) {
+      _tambahAlamat();
+      return;
+    }
 
     final blokir = _blokir;
     if (blokir.isNotEmpty) {
@@ -986,10 +1109,29 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
                     style: TextStyle(fontSize: 12.5, color: m.ink700)),
                 if (!bisa) ...[
                   const SizedBox(height: 4),
-                  MasPill(
-                    label: _srv(i.partNumber)?.alasan ?? 'belum bisa dibeli',
-                    tone: MasPillTone.warn,
-                    height: 19,
+                  // Teks biasa (bisa turun baris) — alasan seperti "stok tinggal
+                  // N — kurangi jumlahnya" terlalu panjang untuk pil satu baris.
+                  Text(_srv(i.partNumber)?.alasan ?? 'belum bisa dibeli',
+                      style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: m.warn600)),
+                ],
+                // Qty > stok (masukan penguji 2026-09-29) → satu ketukan menyesuaikan.
+                if ((_srv(i.partNumber)?.stok ?? 0) > 0 &&
+                    i.qty > _srv(i.partNumber)!.stok) ...[
+                  const SizedBox(height: 4),
+                  SizedBox(
+                    height: 28,
+                    child: OutlinedButton(
+                      onPressed: () =>
+                          _cart.setQty(i.partNumber, _srv(i.partNumber)!.stok),
+                      style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 10)),
+                      child: Text('Jadikan ${_srv(i.partNumber)!.stok}',
+                          style: const TextStyle(fontSize: 12)),
+                    ),
                   ),
                 ],
                 if (gudang.isNotEmpty) ...[
@@ -1040,8 +1182,13 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
                       size: 13, weight: FontWeight.w700, color: m.ink900)),
             ),
           ),
-          _stepBtn(m, Icons.add_rounded,
-              () => _cart.setQty(i.partNumber, i.qty + 1)),
+          _stepBtn(
+              m,
+              Icons.add_rounded,
+              // Sisa stok diketahui → tak bisa menambah melebihinya.
+              (_srv(i.partNumber)?.stok ?? 0) > 0 && i.qty >= _srv(i.partNumber)!.stok
+                  ? null
+                  : () => _cart.setQty(i.partNumber, i.qty + 1)),
         ]),
       );
 
@@ -1055,7 +1202,27 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         ),
       );
 
-  Widget _alamat(MasColors m) => MasCard(
+  /// Belum ada alamat profil → tak ada form bebas (server mengabaikannya):
+  /// info + tombol Tambah Alamat (masukan penguji 2026-09-29, paritas web).
+  Widget _alamatKosong(MasColors m) => MasCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('📍 Alamat Penerima',
+              style: TextStyle(
+                  fontSize: 14, fontWeight: FontWeight.w600, color: m.ink900)),
+          const SizedBox(height: 10),
+          _alert(m, 'Lengkapi alamat pengiriman dulu — gudang terdekat, stok, '
+              'dan ongkir dipilih dari alamat itu.'),
+          const SizedBox(height: 10),
+          MasButton(
+            label: 'Tambah Alamat',
+            icon: Icons.add_location_alt_outlined,
+            expand: true,
+            onTap: _tambahAlamat,
+          ),
+        ]),
+      );
+
+  Widget _alamat(MasColors m) => _tanpaAlamat ? _alamatKosong(m) : MasCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Expanded(
@@ -1065,13 +1232,14 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
                       fontWeight: FontWeight.w600,
                       color: m.ink900)),
             ),
-            MasButton(
-              label: _alamatList.isEmpty ? 'Simpan' : 'Kelola',
-              icon: Icons.person_outline_rounded,
-              primary: false,
-              height: 34,
-              onTap: () => AppNav.of(context).go(MasScreen.profil),
-            ),
+            if (_alamatList.isNotEmpty)
+              MasButton(
+                label: 'Kelola',
+                icon: Icons.person_outline_rounded,
+                primary: false,
+                height: 34,
+                onTap: () => AppNav.of(context).go(MasScreen.profil),
+              ),
             const SizedBox(width: 6),
             MasButton(
               label: 'Peta',
@@ -1081,6 +1249,15 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
               onTap: _openMap,
             ),
           ]),
+          if (_alamatStatus == 'ok')
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _tambahAlamat,
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Tambah Alamat Baru'),
+              ),
+            ),
           const SizedBox(height: 12),
           if (_alamatList.length > 1) ...[
             _field(
@@ -1328,9 +1505,11 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         const SizedBox(height: 10),
         if (_rates.isEmpty)
           Text(
-            _loadingRates
-                ? 'Mengambil tarif kurir…'
-                : 'Isi kode pos untuk melihat pilihan ekspedisi.',
+            _tanpaAlamat
+                ? 'Tambah alamat pengiriman dulu — ongkir dihitung dari alamat itu.'
+                : _loadingRates
+                    ? 'Mengambil tarif kurir…'
+                    : 'Isi kode pos untuk melihat pilihan ekspedisi.',
             style: TextStyle(fontSize: 12.5, color: m.ink500),
           )
         else if (_kelompok.isNotEmpty)

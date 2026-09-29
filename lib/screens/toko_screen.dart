@@ -176,9 +176,22 @@ class _TokoScreenState extends State<TokoScreen> {
     });
   }
 
+  /// Judul hasil — tujuan geser otomatis saat kategori dipilih.
+  final _hasilKey = GlobalKey();
+
   void _setKategori(String k) {
     setState(() => _kategori = _kategori == k ? '' : k);
     _loadCatalog();
+    // Paritas web (masukan penguji 2026-09-29): hasil kategori langsung terlihat.
+    if (_kategori.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final c = _hasilKey.currentContext;
+        if (c != null && c.mounted) {
+          Scrollable.ensureVisible(c,
+              duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+        }
+      });
+    }
   }
 
   int _qtyOf(String pn) {
@@ -221,7 +234,9 @@ class _TokoScreenState extends State<TokoScreen> {
           // Saat MENCARI, banner/flash sale/kategori disembunyikan: di layar HP
           // ketiganya mendorong hasil pencarian jauh ke bawah sehingga pembeli
           // mengira pencariannya tak menghasilkan apa-apa (uji 2026-09-27).
-          if (_q.isEmpty) ...[
+          // Memilih KATEGORI juga menyembunyikan banner & flash sale (paritas web,
+          // masukan penguji 2026-09-29); blok kategori tetap supaya mudah ganti.
+          if (_browsing) ...[
             const PromoBanner(),
             FlashSale(
               items: _flashItems,
@@ -248,7 +263,7 @@ class _TokoScreenState extends State<TokoScreen> {
           ],
 
           const SizedBox(height: 20),
-          _toolbar(m, cat),
+          KeyedSubtree(key: _hasilKey, child: _toolbar(m, cat)),
           const SizedBox(height: 12),
 
           if (_loading)
