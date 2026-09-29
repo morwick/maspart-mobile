@@ -25,6 +25,7 @@ import '../app/nav.dart';
 import '../order_ui.dart';
 import '../theme/mas_theme.dart';
 import '../utils.dart';
+import '../widgets/bukti_packing.dart';
 import '../widgets/koreksi_resi.dart';
 import '../widgets/mas_ui.dart';
 import '../widgets/chat_thread.dart';
@@ -545,6 +546,12 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
     if (next == null) return;
     if (o.tahanKirim) {
       setState(() => _error = o.alasanTahan ?? 'Pesanan ditahan — hubungi admin.');
+      return;
+    }
+    // Masukan penguji 2026-09-29: pesanan bernilai besar wajib VIDEO packing
+    // sebelum dikirim (server juga menolak 409 — ini supaya alasannya terlihat).
+    if (next == 'dikirim' && !o.pickup && (o.packingTahanKirim ?? '').isNotEmpty) {
+      setState(() => _error = o.packingTahanKirim);
       return;
     }
 
@@ -1343,6 +1350,8 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
                 _tombolDok('🏷️ Label Paket', () => _dok(downloadLabelPaket)),
               _tombolDok('🧾 Invoice', () => _dok(downloadInvoicePdf)),
             ]),
+            // Bukti packing foto/video — tersimpan di server (migrasi 046).
+            if (!pickup) BuktiPackingPanel(order: o, admin: false, onChanged: _load),
             if (tahap == 4)
               _centangBaris(m, 'kemas',
                   pickup ? 'Barang siap di konter' : 'Paket sudah dikemas'),
@@ -1362,13 +1371,17 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
                         'lalu tandai dikirim dan ketik nomor resinya.',
                 style: ket,
               ),
+              if (!pickup && (o.packingTahanKirim ?? '').isNotEmpty)
+                _alert(m, '🎥 ${o.packingTahanKirim}'),
               MasButton(
                 label: _busy
                     ? 'Memproses…'
                     : (pickup ? '🏬 Tandai Siap Diambil' : '🚚 Tandai Dikirim'),
                 expand: true,
                 loading: _busy,
-                onTap: _busy ? null : () => _lanjutkan(o),
+                onTap: _busy || (!pickup && (o.packingTahanKirim ?? '').isNotEmpty)
+                    ? null
+                    : () => _lanjutkan(o),
               ),
             ] else
               Text(

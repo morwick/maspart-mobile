@@ -24,6 +24,7 @@ import '../app/nav.dart';
 import '../order_ui.dart';
 import '../theme/mas_theme.dart';
 import '../utils.dart';
+import '../widgets/bukti_packing.dart';
 import '../widgets/koreksi_resi.dart';
 import '../widgets/mas_ui.dart';
 import '../widgets/order_chat.dart';
@@ -680,6 +681,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       final alasan = await _konfirmasiBatal();
       if (alasan == null || !mounted) return;
       await _jalankanBatal(nav, alasan.$1, alasan.$2);
+      return;
+    }
+    // Masukan penguji 2026-09-29: pesanan bernilai besar wajib VIDEO packing —
+    // admin pun tak bisa melompatinya (server menolak 409); tampilkan alasannya.
+    final op = _order;
+    if (status == 'dikirim' && op != null && !op.pickup && (op.packingTahanKirim ?? '').isNotEmpty) {
+      setState(() => _error = op.packingTahanKirim);
       return;
     }
     final ok = await showDialog<bool>(
@@ -1695,6 +1703,23 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             const SizedBox(height: 14),
           ],
 
+          // Bukti packing foto/video dari gudang (masukan penguji 2026-09-29,
+          // migrasi 046) — admin juga bisa mengunggah/menghapus selama diproses.
+          if (!o.pickup &&
+              o.packingBuktiAktif &&
+              (o.packingBukti.isNotEmpty || o.status == 'diproses')) ...[
+            MasSectionCard(
+              title: '🎥 Bukti Packing',
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+                  child: BuktiPackingPanel(order: o, admin: true, onChanged: _load),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+          ],
+
           if (o.trackingNo != null && o.trackingNo!.isNotEmpty) ...[
             _pengiriman(m, o),
             const SizedBox(height: 14),
@@ -2116,12 +2141,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           // dikirim/selesai terkunci selama pengiriman DITAHAN (T-5).
                           onTap: _busy ||
                                   o.status == s ||
-                                  (o.tahanKirim && (s == 'dikirim' || s == 'selesai'))
+                                  (o.tahanKirim && (s == 'dikirim' || s == 'selesai')) ||
+                                  // Wajib video packing belum terpenuhi (2026-09-29).
+                                  (s == 'dikirim' && !o.pickup &&
+                                      (o.packingTahanKirim ?? '').isNotEmpty)
                               ? null
                               : () => _setStatus(s),
                         ),
                     ],
                   ),
+                  if (o.status == 'diproses' && !o.pickup &&
+                      (o.packingTahanKirim ?? '').isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text('🎥 ${o.packingTahanKirim}',
+                        style: TextStyle(fontSize: 12, color: m.danger600, height: 1.4)),
+                  ],
                 ],
                 if (o.status == 'dikirim' && !o.pickup) ...[
                   const SizedBox(height: 8),

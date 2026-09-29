@@ -1696,6 +1696,41 @@ class ApiService {
     required int length,
     required String filename,
     void Function(int pct)? onProgress,
+  }) =>
+      _unggahStream('/api/returns/$jenis',
+          stream: stream, length: length, filename: filename, onProgress: onProgress);
+
+  /// Unggah SATU bukti packing (foto ≤ 8 MB / video MP4-MOV ≤ 50 MB) dengan
+  /// progres — masukan penguji 2026-09-29, padanan `unggahBuktiPacking` web.
+  /// [admin] true → endpoint admin (tanpa pagar gudang). Jenis berkas dibaca
+  /// server dari ISI; 503 = migrasi 046 belum jalan.
+  static ReturUnggah unggahBuktiPacking(
+    String code, {
+    required bool admin,
+    required Stream<List<int>> stream,
+    required int length,
+    required String filename,
+    void Function(int pct)? onProgress,
+  }) =>
+      _unggahStream(
+          '${admin ? '/api/admin/orders' : '/api/branch/orders'}/${Uri.encodeComponent(code)}/packing',
+          stream: stream, length: length, filename: filename, onProgress: onProgress);
+
+  /// Hapus satu bukti packing (hanya selama pesanan 'Diproses').
+  static Future<void> hapusBuktiPacking(String code, String url, {required bool admin}) =>
+      _Api.delete(
+        '${admin ? '/api/admin/orders' : '/api/branch/orders'}/${Uri.encodeComponent(code)}/packing',
+        query: {'url': url},
+      );
+
+  /// Unggah multipart satu berkas yang dialirkan dari [stream] + progres;
+  /// kembalian = `url` dari jawaban JSON server.
+  static ReturUnggah _unggahStream(
+    String path, {
+    required Stream<List<int>> stream,
+    required int length,
+    required String filename,
+    void Function(int pct)? onProgress,
   }) {
     final client = http.Client();
     var dibatalkan = false;
@@ -1714,8 +1749,7 @@ class ApiService {
         }
         return chunk;
       });
-      final req = http.MultipartRequest(
-          'POST', _Api._uri('/api/returns/$jenis'))
+      final req = http.MultipartRequest('POST', _Api._uri(path))
         ..headers.addAll(await _Api._headers(token))
         ..files.add(http.MultipartFile('file', dihitung, length,
             filename: filename));
