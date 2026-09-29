@@ -1938,7 +1938,10 @@ class _CabangPenjualanScreenState extends State<CabangPenjualanScreen> {
 const Duration _cabangChatRefresh = Duration(seconds: 15);
 
 class CabangChatScreen extends StatefulWidget {
-  const CabangChatScreen({super.key});
+  /// `buyer` = pembeli yang percakapannya langsung dibuka (tautan notifikasi
+  /// chat — masukan penguji 2026-09-29; paritas web `/cabang/chat?buyer=`).
+  final Map<String, dynamic> args;
+  const CabangChatScreen({super.key, this.args = const {}});
 
   @override
   State<CabangChatScreen> createState() => _CabangChatScreenState();
@@ -1956,6 +1959,8 @@ class _CabangChatScreenState extends State<CabangChatScreen> {
   @override
   void initState() {
     super.initState();
+    final b = '${widget.args['buyer'] ?? ''}'.trim().toLowerCase();
+    if (b.isNotEmpty) _open = b;
     _load();
     // Ikut web: daftar percakapan disegarkan tiap 15 detik supaya pertanyaan
     // pembeli yang baru masuk terlihat tanpa perlu tarik-untuk-muat-ulang.

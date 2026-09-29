@@ -2835,11 +2835,16 @@ class ChatMessage {
   final String body;
   final String createdAt;
 
+  /// Kartu part (masukan penguji 2026-09-29): dilampirkan server bila body
+  /// diawali penanda `[[part:PN]]`. Paritas `ChatMessage.part` di web api.ts.
+  final ChatPart? part;
+
   const ChatMessage({
     this.senderUsername = '',
     this.senderRole = '',
     this.body = '',
     this.createdAt = '',
+    this.part,
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> j) => ChatMessage(
@@ -2847,6 +2852,32 @@ class ChatMessage {
         senderRole: _s(j['sender_role']),
         body: _s(j['body']),
         createdAt: _s(j['created_at']),
+        part: j['part'] is Map
+            ? ChatPart.fromJson((j['part'] as Map).cast<String, dynamic>())
+            : null,
+      );
+}
+
+/// Info kartu part di chat — TANPA stok per gudang. [hargaDisplay] null bila
+/// penampil tak berizin harga / part tak dipajang di etalase.
+class ChatPart {
+  final String partNumber;
+  final String name;
+  final String? foto;
+  final String? hargaDisplay;
+
+  const ChatPart({
+    required this.partNumber,
+    this.name = '',
+    this.foto,
+    this.hargaDisplay,
+  });
+
+  factory ChatPart.fromJson(Map<String, dynamic> j) => ChatPart(
+        partNumber: _s(j['part_number']),
+        name: _s(j['name']),
+        foto: j['foto']?.toString(),
+        hargaDisplay: j['harga_display']?.toString(),
       );
 }
 
@@ -2887,6 +2918,36 @@ class BuyerChatThread {
   factory BuyerChatThread.fromJson(Map<String, dynamic> j) => BuyerChatThread(
         gudangKey: _s(j['gudang_key']),
         last: _s(j['last']),
+        createdAt: _s(j['created_at']),
+      );
+}
+
+/// Admin: satu thread chat gudang lintas gudang (masukan penguji 2026-09-29).
+class AdminChatThread {
+  final String gudangKey;
+  final String gudangLabel;
+  final String buyerUsername;
+  final String last;
+
+  /// Peran pengirim pesan terakhir — 'pembeli' = menunggu balasan.
+  final String lastRole;
+  final String createdAt;
+
+  const AdminChatThread({
+    required this.gudangKey,
+    required this.buyerUsername,
+    this.gudangLabel = '',
+    this.last = '',
+    this.lastRole = '',
+    this.createdAt = '',
+  });
+
+  factory AdminChatThread.fromJson(Map<String, dynamic> j) => AdminChatThread(
+        gudangKey: _s(j['gudang_key']),
+        gudangLabel: _s(j['gudang_label']),
+        buyerUsername: _s(j['buyer_username']),
+        last: _s(j['last']),
+        lastRole: _s(j['last_role']),
         createdAt: _s(j['created_at']),
       );
 }

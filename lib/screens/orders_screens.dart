@@ -1711,8 +1711,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           _aksi(m, o),
           const SizedBox(height: 14),
 
+          // Paritas web detail pesanan admin (masukan penguji 2026-09-29).
           OrderChat(
-            title: 'Chat dengan ${o.username}',
+            title: 'Chat pesanan — pembeli ${o.username} · gudang ${o.gudang.isNotEmpty ? o.gudang : "-"}',
             me: nav.username,
             fetch: () async => (await ApiService.orderChat(_code)).messages,
             send: (body) => ApiService.sendOrderChat(_code, body),

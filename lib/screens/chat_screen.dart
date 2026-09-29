@@ -41,6 +41,13 @@ class _ChatScreenState extends State<ChatScreen> {
   /// — hanya untuk thread gudang [_pre]; dibuang setelah terkirim supaya
   /// tidak mengisi ulang kotak ketik saat thread dibuka lagi.
   String? _draft;
+
+  /// Kartu part dari argumen `part` (tombol "Chat Gudang" di Detail Part —
+  /// masukan penguji 2026-09-29): menempel ke thread gudang [_lampiranKey] dan
+  /// ikut terkirim SEKALI bersama pesan pertama. Paritas web `/chat?part=`.
+  String? _lampiranPn;
+  String? _lampiranKey;
+  ChatPart? _lampiranInfo;
   bool _loading = true;
   String? _error;
 
@@ -56,7 +63,39 @@ class _ChatScreenState extends State<ChatScreen> {
         _draft = pesan.length > 500 ? pesan.substring(0, 500) : pesan;
       }
     }
+    var pn = '${widget.args['part'] ?? ''}'.trim().toUpperCase();
+    if (pn.length > 64) pn = pn.substring(0, 64);
+    if (pn.isNotEmpty) {
+      _lampiranPn = pn;
+      _lampiranKey = _pre; // null → gudang pertama di daftar (lihat _load)
+      _muatInfoLampiran(pn);
+    }
     _load();
+  }
+
+  /// Pratinjau kartu dari etalase pembeli (endpoint yang sudah ada) — hanya
+  /// nama/foto/harga yang dipakai; server tetap memvalidasi PN saat kirim.
+  Future<void> _muatInfoLampiran(String pn) async {
+    try {
+      final c = await ApiService.tokoCatalog(q: pn, pageSize: 10);
+      TokoProduct? hit;
+      for (final p in c.items) {
+        if (p.partNumber.toUpperCase() == pn) {
+          hit = p;
+          break;
+        }
+      }
+      final h = hit;
+      if (h == null || !mounted || _lampiranPn != pn) return;
+      setState(() => _lampiranInfo = ChatPart(
+            partNumber: h.partNumber,
+            name: h.name,
+            foto: h.foto,
+            hargaDisplay: h.hargaDisplay,
+          ));
+    } catch (_) {
+      /* tanpa pratinjau — kartu tetap tampil dengan PN saja */
+    }
   }
 
   Future<void> _load() async {
@@ -95,6 +134,11 @@ class _ChatScreenState extends State<ChatScreen> {
         _gudang = results[1] as List<BuyerLocation>;
         _keys = keys;
         _loading = false;
+        // Kartu part tanpa gudang terpilih → tempel ke gudang pertama & buka.
+        if (_lampiranPn != null && _lampiranKey == null && keys.isNotEmpty) {
+          _lampiranKey = keys.first;
+          _open ??= keys.first;
+        }
       });
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -173,10 +217,20 @@ class _ChatScreenState extends State<ChatScreen> {
                 'pengiriman ke gudang ini.',
             quickReplies: _kUsulan,
             draft: open == _pre ? _draft : null,
+            lampiran: _lampiranPn != null && _lampiranKey == open
+                ? (pn: _lampiranPn!, info: _lampiranInfo)
+                : null,
+            onLepasLampiran: () => setState(() => _lampiranPn = null),
             fetch: () => ApiService.buyerGudangChat(open),
             send: (body) async {
-              await ApiService.sendBuyerGudangChat(open, body);
+              final kartu = _lampiranKey == open ? _lampiranPn : null;
+              await ApiService.sendBuyerGudangChat(open, body,
+                  partNumber: kartu);
               _draft = null;
+              // Kartu hanya ikut SEKALI (pesan pertama).
+              if (kartu != null && mounted) {
+                setState(() => _lampiranPn = null);
+              }
             },
           ),
         ),

@@ -9,12 +9,114 @@
 // (mis. di dalam Expanded).
 
 import 'dart:async';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../api_service.dart';
+import '../app/nav.dart';
 import '../theme/mas_theme.dart';
 
-const _kRole = {'pembeli': 'Pembeli', 'gudang': 'Gudang', 'admin': 'Admin'};
+const _kRole = {
+  'pembeli': 'Pembeli',
+  'gudang': 'Gudang',
+  'admin': 'Admin MasPart',
+};
+
+// ── Kartu part (masukan penguji 2026-09-29) ──
+// Server menyimpan kartu sebagai penanda di baris pertama body:
+// "[[part:PN]]\n<teks>". Hanya server yang memasangnya (penanda ketikan user
+// dibuang backend). Paritas web `pisahPenanda` di ChatThread.tsx.
+final _kPenanda = RegExp(r'^\[\[part:([^\]\n]{1,64})\]\]\n?');
+
+/// (pn, teks) — pn null bila pesan tanpa kartu.
+({String? pn, String teks}) pisahPenanda(String body) {
+  final mm = _kPenanda.firstMatch(body);
+  if (mm == null) return (pn: null, teks: body);
+  return (pn: mm.group(1), teks: body.substring(mm.end));
+}
+
+/// Kartu part ala Shopee: foto, nama, PN, harga → ketuk = Detail Part.
+class KartuPartChat extends StatelessWidget {
+  final String pn;
+  final ChatPart? info;
+  const KartuPartChat({super.key, required this.pn, this.info});
+
+  @override
+  Widget build(BuildContext context) {
+    final m = context.mas;
+    final foto = info?.foto;
+    final harga = info?.hargaDisplay;
+    final nama = info?.name ?? '';
+    Widget tanpaFoto() => Center(
+        child: Icon(Icons.settings_outlined, size: 22, color: m.ink300));
+    return Material(
+      color: m.paper,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: m.ink150),
+      ),
+      child: InkWell(
+        customBorder: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12)),
+        onTap: () => AppNav.of(context).go(MasScreen.part, part: {
+          'part_number': pn,
+          if (nama.isNotEmpty) 'part_name': nama,
+        }),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 56,
+              height: 56,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: m.ink100),
+              ),
+              child: foto != null && foto.isNotEmpty
+                  ? CachedNetworkImage(
+                      imageUrl: ApiService.partImageUrl(foto),
+                      fit: BoxFit.contain,
+                      placeholder: (_, _) => Container(color: m.ink50),
+                      errorWidget: (_, _, _) => tanpaFoto(),
+                    )
+                  : tanpaFoto(),
+            ),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(nama.isNotEmpty ? nama : 'Part',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 13,
+                          height: 1.3,
+                          fontWeight: FontWeight.w600,
+                          color: m.ink900)),
+                  Text(pn,
+                      style: TextStyle(
+                          fontSize: 11.5,
+                          fontFamily: 'monospace',
+                          color: m.ink500)),
+                  if (harga != null && harga.isNotEmpty)
+                    Text(harga,
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: m.brand700)),
+                ],
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
 
 /// Pesan beruntun dari pengirim sama dalam jarak ini = satu kelompok.
 const _kGroup = Duration(minutes: 5);
@@ -62,6 +164,11 @@ class ChatThreadView extends StatefulWidget {
   /// di toko). Tidak dikirim otomatis — pembeli tetap bisa menyuntingnya.
   final String? draft;
 
+  /// Kartu part yang AKAN ikut terkirim bersama pesan berikutnya (dari Detail
+  /// Part). Layar induk yang meneruskan PN-nya ke API di [send].
+  final ({String pn, ChatPart? info})? lampiran;
+  final VoidCallback? onLepasLampiran;
+
   const ChatThreadView({
     super.key,
     required this.me,
@@ -71,6 +178,8 @@ class ChatThreadView extends StatefulWidget {
     this.quickReplies = const [],
     this.pollEvery = const Duration(seconds: 7),
     this.draft,
+    this.lampiran,
+    this.onLepasLampiran,
   });
 
   @override
@@ -150,7 +259,8 @@ class _ChatThreadViewState extends State<ChatThreadView> {
 
   Future<void> _send() async {
     final body = _ctl.text.trim();
-    if (body.isEmpty || _sending) return;
+    // Kartu part boleh terkirim tanpa teks (seperti Shopee).
+    if ((body.isEmpty && widget.lampiran == null) || _sending) return;
     setState(() {
       _sending = true;
       _error = null;
@@ -207,9 +317,42 @@ class _ChatThreadViewState extends State<ChatThreadView> {
           child: Text(_error!,
               style: TextStyle(fontSize: 12, color: m.danger600)),
         ),
+      if (widget.lampiran != null) _lampiran(m, widget.lampiran!),
       _composer(m),
     ]);
   }
+
+  Widget _lampiran(MasColors m, ({String pn, ChatPart? info}) l) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+        decoration: BoxDecoration(
+          color: m.paper,
+          border: Border(top: BorderSide(color: m.ink150)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(children: [
+              Expanded(
+                child: Text('Kartu part ini ikut terkirim bersama pesanmu',
+                    style: TextStyle(fontSize: 11.5, color: m.ink500)),
+              ),
+              if (widget.onLepasLampiran != null)
+                InkWell(
+                  onTap: widget.onLepasLampiran,
+                  customBorder: const CircleBorder(),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(Icons.close_rounded, size: 18, color: m.ink500),
+                  ),
+                ),
+            ]),
+            const SizedBox(height: 6),
+            KartuPartChat(pn: l.pn, info: l.info),
+          ],
+        ),
+      );
 
   Widget _kosong(MasColors m) => Center(
         child: SingleChildScrollView(
@@ -334,6 +477,7 @@ class _ChatThreadViewState extends State<ChatThreadView> {
             bottomLeft: akhir ? ekor : kecil);
     final hijau = m.isDark ? const Color(0xFF0F7A1D) : m.brand600;
     final warnaTeks = mine ? Colors.white : m.ink900;
+    final penanda = pisahPenanda(msg.body);
 
     return ConstrainedBox(
       constraints: BoxConstraints(
@@ -352,8 +496,15 @@ class _ChatThreadViewState extends State<ChatThreadView> {
           crossAxisAlignment: WrapCrossAlignment.end,
           spacing: 10,
           children: [
-            Text(msg.body,
-                style: TextStyle(fontSize: 14, height: 1.4, color: warnaTeks)),
+            if (penanda.pn != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: KartuPartChat(pn: penanda.pn!, info: msg.part),
+              ),
+            if (penanda.teks.isNotEmpty)
+              Text(penanda.teks,
+                  style:
+                      TextStyle(fontSize: 14, height: 1.4, color: warnaTeks)),
             Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(_jam(msg.createdAt),
@@ -370,7 +521,8 @@ class _ChatThreadViewState extends State<ChatThreadView> {
   }
 
   Widget _composer(MasColors m) {
-    final bisa = _ctl.text.trim().isNotEmpty && !_sending;
+    final bisa = (_ctl.text.trim().isNotEmpty || widget.lampiran != null) &&
+        !_sending;
     return Container(
       padding: EdgeInsets.fromLTRB(
           12, 8, 12, 8 + MediaQuery.of(context).padding.bottom),

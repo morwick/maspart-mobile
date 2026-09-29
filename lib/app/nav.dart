@@ -46,6 +46,7 @@ enum MasScreen {
   // Admin
   orders,
   bermasalah,
+  adminChat,
   orderDetail,
   penjualan,
   feedback,
@@ -101,6 +102,7 @@ const Map<MasScreen, (String, String)> kScreenTitles = {
 
   MasScreen.orders: ('Pesanan', 'Kelola & verifikasi pesanan'),
   MasScreen.bermasalah: ('Pesanan Bermasalah', 'Pesanan yang butuh tindakan admin'),
+  MasScreen.adminChat: ('Chat Pembeli', 'Semua percakapan pembeli ↔ gudang'),
   MasScreen.orderDetail: ('Detail Pesanan', ''),
   MasScreen.penjualan: ('Laporan Penjualan', 'Rekap omzet & barang terjual'),
   MasScreen.feedback: ('Umpan Balik AI', 'Jawaban yang dinilai user'),
@@ -199,6 +201,8 @@ const List<NavItem> _navDataAdmin = [
 const List<NavItem> _navPenjualan = [
   NavItem('Pesanan', Icons.shopping_cart_outlined, MasScreen.orders),
   NavItem('Pesanan Bermasalah', Icons.report_problem_outlined, MasScreen.bermasalah),
+  // Masukan penguji 2026-09-29 — paritas web NAV_ADMIN "/admin/chat".
+  NavItem('Chat Pembeli', Icons.chat_bubble_outline_rounded, MasScreen.adminChat),
   NavItem('Laporan Penjualan', Icons.bar_chart_rounded, MasScreen.penjualan),
 ];
 
@@ -399,6 +403,24 @@ Set<MasScreen> accessibleScreens(List<NavSection> sections) => {
     return (MasScreen.pesananDetail, {'order_code': seg[1], if (nilai) 'nilai': true});
   }
   if (seg.length == 1 && seg[0] == 'retur') return (MasScreen.returSaya, {});
+  // Notifikasi chat (masukan penguji 2026-09-29) — tautan dari services/chat.py.
+  final q = uri?.queryParameters ?? const <String, String>{};
+  if (seg.length == 1 && seg[0] == 'chat') {
+    final g = (q['gudang'] ?? '').trim();
+    return (MasScreen.chat, {if (g.isNotEmpty) 'gudang': g});
+  }
+  if (seg.length == 2 && seg[0] == 'cabang' && seg[1] == 'chat') {
+    final b = (q['buyer'] ?? '').trim();
+    return (MasScreen.cabangChat, {if (b.isNotEmpty) 'buyer': b});
+  }
+  if (seg.length == 2 && seg[0] == 'admin' && seg[1] == 'chat') {
+    final g = (q['gudang'] ?? '').trim();
+    final b = (q['buyer'] ?? '').trim();
+    return (MasScreen.adminChat, {
+      if (g.isNotEmpty) 'gudang': g,
+      if (b.isNotEmpty) 'buyer': b,
+    });
+  }
   return null;
 }
 

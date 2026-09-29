@@ -1789,9 +1789,17 @@ class ApiService {
         const [];
   }
 
-  static Future<void> sendBuyerGudangChat(String key, String body) => _Api.post(
+  /// [partNumber] → server memasang kartu part di pesan ini (divalidasi
+  /// server; masukan penguji 2026-09-29, paritas web `sendBuyerGudangChat`).
+  static Future<void> sendBuyerGudangChat(String key, String body,
+          {String? partNumber}) =>
+      _Api.post(
         '/api/chat/gudang/${Uri.encodeComponent(key)}',
-        body: {'body': body},
+        body: {
+          'body': body,
+          if (partNumber != null && partNumber.isNotEmpty)
+            'part_number': partNumber,
+        },
       );
 
   /// Sisi cabang: daftar pembeli yang mengirim pesan.
@@ -1817,6 +1825,34 @@ class ApiService {
 
   static Future<void> sendBranchChat(String buyer, String body) => _Api.post(
         '/api/chat/branch/${Uri.encodeComponent(buyer)}',
+        body: {'body': body},
+      );
+
+  /// Admin: SEMUA thread chat gudang lintas gudang (masukan penguji 2026-09-29).
+  static Future<List<AdminChatThread>> adminChatThreads() async {
+    final data = _Api._obj(await _Api.get('/api/chat/admin/threads'));
+    return (data['threads'] as List?)
+            ?.whereType<Map>()
+            .map((e) => AdminChatThread.fromJson(e.cast<String, dynamic>()))
+            .toList() ??
+        const [];
+  }
+
+  static Future<List<ChatMessage>> adminChat(String gudang, String buyer) async {
+    final data = _Api._obj(
+      await _Api.get(
+          '/api/chat/admin/${Uri.encodeComponent(gudang)}/${Uri.encodeComponent(buyer)}'),
+    );
+    return (data['messages'] as List?)
+            ?.whereType<Map>()
+            .map((e) => ChatMessage.fromJson(e.cast<String, dynamic>()))
+            .toList() ??
+        const [];
+  }
+
+  static Future<void> sendAdminChat(String gudang, String buyer, String body) =>
+      _Api.post(
+        '/api/chat/admin/${Uri.encodeComponent(gudang)}/${Uri.encodeComponent(buyer)}',
         body: {'body': body},
       );
 
