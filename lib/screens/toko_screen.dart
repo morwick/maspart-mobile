@@ -305,7 +305,7 @@ class _TokoScreenState extends State<TokoScreen> {
           else ...[
             _grid([
               for (final p in _items)
-                _ProductCard(
+                TokoProductCard(
                   product: p,
                   qty: _qtyOf(p.partNumber),
                   onOpen: () => nav.go(MasScreen.part,
@@ -600,7 +600,7 @@ class _TokoScreenState extends State<TokoScreen> {
             final p = items[i];
             return SizedBox(
               width: 172,
-              child: _ProductCard(
+              child: TokoProductCard(
                 product: p,
                 qty: _qtyOf(p.partNumber),
                 onOpen: () => nav.go(MasScreen.part, part: {
@@ -727,7 +727,9 @@ class _TokoScreenState extends State<TokoScreen> {
 // Kartu produk
 // ══════════════════════════════════════════════════════════════════════
 
-class _ProductCard extends StatelessWidget {
+/// Publik: dipakai ulang strip "Produk serupa" di detail part (masukan penguji
+/// 2026-09-29) — kartu sama persis dengan etalase.
+class TokoProductCard extends StatelessWidget {
   final TokoProduct product;
   final int qty;
   final VoidCallback onOpen;
@@ -735,7 +737,8 @@ class _ProductCard extends StatelessWidget {
   final ValueChanged<int> onQty;
   final VoidCallback onRemove;
 
-  const _ProductCard({
+  const TokoProductCard({
+    super.key,
     required this.product,
     required this.qty,
     required this.onOpen,

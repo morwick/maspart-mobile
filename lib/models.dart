@@ -2760,6 +2760,20 @@ class TokoCatalog {
       );
 }
 
+/// "Produk serupa" di bawah detail part (masukan penguji 2026-09-29) — paritas
+/// `TokoSerupa` web: ≤8 kartu etalase (stok terscope, tanpa sebaran gudang).
+class TokoSerupa {
+  final String partNumber;
+  final List<TokoProduct> items;
+
+  const TokoSerupa({this.partNumber = '', this.items = const []});
+
+  factory TokoSerupa.fromJson(Map<String, dynamic> j) => TokoSerupa(
+        partNumber: _s(j['part_number']),
+        items: _list(j['items'], TokoProduct.fromJson),
+      );
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // Chat (pembeli ↔ gudang)
 // ══════════════════════════════════════════════════════════════════════

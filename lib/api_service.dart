@@ -1129,6 +1129,11 @@ class ApiService {
     return TokoCatalog.fromJson(_Api._obj(data));
   }
 
+  /// "Produk serupa" di bawah detail part (masukan penguji 2026-09-29), khusus
+  /// pembeli. Rute backend `{pn:path}` → PN ber-'/' aman walau di-encode.
+  static Future<TokoSerupa> tokoSerupa(String pn) async => TokoSerupa.fromJson(
+      _Api._obj(await _Api.get('/api/buyer/serupa/${Uri.encodeComponent(pn)}')));
+
   // ────────────────────────────────────────────────────────────────────
   // Keranjang, ongkir & lokasi
   // ────────────────────────────────────────────────────────────────────
