@@ -150,12 +150,28 @@ class CartStore extends ChangeNotifier {
   /// Muat keranjang milik [username]. Panggil sekali setelah login / saat
   /// shell dibangun — mengganti user akan memuat ulang keranjangnya sendiri.
   Future<void> load(String username) async {
-    final u = username.isEmpty ? 'anon' : username;
+    final nama = username.trim().toLowerCase();
+    final u = nama.isEmpty ? 'anon' : nama;
     if (_loaded && u == _username) return;
     _username = u;
     final prefs = await SharedPreferences.getInstance();
-    _items = _decode(prefs.getString(_key));
+    // Kunci kini huruf kecil (username token = huruf kecil); keranjang lama
+    // yang tersimpan dengan ejaan asli tetap terbaca.
+    final lama = username.trim();
+    _items = _decode(prefs.getString(_key) ??
+        (lama != nama ? prefs.getString('maspart_cart_$lama') : null));
     _loaded = true;
+    notifyListeners();
+  }
+
+  /// Logout: lupakan keranjang akun ini dari MEMORI (isinya tetap tersimpan di
+  /// kunci akunnya). Tanpa ini singleton membawa barang akun A ke akun B yang
+  /// login sesudahnya — dan barang tambahan B ikut tersimpan ke kunci A
+  /// (QA e2e 2026-09-29 #14).
+  void reset() {
+    _username = 'anon';
+    _items = [];
+    _loaded = false;
     notifyListeners();
   }
 

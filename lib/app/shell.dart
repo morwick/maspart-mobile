@@ -270,6 +270,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // Config server-driven + cek update — jalan sendiri, tak memblokir sesi.
     _loadAppMeta();
 
+    // QA e2e 2026-09-29 #14: keranjang per akun dimuat dari username TOKEN,
+    // tidak menunggu /me — dulu /me yang gagal membuat keranjang akun
+    // sebelumnya (singleton) tetap tampil & tersimpan ke kunci akun itu.
+    final dariToken = await AuthStorage.usernameToken();
+    if (dariToken.isNotEmpty) {
+      await _cart.load(dariToken);
+    } else {
+      _cart.reset();
+    }
+
     ApiService.me().then((u) {
       if (!mounted) return;
       final username = (u['username'] ?? u['name'] ?? '').toString();
@@ -278,7 +288,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         _role = (u['role'] ?? _role).toString();
       });
       // Keranjang disimpan PER-USER: dua akun di satu HP tak boleh tercampur.
-      _cart.load(username);
+      // Username token (di atas) yang dipakai bila ada — sumber yang sama
+      // dengan server; /me hanya cadangan untuk token non-JWT.
+      if (dariToken.isEmpty) _cart.load(username);
       _applyHomeAndGuard();
     }).catchError((_) {});
 
@@ -350,13 +362,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     setState(() {
       _navigated = true;
-      _history.add((_screen, _args));
+      // QA e2e 2026-09-29 #13: `autopay` (buka Snap otomatis sesudah
+      // checkout) hanya berlaku SEKALI — jangan ikut tersimpan di riwayat,
+      // kalau tidak tiap Kembali ke detail pesanan membuka Midtrans lagi.
+      _history.add((_screen, _tanpaAutopay(_args)));
       _screen = target;
+      if (part == null) _args = _tanpaAutopay(_args);
       if (part != null) _args = part;
     });
     if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
       Navigator.of(context).pop();
     }
+  }
+
+  static Map<String, dynamic>? _tanpaAutopay(Map<String, dynamic>? a) {
+    if (a == null || !a.containsKey('autopay')) return a;
+    return Map<String, dynamic>.of(a)..remove('autopay');
   }
 
   void _back() {
@@ -423,6 +444,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     await Push.lepas(); // lepas token push di server (butuh token sesi)
     await ApiService.logout(); // audit log: LOGOUT (sebelum token dibuang)
     await AuthStorage.clearToken();
+    // Keranjang & kunci checkout milik akun ini tak boleh terbawa ke akun
+    // yang login berikutnya (#14).
+    _cart.reset();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const LoginScreen()),
