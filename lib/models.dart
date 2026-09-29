@@ -1395,6 +1395,19 @@ class RepairKitModel {
 // Pesanan, pembayaran & pengiriman
 // ══════════════════════════════════════════════════════════════════════
 
+/// Satu bukti packing (foto/video) — masukan penguji 2026-09-29 (migrasi 046).
+/// `jenis` ditentukan server dari ISI berkas saat unggah.
+class BuktiPacking {
+  final String url;
+  final String jenis; // 'foto' | 'video'
+  const BuktiPacking({required this.url, required this.jenis});
+
+  bool get video => jenis == 'video';
+
+  factory BuktiPacking.fromJson(Map<String, dynamic> j) =>
+      BuktiPacking(url: _s(j['url']), jenis: _s(j['jenis'], 'foto'));
+}
+
 class OrderItemDetail {
   final String partNumber;
   final String name;
@@ -1628,6 +1641,19 @@ class OrderDetail extends OrderSummary {
   final String? pickedUpBy;
   final String? pickedUpAt;
 
+  /// Bukti packing foto/video (masukan penguji 2026-09-29, migrasi 046) —
+  /// HANYA gudang & admin. Ambang & syarat dihitung server:
+  /// `packingBuktiAktif` false = migrasi belum jalan (unggah 503, syarat tak
+  /// dipaksakan); `packingBuktiWajib` = kirim kurir & total ≥ `packingBuktiMin`
+  /// → wajib VIDEO sebelum 'dikirim'; `packingTahanKirim` = alasan tombol
+  /// "Tandai Dikirim" ditahan.
+  final List<BuktiPacking> packingBukti;
+  final bool packingBuktiAktif;
+  final int packingBuktiMin;
+  final bool packingBuktiWajib;
+  final int packingBuktiMaks;
+  final String? packingTahanKirim;
+
   /// S-7 (HANYA pembeli pemilik pesanan): kode ambil 6 digit yang ditunjukkan
   /// ke gudang saat mengambil barang. Gudang & admin tak pernah menerimanya.
   final String? kodeAmbil;
@@ -1746,6 +1772,12 @@ class OrderDetail extends OrderSummary {
     this.pickupProofUrl,
     this.pickedUpBy,
     this.pickedUpAt,
+    this.packingBukti = const [],
+    this.packingBuktiAktif = false,
+    this.packingBuktiMin = 0,
+    this.packingBuktiWajib = false,
+    this.packingBuktiMaks = 6,
+    this.packingTahanKirim,
     this.kodeAmbil,
     this.paymentNote,
     this.catatanTerbuka = const [],
@@ -1827,6 +1859,12 @@ class OrderDetail extends OrderSummary {
         pickupProofUrl: _sOrNull(j['pickup_proof_url']),
         pickedUpBy: _sOrNull(j['picked_up_by']),
         pickedUpAt: _sOrNull(j['picked_up_at']),
+        packingBukti: _list(j['packing_bukti'], BuktiPacking.fromJson),
+        packingBuktiAktif: _b(j['packing_bukti_aktif']),
+        packingBuktiMin: _i(j['packing_bukti_min']),
+        packingBuktiWajib: _b(j['packing_bukti_wajib']),
+        packingBuktiMaks: _i(j['packing_bukti_maks'], 6),
+        packingTahanKirim: _sOrNull(j['packing_tahan_kirim']),
         kodeAmbil: _sOrNull(j['kode_ambil']),
         paymentNote: _sOrNull(j['payment_note']),
         // Server lama belum mengirim catatan_terbuka → seluruh catatan terbuka.
