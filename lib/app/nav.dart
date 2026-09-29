@@ -196,8 +196,6 @@ const List<NavItem> _navDataAdmin = [
   NavItem('Lokasi Gudang', Icons.place_outlined, MasScreen.gudang),
 ];
 
-// Tempat "Chat Pembeli" admin (/admin/chat) bila layarnya sudah ada: sisipkan
-// di sini — jangan tambahkan sebelum layarnya nyata.
 const List<NavItem> _navPenjualan = [
   NavItem('Pesanan', Icons.shopping_cart_outlined, MasScreen.orders),
   NavItem('Pesanan Bermasalah', Icons.report_problem_outlined, MasScreen.bermasalah),
