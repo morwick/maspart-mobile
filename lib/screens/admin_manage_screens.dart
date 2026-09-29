@@ -2267,7 +2267,12 @@ class _GudangRow {
   double? lon;
   String originPostal;
   String pic;
-  String key;
+
+  /// ID lokasi (read-only, dibuat server) — dikirim balik apa adanya.
+  final String key;
+
+  /// Username staf cabang pemroses. Satu akun boleh memegang banyak gudang.
+  String akun;
   bool selectable;
   bool canShip;
 
@@ -2280,6 +2285,7 @@ class _GudangRow {
         originPostal = g.originPostal,
         pic = g.pic,
         key = g.key ?? '',
+        akun = (g.akun ?? g.key ?? '').toLowerCase(),
         selectable = g.selectable,
         canShip = g.canShip;
 
@@ -2290,6 +2296,7 @@ class _GudangRow {
         lon: lon,
         selectable: selectable,
         key: key.isEmpty ? null : key,
+        akun: akun.isEmpty ? null : akun,
         originPostal: originPostal,
         pic: pic,
         canShip: canShip,
@@ -2377,7 +2384,7 @@ class _GudangScreenState extends State<GudangScreen> {
           );
           _pos[r.label] = TextEditingController(text: r.originPostal);
           _pic[r.label] = TextEditingController(text: r.pic);
-          _key[r.label] = TextEditingController(text: r.key);
+          _key[r.label] = TextEditingController(text: r.akun);
         }
         _loading = false;
       });
@@ -2644,7 +2651,7 @@ class _GudangScreenState extends State<GudangScreen> {
 
           if (r.selectable) ...[
             const SizedBox(height: 12),
-            const MasEyebrow('Key / akun cabang'),
+            const MasEyebrow('Akun cabang'),
             const SizedBox(height: 6),
             if (_akun != null)
               _pilihAkun(r, _akun!)
@@ -2653,8 +2660,9 @@ class _GudangScreenState extends State<GudangScreen> {
                 controller: _key[r.label]!,
                 hint: 'mis. jakarta',
                 mono: true,
-                onChanged: (v) => r.key = v.trim().toLowerCase(),
+                onChanged: (v) => r.akun = v.trim().toLowerCase(),
               ),
+            ..._infoAkun(m, r),
           ],
 
           const SizedBox(height: 10),
@@ -2665,11 +2673,40 @@ class _GudangScreenState extends State<GudangScreen> {
         ]),
       );
 
-  /// Dropdown akun staf cabang. Akun yang sudah memegang gudang utama lain
-  /// dinonaktifkan (backend menolak satu key dipakai dua gudang).
+  /// Info kecil di bawah pilihan akun: gudang lain yang juga dipegang akun ini
+  /// (satu akun boleh memegang beberapa gudang) + ID lokasi (read-only).
+  List<Widget> _infoAkun(MasColors m, _GudangRow r) {
+    final lain = r.akun.isEmpty
+        ? const <String>[]
+        : [
+            for (final x in _rows)
+              if (x.label != r.label && x.selectable && x.akun == r.akun)
+                x.display.isEmpty ? x.label : x.display,
+          ];
+    return [
+      if (lain.isNotEmpty) ...[
+        const SizedBox(height: 6),
+        Text(
+          'Akun ini juga memegang: ${lain.join(", ")}',
+          style: TextStyle(fontSize: 11.5, color: m.ink500),
+        ),
+      ],
+      if (r.key.isNotEmpty) ...[
+        const SizedBox(height: 4),
+        Text(
+          'ID lokasi: ${r.key}',
+          style: TextStyle(
+              fontSize: 11, color: m.ink400, fontFamily: 'monospace'),
+        ),
+      ],
+    ];
+  }
+
+  /// Dropdown akun staf cabang. Satu akun BOLEH memegang beberapa gudang,
+  /// jadi akun yang sudah dipakai gudang lain tetap bisa dipilih.
   Widget _pilihAkun(_GudangRow r, List<AdminUser> akun) {
     final m = context.mas;
-    final ada = akun.any((u) => u.username.toLowerCase() == r.key);
+    final ada = akun.any((u) => u.username.toLowerCase() == r.akun);
     return Container(
       height: 42,
       padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -2680,7 +2717,7 @@ class _GudangScreenState extends State<GudangScreen> {
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: r.key,
+          value: r.akun,
           isExpanded: true,
           icon: Icon(Icons.keyboard_arrow_down_rounded,
               size: 18, color: m.ink500),
@@ -2688,28 +2725,26 @@ class _GudangScreenState extends State<GudangScreen> {
           dropdownColor: m.paper,
           items: [
             const DropdownMenuItem(value: '', child: Text('— pilih akun —')),
-            if (r.key.isNotEmpty && !ada)
+            if (r.akun.isNotEmpty && !ada)
               DropdownMenuItem(
-                value: r.key,
-                child: Text('${r.key} (akun tak ditemukan)',
+                value: r.akun,
+                child: Text('${r.akun} (akun tak ditemukan)',
                     overflow: TextOverflow.ellipsis),
               ),
             for (final u in akun)
               () {
                 final nama = u.username.toLowerCase();
-                final dipakai = _rows
+                final dipegang = _rows
                     .where((x) =>
-                        x.label != r.label && x.selectable && x.key == nama)
-                    .firstOrNull;
+                        x.label != r.label && x.selectable && x.akun == nama)
+                    .length;
                 return DropdownMenuItem(
                   value: nama,
-                  enabled: dipakai == null,
                   child: Text(
-                    dipakai == null
+                    dipegang == 0
                         ? u.username
-                        : '${u.username} (dipakai ${dipakai.display})',
+                        : '${u.username} (+$dipegang gudang lain)',
                     overflow: TextOverflow.ellipsis,
-                    style: dipakai == null ? null : TextStyle(color: m.ink400),
                   ),
                 );
               }(),
@@ -2717,7 +2752,7 @@ class _GudangScreenState extends State<GudangScreen> {
           onChanged: (v) {
             if (v == null) return;
             setState(() {
-              r.key = v;
+              r.akun = v;
               _key[r.label]?.text = v;
             });
           },

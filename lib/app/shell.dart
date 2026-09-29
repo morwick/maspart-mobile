@@ -610,7 +610,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // kunjungan sebelumnya terpakai ulang dan prefill-nya hilang.
       MasScreen.chat => 'chat:${a?['gudang'] ?? ''}:${a?['part'] ?? ''}',
       // Tautan notifikasi chat membuka thread tertentu (masukan penguji 2026-09-29).
-      MasScreen.cabangChat => 'cabangChat:${a?['buyer'] ?? ''}',
+      MasScreen.cabangChat =>
+        'cabangChat:${a?['gudang'] ?? ''}:${a?['buyer'] ?? ''}',
       MasScreen.adminChat =>
         'adminChat:${a?['gudang'] ?? ''}:${a?['buyer'] ?? ''}',
       MasScreen.sinonim => 'sinonim:${a?['trigger'] ?? ''}',

@@ -409,7 +409,12 @@ Set<MasScreen> accessibleScreens(List<NavSection> sections) => {
   }
   if (seg.length == 2 && seg[0] == 'cabang' && seg[1] == 'chat') {
     final b = (q['buyer'] ?? '').trim();
-    return (MasScreen.cabangChat, {if (b.isNotEmpty) 'buyer': b});
+    // `gudang` = key lokasi thread (akun pemegang beberapa gudang).
+    final g = (q['gudang'] ?? '').trim();
+    return (MasScreen.cabangChat, {
+      if (b.isNotEmpty) 'buyer': b,
+      if (g.isNotEmpty) 'gudang': g,
+    });
   }
   if (seg.length == 2 && seg[0] == 'admin' && seg[1] == 'chat') {
     final g = (q['gudang'] ?? '').trim();

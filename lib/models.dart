@@ -2995,10 +2995,18 @@ class ChatThreadSummary {
   final String last;
   final String createdAt;
 
+  /// Lokasi gudang thread ini. Satu akun cabang bisa memegang beberapa
+  /// gudang → pembeli yang sama bisa punya thread di tiap gudang. Kosong =
+  /// backend lama (satu gudang per akun).
+  final String gudangKey;
+  final String gudangLabel;
+
   const ChatThreadSummary({
     required this.buyerUsername,
     this.last = '',
     this.createdAt = '',
+    this.gudangKey = '',
+    this.gudangLabel = '',
   });
 
   factory ChatThreadSummary.fromJson(Map<String, dynamic> j) =>
@@ -3006,6 +3014,8 @@ class ChatThreadSummary {
         buyerUsername: _s(j['buyer_username']),
         last: _s(j['last']),
         createdAt: _s(j['created_at']),
+        gudangKey: _s(j['gudang_key']),
+        gudangLabel: _s(j['gudang_label']),
       );
 }
 
@@ -4699,7 +4709,14 @@ class AdminGudang {
 
   /// Boleh dipilih pembeli sebagai lokasi belanja.
   final bool selectable;
+
+  /// ID lokasi gudang utama (dipakai pembeli, keranjang & thread chat) —
+  /// read-only di layar admin; server yang membuatnya.
   final String? key;
+
+  /// Username staf cabang pemroses pesanan gudang ini. SATU akun boleh
+  /// memegang BEBERAPA gudang. Backend lama tanpa field ini → sama dengan [key].
+  final String? akun;
   final String originPostal;
   final String pic;
 
@@ -4715,6 +4732,7 @@ class AdminGudang {
     this.lon,
     this.selectable = false,
     this.key,
+    this.akun,
     this.originPostal = '',
     this.pic = '',
     this.canShip = false,
@@ -4728,6 +4746,7 @@ class AdminGudang {
         lon: _dOrNull(j['lon']),
         selectable: _b(j['selectable']),
         key: _sOrNull(j['key']),
+        akun: j.containsKey('akun') ? _sOrNull(j['akun']) : _sOrNull(j['key']),
         originPostal: _s(j['origin_postal']),
         pic: _s(j['pic']),
         canShip: _b(j['can_ship']),
@@ -4740,6 +4759,7 @@ class AdminGudang {
         'lon': lon,
         'selectable': selectable,
         'key': key,
+        'akun': akun,
         'pic': pic,
         'origin_postal': originPostal,
         'can_ship': canShip,
@@ -4750,6 +4770,7 @@ class AdminGudang {
     double? lon,
     bool? selectable,
     String? key,
+    String? akun,
     String? originPostal,
     String? pic,
     bool? canShip,
@@ -4761,6 +4782,7 @@ class AdminGudang {
         lon: lon ?? this.lon,
         selectable: selectable ?? this.selectable,
         key: key ?? this.key,
+        akun: akun ?? this.akun,
         originPostal: originPostal ?? this.originPostal,
         pic: pic ?? this.pic,
         canShip: canShip ?? this.canShip,
