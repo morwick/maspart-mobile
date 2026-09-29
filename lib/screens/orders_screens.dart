@@ -1,7 +1,8 @@
 // lib/screens/orders_screens.dart
 // Tiga layar PESANAN sisi ADMIN, seluruhnya dari API nyata:
 //
-//   OrdersScreen      — semua pesanan lintas cabang (+ saring status).
+//   OrdersScreen      — semua pesanan lintas cabang (+ ringkasan status, cari,
+//                       muat lebih — masukan penguji 2026-09-29).
 //   OrderDetailScreen — satu pesanan: uang, penerima, gudang, aksi & chat.
 //   PenjualanScreen   — rekap omzet, per bulan, per gudang, part terlaris.
 //
@@ -9,6 +10,7 @@
 // percakapan. Model tidak dipakai di sini, jadi disembunyikan supaya nama
 // `OrderChat` tegas menunjuk widget-nya.
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -133,13 +135,35 @@ class OrdersScreen extends StatefulWidget {
   State<OrdersScreen> createState() => _OrdersScreenState();
 }
 
+/// Chip ringkasan status (masukan penguji 2026-09-29, paritas web
+/// /admin/orders). "Perlu Diverifikasi" hanya tampil bila ada isinya.
+const List<(String, String, bool)> _kKartuStatus = [
+  ('menunggu_pembayaran', 'Belum Bayar', false),
+  ('menunggu_verifikasi', 'Perlu Diverifikasi', true),
+  ('diproses', 'Perlu Diproses', false),
+  ('dikirim', 'Dikirim', false),
+  ('selesai', 'Selesai', false),
+  ('batal', 'Dibatalkan', false),
+];
+const int _kPerHalaman = 50;
+
 class _OrdersScreenState extends State<OrdersScreen> {
   List<OrderSummary> _orders = [];
+  Map<String, String> _penerima = {};
   bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMore = false;
   String? _error;
+  AdminOrdersRingkasan? _ringkasan;
 
-  /// '' = semua status.
+  /// '' = semua status. Disaring di SERVER (bukan dari 200 pesanan terbaru).
   String _filter = '';
+  String _q = '';
+  final _cariCtrl = TextEditingController();
+  Timer? _debounce;
+
+  /// Nomor permintaan terakhir: jawaban lama (ketik cepat / ganti filter) dibuang.
+  int _reqId = 0;
 
   @override
   void initState() {
@@ -147,20 +171,33 @@ class _OrdersScreenState extends State<OrdersScreen> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _cariCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
+    final id = ++_reqId;
     setState(() {
       _loading = true;
+      _loadingMore = false;
       _error = null;
     });
+    _muatRingkasan();
     try {
-      final o = await ApiService.adminOrders();
-      if (!mounted) return;
+      final hal = await ApiService.adminOrdersCari(
+          status: _filter, q: _q, offset: 0, limit: _kPerHalaman);
+      if (!mounted || id != _reqId) return;
       setState(() {
-        _orders = o;
+        _orders = hal.orders;
+        _penerima = Map.of(hal.penerima);
+        _hasMore = hal.hasMore;
         _loading = false;
       });
     } on ApiException catch (e) {
-      if (!mounted) return;
+      if (!mounted || id != _reqId) return;
       setState(() {
         _error = e.message;
         _loading = false;
@@ -168,69 +205,133 @@ class _OrdersScreenState extends State<OrdersScreen> {
     }
   }
 
-  List<OrderSummary> get _view =>
-      _filter.isEmpty ? _orders : _orders.where((o) => o.status == _filter).toList();
+  Future<void> _muatLagi() async {
+    if (_loadingMore || _loading) return;
+    final id = _reqId;
+    setState(() => _loadingMore = true);
+    try {
+      final hal = await ApiService.adminOrdersCari(
+          status: _filter, q: _q, offset: _orders.length, limit: _kPerHalaman);
+      if (!mounted || id != _reqId) return;
+      final ada = {for (final o in _orders) o.orderCode};
+      setState(() {
+        _orders = [
+          ..._orders,
+          ...hal.orders.where((o) => !ada.contains(o.orderCode)),
+        ];
+        _penerima = {..._penerima, ...hal.penerima};
+        _hasMore = hal.hasMore;
+        _loadingMore = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted || id != _reqId) return;
+      setState(() {
+        _error = e.message;
+        _loadingMore = false;
+      });
+    }
+  }
+
+  Future<void> _muatRingkasan() async {
+    try {
+      final r = await ApiService.adminOrdersRingkasan();
+      if (!mounted) return;
+      setState(() => _ringkasan = r);
+    } on ApiException {
+      // Ringkasan hanya pelengkap — daftar tetap jalan tanpanya.
+    }
+  }
+
+  void _pilihStatus(String st) {
+    setState(() => _filter = _filter == st ? '' : st);
+    _load();
+  }
+
+  void _onCari(String v) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), () {
+      final kata = v.trim();
+      if (!mounted || kata == _q) return;
+      _q = kata;
+      _load();
+    });
+  }
+
+  void _resetFilter() {
+    _debounce?.cancel();
+    _cariCtrl.clear();
+    setState(() {
+      _filter = '';
+      _q = '';
+    });
+    _load();
+  }
 
   @override
   Widget build(BuildContext context) {
     final m = context.mas;
     final nav = AppNav.of(context);
+    final counts = _ringkasan?.counts ?? const <String, int?>{};
+    final kartu = _kKartuStatus
+        .where((k) => !k.$3 || (counts[k.$1] ?? 0) > 0 || _filter == k.$1)
+        .toList();
+    final adaFilter = _filter.isNotEmpty || _q.isNotEmpty;
 
-    // Menunggu verifikasi = satu-satunya status yang menuntut tindakan admin.
-    final pending =
-        _orders.where((o) => o.status == 'menunggu_verifikasi').length;
-
-    // Hanya tawarkan status yang benar-benar ada datanya, diurut mengikuti
-    // alur hidup pesanan (bukan abjad). Status tak dikenal dilempar ke akhir.
-    final urutan = kOrderStatus.keys.toList();
-    int rank(String s) {
-      final i = urutan.indexOf(s);
-      return i < 0 ? urutan.length : i;
+    String angka(String st) {
+      if (_ringkasan == null) return '…';
+      return counts[st]?.toString() ?? '–';
     }
-
-    final statuses = <String>{for (final o in _orders) o.status}.toList()
-      ..sort((a, b) => rank(a).compareTo(rank(b)));
 
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
+          // Ringkasan status = filter; ketuk lagi chip aktif untuk melepas.
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              _chip(m, 'Semua', _filter.isEmpty, () {
+                if (_filter.isEmpty) return;
+                setState(() => _filter = '');
+                _load();
+              }),
+              for (final k in kartu) ...[
+                const SizedBox(width: 6),
+                _chip(m, '${k.$2} (${angka(k.$1)})', _filter == k.$1,
+                    () => _pilihStatus(k.$1)),
+              ],
+            ]),
+          ),
+          const SizedBox(height: 10),
+          MasInput(
+            controller: _cariCtrl,
+            hint: 'Cari PO, pembeli, penerima, resi, PN / barang…',
+            prefix: Icon(Icons.search_rounded, size: 18, color: m.ink400),
+            suffix: adaFilter
+                ? InkResponse(
+                    radius: 20,
+                    onTap: _resetFilter,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                      child: Icon(Icons.close_rounded, size: 17, color: m.ink500),
+                    ),
+                  )
+                : null,
+            action: TextInputAction.search,
+            autocorrect: false,
+            onChanged: _onCari,
+            onSubmitted: (v) {
+              _debounce?.cancel();
+              _q = v.trim();
+              _load();
+            },
+          ),
+          const SizedBox(height: 12),
+
           if (_error != null) ...[
             _Alert(_error!),
             const SizedBox(height: 14),
-          ],
-
-          if (pending > 0) ...[
-            Row(children: [
-              MasPill(
-                label: '$pending menunggu verifikasi',
-                tone: MasPillTone.warn,
-                dot: true,
-              ),
-            ]),
-            const SizedBox(height: 12),
-          ],
-
-          if (statuses.isNotEmpty) ...[
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(children: [
-                _chip(m, 'Semua (${_orders.length})', _filter.isEmpty,
-                    () => setState(() => _filter = '')),
-                for (final s in statuses) ...[
-                  const SizedBox(width: 6),
-                  _chip(
-                    m,
-                    '${orderStatusLabel(s)} '
-                    '(${_orders.where((o) => o.status == s).length})',
-                    _filter == s,
-                    () => setState(() => _filter = s),
-                  ),
-                ],
-              ]),
-            ),
-            const SizedBox(height: 12),
           ],
 
           if (_loading)
@@ -241,22 +342,34 @@ class _OrdersScreenState extends State<OrdersScreen> {
                   child: MasSkeleton(height: 96),
                 ),
             ])
-          else if (_view.isEmpty)
+          else if (_orders.isEmpty)
             MasEmpty(
               icon: Icons.shopping_cart_outlined,
-              title: _orders.isEmpty
-                  ? 'Belum ada pesanan'
-                  : 'Tidak ada pesanan pada status ini',
-              subtitle: _orders.isEmpty
-                  ? 'Pesanan dari pembeli akan muncul di sini.'
-                  : 'Pilih status lain atau tampilkan semua.',
+              title: adaFilter
+                  ? 'Tidak ada pesanan yang cocok'
+                  : 'Belum ada pesanan',
+              subtitle: adaFilter
+                  ? 'Ubah kata cari atau pilih status lain.'
+                  : 'Pesanan dari pembeli akan muncul di sini.',
             )
-          else
-            for (final o in _view)
+          else ...[
+            for (final o in _orders)
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: _card(m, nav, o),
               ),
+            if (_hasMore)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: MasButton(
+                  label: 'Muat lebih',
+                  primary: false,
+                  expand: true,
+                  loading: _loadingMore,
+                  onTap: _loadingMore ? null : _muatLagi,
+                ),
+              ),
+          ],
         ],
       ),
     );
@@ -329,6 +442,21 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 const MasPill(
                     label: 'bukti bayar', tone: MasPillTone.info, height: 19),
             ]),
+            if ((_penerima[o.orderCode] ?? '').isNotEmpty &&
+                _penerima[o.orderCode] != o.username) ...[
+              const SizedBox(height: 5),
+              Text('Penerima: ${_penerima[o.orderCode]}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11.5, color: m.ink500)),
+            ],
+            if ((o.ringkasResi ?? '').isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text('Resi ${o.ringkasResi}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: masMono(size: 11, color: m.ink500)),
+            ],
             const SizedBox(height: 6),
             Text('Dibuat ${fmtDate(o.createdAt)}',
                 style: TextStyle(fontSize: 11, color: m.ink400)),

@@ -46,7 +46,7 @@ class _MasDrawerState extends State<MasDrawer> {
     super.dispose();
   }
 
-  /// Seksi setelah disaring kotak cari. Admin punya 15 item di seksi Admin
+  /// Seksi setelah disaring kotak cari. Admin punya ±20 item di seksi-seksi admin
   /// saja — menggulir mencarinya lebih lambat daripada mengetik dua huruf.
   List<NavSection> get _sections {
     final q = _filter.trim().toLowerCase();

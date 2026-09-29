@@ -184,23 +184,39 @@ const List<NavItem> _navData = [
   NavItem('Rak & Kartu Stok', Icons.shelves, MasScreen.rak, permKey: 'rak'),
 ];
 
-const List<NavItem> _navAdmin = [
+// Menu admin dikelompokkan per pekerjaan (masukan penguji 2026-09-29, paritas
+// AppShell.tsx web): dulu satu seksi "Admin" datar. Urutan: Data (+ khusus
+// admin) → Penjualan → Tools Pembelajaran AI → Sistem. Voucher Promo, Return
+// Barang (admin), System Activity Log, Pelanggan Accurate & Config Aplikasi
+// belum punya layar di HP — tempatnya di Penjualan/Sistem bila kelak dibuat.
+const List<NavItem> _navDataAdmin = [
+  NavItem('Manajemen User', Icons.person_outline_rounded, MasScreen.users),
+  NavItem('Lokasi Gudang', Icons.place_outlined, MasScreen.gudang),
+];
+
+// Tempat "Chat Pembeli" admin (/admin/chat) bila layarnya sudah ada: sisipkan
+// di sini — jangan tambahkan sebelum layarnya nyata.
+const List<NavItem> _navPenjualan = [
   NavItem('Pesanan', Icons.shopping_cart_outlined, MasScreen.orders),
   NavItem('Pesanan Bermasalah', Icons.report_problem_outlined, MasScreen.bermasalah),
   NavItem('Laporan Penjualan', Icons.bar_chart_rounded, MasScreen.penjualan),
+];
+
+const List<NavItem> _navAiTools = [
   NavItem('Umpan Balik AI', Icons.forum_outlined, MasScreen.feedback),
   NavItem('Observabilitas AI', Icons.monitor_heart_outlined, MasScreen.chatlog),
   NavItem('Pencarian Nihil', Icons.search_off_rounded, MasScreen.misses),
   NavItem('Kamus Sinonim', Icons.menu_book_outlined, MasScreen.sinonim),
   NavItem('Rute Maksud', Icons.alt_route_rounded, MasScreen.maksud),
   NavItem('Pengetahuan AI', Icons.auto_stories_outlined, MasScreen.pengetahuan),
+  NavItem('Foto Part', Icons.photo_library_outlined, MasScreen.fotopart),
+  NavItem('Image Index', Icons.grid_on_rounded, MasScreen.imageindex),
+];
+
+const List<NavItem> _navSistem = [
   NavItem('Menu Control', Icons.shield_outlined, MasScreen.menu),
   NavItem('Monitoring User', Icons.pie_chart_outline_rounded, MasScreen.monitoring),
   NavItem('Upload Data', Icons.upload_rounded, MasScreen.upload),
-  NavItem('Manajemen User', Icons.person_outline_rounded, MasScreen.users),
-  NavItem('Lokasi Gudang', Icons.place_outlined, MasScreen.gudang),
-  NavItem('Foto Part', Icons.photo_library_outlined, MasScreen.fotopart),
-  NavItem('Image Index', Icons.grid_on_rounded, MasScreen.imageindex),
 ];
 
 const List<NavItem> _navCabang = [
@@ -226,12 +242,13 @@ const Set<MasScreen> _kChildScreens = {
 
 /// Bangun struktur drawer sesuai peran & izin — persis logika web (AppShell.tsx):
 /// - pembeli → hanya alur belanja (tetap difilter Menu Control).
-/// - admin   → Ringkasan + Pencarian + Data + Admin.
+/// - admin   → Ringkasan + Pencarian + Data (+ User & Gudang) + Penjualan +
+///             Tools Pembelajaran AI + Sistem.
 /// - cabang  → Ringkasan + Pencarian + Data + "Cabang <label>".
 /// - user    → Ringkasan + Pencarian + Data.
 ///
 /// [allowed] null = izin belum dimuat → tampilkan semua item ber-permKey (aman:
-/// seksi Admin tetap digembok oleh role, bukan oleh izin).
+/// seksi admin tetap digembok oleh role, bukan oleh izin).
 ///
 /// [gudangKelola] = daftar gudang yang boleh DITULIS user (izin Rak & Kartu
 /// Stok); kosong berarti user hanya bisa MELIHAT rak dari Detail Part.
@@ -263,13 +280,23 @@ List<NavSection> buildNavSections({
   final out = <NavSection>[
     const NavSection('Ringkasan', [_navDashboard]),
     NavSection('Pencarian', _navPrimary.where(show).toList()),
-    NavSection('Data', _navData.where(show).toList()),
+    // Manajemen User & Lokasi Gudang ikut seksi Data, khusus admin.
+    NavSection('Data', [
+      ..._navData.where(show),
+      if (isAdmin) ..._navDataAdmin,
+    ]),
   ];
 
   if (branch != null && branch.isNotEmpty) {
     out.add(NavSection('Cabang $branch', _navCabang));
   }
-  if (isAdmin) out.add(const NavSection('Admin', _navAdmin));
+  if (isAdmin) {
+    out.addAll(const [
+      NavSection('Penjualan', _navPenjualan),
+      NavSection('Tools Pembelajaran AI', _navAiTools),
+      NavSection('Sistem', _navSistem),
+    ]);
+  }
 
   return out.where((s) => s.items.isNotEmpty).toList();
 }

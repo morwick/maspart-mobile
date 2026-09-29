@@ -1559,6 +1559,55 @@ class OrderSummary {
       );
 }
 
+/// Satu halaman daftar pesanan ADMIN — GET /api/admin/orders dengan
+/// status/q/offset/limit (masukan penguji 2026-09-29, paritas web
+/// `cariAdminOrders`). [penerima] = order_code → nama penerima (kolom yang
+/// hanya dikirim jalur cari admin; OrderSummary sengaja tak diubah).
+class AdminOrdersPage {
+  final List<OrderSummary> orders;
+  final Map<String, String> penerima;
+  final bool hasMore;
+  const AdminOrdersPage({
+    this.orders = const [],
+    this.penerima = const {},
+    this.hasMore = false,
+  });
+
+  factory AdminOrdersPage.fromJson(Map<String, dynamic> j) {
+    final rows = (j['orders'] as List?)
+            ?.whereType<Map>()
+            .map((e) => e.cast<String, dynamic>())
+            .toList() ??
+        const <Map<String, dynamic>>[];
+    final penerima = <String, String>{};
+    for (final r in rows) {
+      final nama = _s(r['recipient_name']).trim();
+      if (nama.isNotEmpty) penerima[_s(r['order_code'])] = nama;
+    }
+    return AdminOrdersPage(
+      orders: rows.map(OrderSummary.fromJson).toList(),
+      penerima: penerima,
+      hasMore: _b(j['has_more']),
+    );
+  }
+}
+
+/// Jumlah pesanan per status (GET /api/admin/orders/ringkasan, cache server
+/// 30 dtk). Nilai null = status itu gagal dihitung → tampilkan "–".
+class AdminOrdersRingkasan {
+  final Map<String, int?> counts;
+  const AdminOrdersRingkasan({this.counts = const {}});
+
+  factory AdminOrdersRingkasan.fromJson(Map<String, dynamic> j) {
+    final c = <String, int?>{};
+    final raw = j['counts'];
+    if (raw is Map) {
+      raw.forEach((k, v) => c['$k'] = v == null ? null : _i(v));
+    }
+    return AdminOrdersRingkasan(counts: c);
+  }
+}
+
 /// Detail pesanan. Perhatikan `tax` = PPN 12% (DPP 11/12) yang DITAMBAHKAN di
 /// atas harga barang setelah voucher diskon & poin (aturan sekarang, ikut
 /// Accurate). Pesanan lama (2026-07-12 s/d 2026-09-26) menyimpan `tax` sebagai

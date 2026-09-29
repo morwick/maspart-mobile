@@ -75,4 +75,31 @@ void main() {
       expect(kNoBottomBar.contains(MasScreen.dashboard), isFalse);
     });
   });
+
+  // Masukan penguji 2026-09-29: seksi "Admin" datar dipecah per pekerjaan
+  // (paritas AppShell.tsx web).
+  group('seksi menu admin', () {
+    List<MasScreen> isi(List<NavSection> secs, String label) =>
+        secs.firstWhere((s) => s.label == label).items.map((it) => it.screen).toList();
+
+    test('admin → Data (+User & Gudang), Penjualan, Tools AI, Sistem', () {
+      final secs = buildNavSections(role: 'admin', allowed: null);
+      expect(secs.map((s) => s.label).toList(), [
+        'Ringkasan', 'Pencarian', 'Data', 'Penjualan', 'Tools Pembelajaran AI', 'Sistem',
+      ]);
+      expect(isi(secs, 'Data'), containsAll([MasScreen.users, MasScreen.gudang]));
+      expect(isi(secs, 'Penjualan'),
+          [MasScreen.orders, MasScreen.bermasalah, MasScreen.penjualan]);
+      expect(isi(secs, 'Tools Pembelajaran AI'),
+          containsAll([MasScreen.feedback, MasScreen.fotopart, MasScreen.imageindex]));
+      expect(isi(secs, 'Sistem'),
+          [MasScreen.menu, MasScreen.monitoring, MasScreen.upload]);
+    });
+
+    test('staf non-admin tak mendapat menu admin di seksi Data', () {
+      final secs = buildNavSections(role: 'user', allowed: null);
+      expect(isi(secs, 'Data').contains(MasScreen.users), isFalse);
+      expect(secs.any((s) => s.label == 'Penjualan'), isFalse);
+    });
+  });
 }
