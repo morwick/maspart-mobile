@@ -492,8 +492,20 @@ class _BeliLagiScreenState extends State<BeliLagiScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontSize: 11.5, color: m.ink600),
-                        )
-                      else
+                        ),
+                      // QA2 N-10: terhalang berat → masuk keranjang, tapi hanya Ambil di Toko.
+                      if (bisa && it.hanyaAmbil)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Text(
+                            'Hanya bisa Ambil di Toko — ${it.alasan.split(' — ').first}',
+                            style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: m.warn600),
+                          ),
+                        ),
+                      if (!bisa)
                         Padding(
                           padding: const EdgeInsets.only(top: 2),
                           child: MasPill(

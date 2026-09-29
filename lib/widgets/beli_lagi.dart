@@ -114,7 +114,7 @@ Future<void> beliLagiDariPesanan(BuildContext context, String code) async {
 
   final n = await masukkanBeliLagi(bisa);
   final perluRingkasan = hasil.items.any((i) =>
-      !i.bisaDibeli || i.qtyDisesuaikan || i.selisihHarga != 0);
+      !i.bisaDibeli || i.hanyaAmbil || i.qtyDisesuaikan || i.selisihHarga != 0);
   if (perluRingkasan && context.mounted) {
     await tampilkanRingkasanBeliLagi(context, hasil.items, dimasukkan: n);
   } else {
@@ -151,6 +151,8 @@ class _RingkasanSheet extends StatelessWidget {
         items.where((i) => i.bisaDibeli && i.qtyDisesuaikan).toList();
     final berubah =
         items.where((i) => i.bisaDibeli && i.selisihHarga != 0).toList();
+    final hanyaAmbil =
+        items.where((i) => i.bisaDibeli && i.hanyaAmbil).toList();   // QA2 N-10
     final kosong = dimasukkan == 0;
 
     Widget judulBagian(String t, IconData ik, Color c) => Padding(
@@ -249,6 +251,14 @@ class _RingkasanSheet extends StatelessWidget {
                           baris(it.judul,
                               it.alasan.isNotEmpty ? it.alasan : 'tidak tersedia',
                               warnaKet: m.danger600),
+                      ],
+                      if (hanyaAmbil.isNotEmpty) ...[
+                        judulBagian('Hanya bisa Ambil di Toko',
+                            Icons.storefront_outlined, m.warn600),
+                        for (final it in hanyaAmbil)
+                          baris(it.judul,
+                              '${it.alasan.split(' — ').first} — pilih Ambil di Toko saat checkout',
+                              warnaKet: m.warn600),
                       ],
                       if (disesuaikan.isNotEmpty) ...[
                         judulBagian('Jumlah disesuaikan stok',

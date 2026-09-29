@@ -2505,6 +2505,10 @@ class BeliLagiItem {
   final String gudang;
   final bool bisaDibeli;
 
+  /// QA2 N-10: terhalang BERAT saja → boleh masuk keranjang, tapi keranjang
+  /// hanya mengizinkannya lewat Ambil di Toko ([alasan] memuat sarannya).
+  final bool hanyaAmbil;
+
   /// 'stok habis' | 'harga belum tersedia' | 'berat belum ditetapkan'
   final String alasan;
 
@@ -2533,6 +2537,7 @@ class BeliLagiItem {
     this.foto,
     this.gudang = '',
     this.bisaDibeli = false,
+    this.hanyaAmbil = false,
     this.alasan = '',
     this.kali = 0,
     this.totalQty = 0,
@@ -2556,6 +2561,7 @@ class BeliLagiItem {
         foto: _sOrNull(j['foto']),
         gudang: _s(j['gudang']),
         bisaDibeli: _b(j['bisa_dibeli']),
+        hanyaAmbil: _b(j['hanya_ambil']),
         alasan: _s(j['alasan']),
         kali: _i(j['kali']),
         totalQty: _i(j['total_qty']),
