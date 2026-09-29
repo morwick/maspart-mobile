@@ -15,6 +15,7 @@ import '../utils.dart';
 import '../api_service.dart';
 import '../app/nav.dart';
 import '../cart.dart';
+import 'toko_screen.dart' show TokoProductCard;
 import 'viewer_3d_screen.dart';
 
 /// Nomor rangka terakhir yang dipakai — pembeli umumnya punya 1-2 unit saja,
@@ -659,6 +660,10 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     return o > _beratGram ? o : 0;
   }
 
+  /// Angka kg apa adanya seperti web (`0.35` → "0.35", `12.0` → "12").
+  static String _angkaKg(double kg) =>
+      kg == kg.roundToDouble() ? kg.toStringAsFixed(0) : '$kg';
+
   static String _kg(int gram) =>
       '${(gram / 1000).toStringAsFixed(gram < 10000 ? 1 : 0).replaceAll('.', ',')} kg';
 
@@ -827,6 +832,11 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
           const SizedBox(height: 16),
           _CekUnitCard(pn: pn),
         ],
+        // Produk serupa ala Shopee (masukan penguji 2026-09-29) — kartu etalase
+        // yang sama dengan Toko; khusus pembeli (paritas web ProdukSerupa).
+        // Kosong / gagal → tak tampil sama sekali.
+        if (pn.isNotEmpty && isBuyer)
+          _ProdukSerupaSection(key: ValueKey('serupa-$pn'), pn: pn),
         // Penilaian pembeli ala Shopee — rata-rata, sebaran, filter, ulasan.
         // Hanya di tampilan pembeli (penjualan), sama dengan baris ★ di atas.
         if (pn.isNotEmpty && isBuyer) ...[
@@ -1272,21 +1282,10 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
 
     return MasCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Expanded(child: MasEyebrow('Beli part ini')),
-          if (berat > 0)
-            Text('${thousands(berat)} g / pcs', style: TextStyle(fontSize: 11.5, color: m.ink500)),
-        ]),
-        // Barang besar-ringan: ongkir ikut ukuran kemasan, bukan beratnya.
-        // Disebut di sini supaya ongkir di keranjang tak terasa "dicurangi".
-        if (_beratOngkirLebih > 0) ...[
-          const SizedBox(height: 4),
-          Text(
-            'Ongkir dihitung ±${_kg(_beratOngkirLebih)} / pcs (ukuran kemasan '
-            'lebih menentukan daripada beratnya).',
-            style: TextStyle(fontSize: 11.5, color: m.ink500, height: 1.35),
-          ),
-        ],
+        // Masukan penguji 2026-09-29: berat kirim & berat hitung ongkir
+        // (volumetrik) = info internal penentu ongkir → tak ditampilkan ke
+        // pembeli. Berat barang sebenarnya ada di kartu Spesifikasi (paritas web).
+        MasEyebrow('Beli part ini'),
         const SizedBox(height: 10),
         aksi,
         // Ikut web: pembeli bisa langsung menanyakan ketersediaan ke gudang.
@@ -1897,19 +1896,25 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
   Widget _specCard(MasColors m) {
     if (_loadingSpec) return const MasSkeleton(height: 120);
 
-    final rows = _specRows(_spec?.spec, isBuyer: AppNav.of(context).isBuyer);
+    final isBuyer = AppNav.of(context).isBuyer;
+    final rows = _specRows(_spec?.spec, isBuyer: isBuyer);
     final catatan = <Widget>[];
 
-    if (_specErr != null) {
-      catatan.add(_alertBox(m, 'Spesifikasi SIMS gagal dimuat: $_specErr'));
-    } else if (_spec?.spec.isEmpty ?? true) {
-      catatan.add(_alertBox(m, 'Belum ada data spesifikasi (berat & dimensi) di SIMS.'));
-    }
-    // Berat = dasar hitung ongkir. Tanpa berat, part tidak bisa dibeli sama
-    // sekali, jadi ini wajib disebut — bukan sekadar kolom kosong.
-    if (_beratGram == 0) {
-      catatan.add(_alertBox(m,
-          'Berat belum ditetapkan. Berat dipakai untuk menghitung ongkir, sehingga part ini belum bisa dibeli.'));
+    // Pembeli (masukan penguji 2026-09-29): catatan data SIMS/berat-ongkir =
+    // urusan internal; kartu cukup hilang bila tak ada baris (paritas web).
+    // Kartu Beli sudah menjelaskan bila part belum bisa dibeli (berat kosong).
+    if (!isBuyer) {
+      if (_specErr != null) {
+        catatan.add(_alertBox(m, 'Spesifikasi SIMS gagal dimuat: $_specErr'));
+      } else if (_spec?.spec.isEmpty ?? true) {
+        catatan.add(_alertBox(m, 'Belum ada data spesifikasi (berat & dimensi) di SIMS.'));
+      }
+      // Berat = dasar hitung ongkir. Tanpa berat, part tidak bisa dibeli sama
+      // sekali, jadi ini wajib disebut — bukan sekadar kolom kosong.
+      if (_beratGram == 0) {
+        catatan.add(_alertBox(m,
+            'Berat belum ditetapkan. Berat dipakai untuk menghitung ongkir, sehingga part ini belum bisa dibeli.'));
+      }
     }
 
     if (rows.isEmpty && catatan.isEmpty) return const SizedBox.shrink();
@@ -1937,13 +1942,21 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     final rows = <(String, String)>[];
 
     if (s != null) {
-      final bk = s.beratKirimKg;
-      final bb = s.beratBersihKg;
-      if (bk != null) rows.add(('Berat (kirim)', '$bk kg'));
-      if (_beratOngkirLebih > 0) {
-        rows.add(('Berat hitung ongkir', '${_kg(_beratOngkirLebih)} (volumetrik)'));
+      final bk = s.beratKirimKg ?? 0.0;
+      final bb = s.beratBersihKg ?? 0.0;
+      if (isBuyer) {
+        // Masukan penguji 2026-09-29: pembeli melihat berat BARANG sebenarnya
+        // (bersih; kosong → kotor). Berat kirim & hitung ongkir = internal.
+        final barang = bb > 0 ? bb : bk;
+        if (barang > 0) rows.add(('Berat', '${_angkaKg(barang)} kg'));
+      } else {
+        // Nilai 0 (cache SIMS belum hangat) tak dijadikan baris kosong.
+        if (bk > 0) rows.add(('Berat (kirim)', '${_angkaKg(bk)} kg'));
+        if (_beratOngkirLebih > 0) {
+          rows.add(('Berat hitung ongkir', '${_kg(_beratOngkirLebih)} (volumetrik)'));
+        }
+        if (bb > 0 && bb != bk) rows.add(('Berat (bersih)', '${_angkaKg(bb)} kg'));
       }
-      if (bb != null && bb != bk) rows.add(('Berat (bersih)', '$bb kg'));
       if ((s.dimensiCm ?? '').isNotEmpty) rows.add(('Dimensi (P×L×T)', '${s.dimensiCm} cm'));
       if ((s.satuan ?? '').isNotEmpty) rows.add(('Satuan', s.satuan!));
       // Kemasan minimum = MOQ pembelian ke pabrik — internal saja (paritas web).
@@ -2428,5 +2441,106 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
         ]),
       ),
     );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Produk serupa (masukan penguji 2026-09-29) — paritas web ProdukSerupa
+// ══════════════════════════════════════════════════════════════════════
+
+class _ProdukSerupaSection extends StatefulWidget {
+  final String pn;
+  const _ProdukSerupaSection({super.key, required this.pn});
+
+  @override
+  State<_ProdukSerupaSection> createState() => _ProdukSerupaSectionState();
+}
+
+class _ProdukSerupaSectionState extends State<_ProdukSerupaSection> {
+  final _cart = CartStore.instance;
+  List<TokoProduct> _items = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _cart.addListener(_onCart);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _cart.removeListener(_onCart);
+    super.dispose();
+  }
+
+  void _onCart() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _load() async {
+    try {
+      final r = await ApiService.tokoSerupa(widget.pn);
+      if (mounted) setState(() => _items = r.items);
+    } catch (_) {
+      /* strip pelengkap — diam saja bila gagal */
+    }
+  }
+
+  int _qtyOf(String pn) {
+    for (final i in _cart.items) {
+      if (i.partNumber == pn) return i.qty;
+    }
+    return 0;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_items.isEmpty) return const SizedBox.shrink();
+    final m = context.mas;
+    final nav = AppNav.of(context);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 20),
+      Row(children: [
+        Icon(Icons.grid_view_rounded, size: 17, color: m.brand700),
+        const SizedBox(width: 8),
+        Text('Produk serupa',
+            style: TextStyle(
+                fontSize: 14.5, fontWeight: FontWeight.w700, color: m.ink900)),
+      ]),
+      const SizedBox(height: 10),
+      SizedBox(
+        height: 280,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: _items.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 12),
+          itemBuilder: (_, i) {
+            final p = _items[i];
+            return SizedBox(
+              width: 172,
+              child: TokoProductCard(
+                product: p,
+                qty: _qtyOf(p.partNumber),
+                onOpen: () => nav.go(MasScreen.part, part: {
+                  'part_number': p.partNumber,
+                  'part_name': p.name,
+                }),
+                onAdd: () {
+                  _cart.add(CartItem(
+                    partNumber: p.partNumber,
+                    name: p.name,
+                    harga: p.hargaDisplay,
+                    berat: p.berat,
+                  ));
+                  nav.toast('${p.partNumber} masuk keranjang');
+                },
+                onQty: (q) => _cart.setQty(p.partNumber, q),
+                onRemove: () => _cart.remove(p.partNumber),
+              ),
+            );
+          },
+        ),
+      ),
+    ]);
   }
 }
