@@ -5106,6 +5106,12 @@ class ReturConfig {
   /// S-10: retur menunggu pembeli (kirim barang / bukti) dibatalkan otomatis.
   final int tungguPembeliHari;
 
+  /// C3 (masukan penguji 2026-09-29): batas barang per pengajuan jamak.
+  /// C4: [solusi] hanya yang DITAWARKAN (tukar, refund); label semua solusi
+  /// (termasuk 'ganti_part' retur lama) di [solusiLabel].
+  final int maksBarangSekaligus;
+  final Map<String, String> solusiLabel;
+
   const ReturConfig({
     this.alasan = const [],
     this.jenisRusak = const [],
@@ -5118,6 +5124,8 @@ class ReturConfig {
     this.durasiMinDetik = 10,
     this.maksFoto = 8,
     this.tungguPembeliHari = 7,
+    this.maksBarangSekaligus = 30,
+    this.solusiLabel = const {},
   });
 
   factory ReturConfig.fromJson(Map<String, dynamic> j) {
@@ -5134,6 +5142,8 @@ class ReturConfig {
       durasiMinDetik: _i(j['durasi_min_detik'], 10),
       maksFoto: _i(j['maks_foto'], 8),
       tungguPembeliHari: _i(j['tunggu_pembeli_hari'], 7),
+      maksBarangSekaligus: _i(j['maks_barang_sekaligus'], 30),
+      solusiLabel: _strMap(j['solusi_label']),
     );
   }
 }
@@ -5151,6 +5161,10 @@ class ReturRingkas {
   final String reasonLabel;
   final String requestedResolution;
   final String? resolution;
+
+  /// Label solusi (disetujui, atau yang diminta) dari server — '' bila server
+  /// lama. Nama beda dari [ReturDetail.solusiLabel] (field detail).
+  final String labelSolusi;
   final String status;
   final String statusLabel;
   final bool perluPeriksa;
@@ -5173,6 +5187,7 @@ class ReturRingkas {
     this.reasonLabel = '',
     this.requestedResolution = '',
     this.resolution,
+    this.labelSolusi = '',
     this.status = '',
     this.statusLabel = '',
     this.perluPeriksa = false,
@@ -5194,6 +5209,7 @@ class ReturRingkas {
         reasonLabel: _s(j['reason_label'], _s(j['reason'])),
         requestedResolution: _s(j['requested_resolution']),
         resolution: _kosongNull(j['resolution']),
+        labelSolusi: _s(j['solusi_label']),
         status: _s(j['status']),
         statusLabel: _s(j['status_label'], _s(j['status'])),
         perluPeriksa: _b(j['perlu_periksa']),
@@ -5205,6 +5221,48 @@ class ReturRingkas {
 
   /// Sudah di status akhir (selesai / ditolak / dibatalkan).
   bool get tamat => kReturAkhir.contains(status);
+}
+
+/// C3 (masukan penguji 2026-09-29): barang yang GAGAL disimpan saat pengajuan
+/// retur beberapa barang (mis. kalah balapan) — pembeli diminta mengajukan ulang.
+class ReturGagalSimpan {
+  final String partNumber;
+  final String pesan;
+  const ReturGagalSimpan({required this.partNumber, this.pesan = ''});
+
+  factory ReturGagalSimpan.fromJson(Map<String, dynamic> j) =>
+      ReturGagalSimpan(partNumber: _s(j['part_number']), pesan: _s(j['pesan']));
+}
+
+/// C3: hasil pengajuan retur BEBERAPA barang — paritas `AjukanReturBanyakHasil`
+/// web. [lengkap] false = sebagian GAGAL disimpan: [returns] = yang sudah
+/// terbuat, [gagal] = barang yang harus diajukan ulang.
+class ReturAjukanBanyak {
+  final List<ReturRingkas> returns;
+  final List<String> kode;
+  final List<ReturGagalSimpan> gagal;
+  final bool lengkap;
+  final String pesan;
+
+  const ReturAjukanBanyak({
+    this.returns = const [],
+    this.kode = const [],
+    this.gagal = const [],
+    this.lengkap = true,
+    this.pesan = '',
+  });
+
+  factory ReturAjukanBanyak.fromJson(Map<String, dynamic> j) {
+    final returns = _list(j['returns'], ReturRingkas.fromJson);
+    final kode = _strList(j['kode']);
+    return ReturAjukanBanyak(
+      returns: returns,
+      kode: kode.isNotEmpty ? kode : [for (final r in returns) r.returnCode],
+      gagal: _list(j['gagal'], ReturGagalSimpan.fromJson),
+      lengkap: _b(j['lengkap'], true),
+      pesan: _s(j['pesan']),
+    );
+  }
 }
 
 class ReturPesananItem {
