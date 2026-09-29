@@ -22,6 +22,7 @@ import 'mas_drawer.dart';
 import 'nav.dart';
 
 import '../screens/admin_ai_screens.dart';
+import '../screens/admin_chat_screen.dart';
 import '../screens/admin_manage_screens.dart';
 import '../screens/admin_pengetahuan_screen.dart';
 import '../screens/asisten_screen.dart';
@@ -524,13 +525,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       case MasScreen.cabangPenjualan:
         return const CabangPenjualanScreen();
       case MasScreen.cabangChat:
-        return const CabangChatScreen();
+        return CabangChatScreen(args: args);
 
       // Admin
       case MasScreen.orders:
         return const OrdersScreen();
       case MasScreen.bermasalah:
         return const BermasalahScreen();
+      case MasScreen.adminChat:
+        return AdminChatScreen(args: args);
       case MasScreen.orderDetail:
         return OrderDetailScreen(args: args);
       case MasScreen.penjualan:
@@ -581,7 +584,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // Dua layar ini bisa dibuka dengan isian awal (Chat Gudang dari Detail
       // Part, "+ Sinonim" dari Pencarian Nihil). Tanpa argumen di kunci, state
       // kunjungan sebelumnya terpakai ulang dan prefill-nya hilang.
-      MasScreen.chat => 'chat:${a?['gudang'] ?? ''}',
+      MasScreen.chat => 'chat:${a?['gudang'] ?? ''}:${a?['part'] ?? ''}',
+      // Tautan notifikasi chat membuka thread tertentu (masukan penguji 2026-09-29).
+      MasScreen.cabangChat => 'cabangChat:${a?['buyer'] ?? ''}',
+      MasScreen.adminChat =>
+        'adminChat:${a?['gudang'] ?? ''}:${a?['buyer'] ?? ''}',
       MasScreen.sinonim => 'sinonim:${a?['trigger'] ?? ''}',
       _ => _screen.name,
     };

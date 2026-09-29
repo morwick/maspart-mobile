@@ -195,7 +195,7 @@ class _OrderChatState extends State<OrderChat> {
   static const _roleLabel = {
     'pembeli': 'Pembeli',
     'gudang': 'Gudang',
-    'admin': 'Admin',
+    'admin': 'Admin MasPart',
   };
 
   Widget _bubble(MasColors m, ChatMessage msg) {

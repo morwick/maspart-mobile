@@ -591,8 +591,12 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     }
     if (!mounted) return;
     setState(() => _bukaChat = false);
-    nav.go(MasScreen.chat,
-        part: {if (key != null && key.isNotEmpty) 'gudang': key});
+    // Kartu part ikut ke chat (masukan penguji 2026-09-29) — terkirim
+    // bersama pesan pertama pembeli, ala Shopee. Paritas web `?part=`.
+    nav.go(MasScreen.chat, part: {
+      if (key != null && key.isNotEmpty) 'gudang': key,
+      if (_pn.isNotEmpty) 'part': _pn,
+    });
   }
 
   // ── Varian pemasok ──────────────────────────────────────────────────
