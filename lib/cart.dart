@@ -155,13 +155,27 @@ class CartStore extends ChangeNotifier {
     if (_loaded && u == _username) return;
     _username = u;
     final prefs = await SharedPreferences.getInstance();
-    // Kunci kini huruf kecil (username token = huruf kecil); keranjang lama
-    // yang tersimpan dengan ejaan asli tetap terbaca.
-    final lama = username.trim();
-    _items = _decode(prefs.getString(_key) ??
-        (lama != nama ? prefs.getString('maspart_cart_$lama') : null));
+    // Kunci kini huruf kecil (username token = huruf kecil). Keranjang & alamat
+    // lama yang tersimpan dengan ejaan asli (username /me, mis. "Linda")
+    // dipindah sekali ke kunci huruf kecil agar tak hilang.
+    await _pindahKunciLama(prefs, _key);
+    await _pindahKunciLama(prefs, _alamatKey);
+    _items = _decode(prefs.getString(_key));
     _loaded = true;
     notifyListeners();
+  }
+
+  static Future<void> _pindahKunciLama(
+      SharedPreferences prefs, String kunci) async {
+    if (prefs.containsKey(kunci)) return;
+    for (final k in prefs.getKeys()) {
+      if (k != kunci && k.toLowerCase() == kunci) {
+        final v = prefs.getString(k);
+        if (v != null) await prefs.setString(kunci, v);
+        await prefs.remove(k);
+        return;
+      }
+    }
   }
 
   /// Logout: lupakan keranjang akun ini dari MEMORI (isinya tetap tersimpan di
