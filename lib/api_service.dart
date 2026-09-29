@@ -1558,6 +1558,22 @@ class ApiService {
     return ReturDetail.fromJson(_Api._obj(data));
   }
 
+  /// C3 (masukan penguji 2026-09-29): retur BEBERAPA barang sekaligus — paritas
+  /// web `ajukanReturBanyak`. body = isian bersama (reason, reason_detail,
+  /// description, requested_resolution, unboxing_video_url, video_meta,
+  /// evidence_photo_urls) + `items: [{part_number, qty, pn_dipesan?,
+  /// pn_diterima?}]`. Server tetap membuat 1 retur per barang; satu barang tak
+  /// lolos → ApiException 400 (tak ada yang tertulis). Hasil `lengkap` false =
+  /// sebagian gagal disimpan (lihat `gagal`).
+  static Future<ReturAjukanBanyak> ajukanReturBanyak(
+      String code, Map<String, dynamic> body) async {
+    final data = await _Api.post(
+      '/api/orders/${Uri.encodeComponent(code)}/returns/batch',
+      body: body,
+    );
+    return ReturAjukanBanyak.fromJson(_Api._obj(data));
+  }
+
   static Future<({bool aktif, List<ReturRingkas> returns})> getMyReturns() async {
     final data = _Api._obj(await _Api.get('/api/returns'));
     return (

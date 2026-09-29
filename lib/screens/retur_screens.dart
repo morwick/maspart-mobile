@@ -4,6 +4,9 @@
 //       (pilih barang) → 1. Alasan → 2. Bukti (video unboxing WAJIB + foto)
 //       → 3. Solusi → 4. Review → Kirim. Video & foto diunggah langsung saat
 //       dipilih (dengan progres), jadi Kirim tinggal mengirim URL.
+//       Masukan penguji 2026-09-29 (C3): BEBERAPA barang bisa dicentang
+//       sekaligus (qty per barang) → POST …/returns/batch; server tetap membuat
+//       1 retur per barang. Hasil jamak = kartu semua kode retur (+ yang gagal).
 //   • ReturSayaScreen          ↔ app/retur/page.tsx (Berjalan / Selesai / Semua)
 //   • ReturDetailScreen        ↔ app/retur/[code]/page.tsx (stepper, timeline,
 //       resi kirim balik, bukti tambahan saat perlu_bukti, batal)
@@ -126,12 +129,15 @@ Future<bool> _tanya(BuildContext context, String judul, String isi,
 }
 
 /// Pilihan bulat (radio) bergaya kartu — padanan `.rtr-opsi` web.
+/// [kotak] = kotak centang (pilih banyak, C3) — padanan `.rtr-opsi .centang`.
 class _Opsi extends StatelessWidget {
   final bool pilih;
   final bool aktif;
+  final bool kotak;
   final Widget isi;
   final VoidCallback onTap;
-  const _Opsi({required this.pilih, required this.isi, required this.onTap, this.aktif = true});
+  const _Opsi(
+      {required this.pilih, required this.isi, required this.onTap, this.aktif = true, this.kotak = false});
 
   @override
   Widget build(BuildContext context) {
@@ -157,10 +163,19 @@ class _Opsi extends StatelessWidget {
                   width: 18,
                   height: 18,
                   margin: const EdgeInsets.only(top: 1),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: pilih ? m.brand600 : m.ink300, width: pilih ? 5 : 1.5),
-                  ),
+                  decoration: kotak
+                      ? BoxDecoration(
+                          color: pilih ? m.brand600 : null,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: pilih ? m.brand600 : m.ink300, width: 1.5),
+                        )
+                      : BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: pilih ? m.brand600 : m.ink300, width: pilih ? 5 : 1.5),
+                        ),
+                  child: kotak && pilih
+                      ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+                      : null,
                 ),
                 const SizedBox(width: 10),
                 Expanded(child: isi),
@@ -271,14 +286,14 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
   bool _loaded = false;
   String? _error;
 
-  String _pn = '';
-  int _qty = 1;
+  /// C3: barang yang dicentang (PN → qty diretur) + PN diterima per barang.
+  final Map<String, int> _pilih = {};
+  final Map<String, TextEditingController> _pnTerimaCtrl = {};
+  ReturAjukanBanyak? _hasil;
   int _step = 0;
   String _reason = '';
   String _jenisRusak = '';
   final _detailCtrl = TextEditingController();
-  final _pnDipesanCtrl = TextEditingController();
-  final _pnDiterimaCtrl = TextEditingController();
   final _deskCtrl = TextEditingController();
   String _solusi = '';
   _VideoBukti? _video;
@@ -288,16 +303,18 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
 
   /// R-3 (audit 2026-09-28): perkiraan refund dari SERVER untuk (barang, qty) —
   /// dulu harga × qty (tanpa PPN, tanpa potongan voucher/poin). Paritas web.
-  PerkiraanRefund? _perkiraan;
+  /// C3: satu perkiraan per barang yang dicentang.
+  List<PerkiraanRefund>? _perkiraan;
   bool _perkiraanGagal = false;
   String _perkiraanKunci = '';
 
   String get _code => '${widget.args['order_code'] ?? ''}';
 
-  Future<void> _muatPerkiraan(String pn, int qty) async {
-    final kunci = '$pn|$qty';
+  Future<void> _muatPerkiraan(List<(String, int)> barang, String kunci) async {
     try {
-      final p = await ApiService.perkiraanRefund(_code, pn, qty);
+      final p = await Future.wait([
+        for (final b in barang) ApiService.perkiraanRefund(_code, b.$1, b.$2),
+      ]);
       if (!mounted || _perkiraanKunci != kunci) return;
       setState(() {
         _perkiraan = p;
@@ -325,8 +342,9 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
       if (f.url == null && f.err == null) f.tugas?.batal();
     }
     _detailCtrl.dispose();
-    _pnDipesanCtrl.dispose();
-    _pnDiterimaCtrl.dispose();
+    for (final c in _pnTerimaCtrl.values) {
+      c.dispose();
+    }
     _deskCtrl.dispose();
     super.dispose();
   }
@@ -348,8 +366,8 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
         _order = o;
         _cfg = c;
         _loaded = true;
+        if (awal.isNotEmpty) _pilih[awal] = 1;
       });
-      _setPn(awal);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -359,20 +377,31 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
     }
   }
 
-  void _setPn(String pn) {
+  /// C3: centang / lepas satu barang (qty awal 1).
+  void _centang(String pn) {
     setState(() {
-      _pn = pn;
-      _qty = 1;
-      _pnDipesanCtrl.text = pn;
+      if (_pilih.containsKey(pn)) {
+        _pilih.remove(pn);
+      } else if (_pilih.length < (_cfg?.maksBarangSekaligus ?? 30)) {
+        _pilih[pn] = 1;
+      }
     });
   }
 
-  OrderItemDetail? get _item {
+  /// Barang yang dicentang, urut sesuai pesanan, beserta qty-nya.
+  List<(OrderItemDetail, int)> get _dipilih {
+    final out = <(OrderItemDetail, int)>[];
     for (final it in _order?.items ?? const <OrderItemDetail>[]) {
-      if (it.partNumber == _pn) return it;
+      final q = _pilih[it.partNumber];
+      if (q != null) out.add((it, q));
     }
-    return null;
+    return out;
   }
+
+  TextEditingController _ctrlPnTerima(String pn) =>
+      _pnTerimaCtrl.putIfAbsent(pn, () => TextEditingController());
+
+  String _pnTerima(String pn) => (_pnTerimaCtrl[pn]?.text ?? '').trim().toUpperCase();
 
   /// S-13: unit yang masih boleh diretur (dibeli − yang sudah memakai jatah
   /// retur sebelumnya). Server lama tanpa qty_sisa → qty pesanan.
@@ -540,17 +569,21 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
   // ── Validasi per langkah (persis web) ──
 
   String? get _salahLangkah {
-    final item = _item;
+    final dipilih = _dipilih;
     final alasan = _alasan;
     final video = _video;
     if (_step == 0) {
-      if (item == null) return 'Pilih barang yang ingin diretur.';
+      if (dipilih.isEmpty) return 'Pilih minimal satu barang yang ingin diretur.';
       if (alasan == null) return 'Pilih alasan return.';
       if (alasan.detail.isNotEmpty && _detail.isEmpty) {
         return 'Isi ${alasan.detail.toLowerCase()}.';
       }
-      if (alasan.pn && _pnDiterimaCtrl.text.trim().isEmpty) {
-        return 'Isi Part Number yang Anda terima.';
+      if (alasan.pn) {
+        for (final d in dipilih) {
+          if (_pnTerima(d.$1.partNumber).isEmpty) {
+            return 'Isi Part Number yang Anda terima untuk barang ${d.$1.partNumber}.';
+          }
+        }
       }
       if (alasan.deskripsiWajib && _deskCtrl.text.trim().length < 10) {
         return 'Jelaskan masalahnya (minimal 10 karakter).';
@@ -572,23 +605,32 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
   }
 
   Future<void> _kirimPengajuan() async {
-    final item = _item;
+    final dipilih = _dipilih;
     final video = _video;
     final alasan = _alasan;
-    if (item == null || video == null || video.url == null) return;
+    if (dipilih.isEmpty || video == null || video.url == null) return;
+    final pakaiPn = alasan?.pn == true;
     final nav = AppNav.of(context);
     setState(() {
       _kirim = true;
       _error = null;
     });
     try {
-      final r = await ApiService.ajukanRetur(_code, {
-        'part_number': item.partNumber,
-        'qty': _qty,
+      // C3: selalu lewat endpoint jamak (1 barang pun) — server tetap 1 retur/barang.
+      final r = await ApiService.ajukanReturBanyak(_code, {
+        'items': [
+          for (final d in dipilih)
+            {
+              'part_number': d.$1.partNumber,
+              'qty': d.$2,
+              'pn_dipesan': pakaiPn ? d.$1.partNumber : '',
+              'pn_diterima': pakaiPn ? _pnTerima(d.$1.partNumber) : '',
+            },
+        ],
         'reason': _reason,
         'reason_detail': _detail,
-        'pn_dipesan': alasan?.pn == true ? _pnDipesanCtrl.text.trim().toUpperCase() : '',
-        'pn_diterima': alasan?.pn == true ? _pnDiterimaCtrl.text.trim().toUpperCase() : '',
+        'pn_dipesan': '',
+        'pn_diterima': '',
         'description': _deskCtrl.text.trim(),
         'requested_resolution': _solusi,
         'unboxing_video_url': video.url,
@@ -606,10 +648,18 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
         ],
       });
       if (!mounted) return;
-      // Ganti layar form dengan detail (padanan router.replace di web): tombol
-      // Kembali dari detail tak boleh membuka form yang sudah terkirim.
-      if (nav.canBack) nav.back();
-      nav.go(MasScreen.returDetail, part: {'return_code': r.returnCode, 'baru': true});
+      if (r.lengkap && r.kode.length == 1) {
+        // Ganti layar form dengan detail (padanan router.replace di web): tombol
+        // Kembali dari detail tak boleh membuka form yang sudah terkirim.
+        if (nav.canBack) nav.back();
+        nav.go(MasScreen.returDetail, part: {'return_code': r.kode.first, 'baru': true});
+        return;
+      }
+      // Beberapa barang / sebagian gagal → tampilkan SEMUA kode retur (paritas web).
+      setState(() {
+        _hasil = r;
+        _kirim = false;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -628,9 +678,12 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
     final o = _order;
     final cfg = _cfg;
     final retur = o?.retur;
+    final hasil = _hasil;
 
     Widget isi;
-    if (o == null || cfg == null) {
+    if (hasil != null) {
+      isi = _kartuHasil(m, nav, hasil);
+    } else if (o == null || cfg == null) {
       isi = _loaded
           ? const MasEmpty(
               icon: Icons.receipt_long_outlined,
@@ -723,6 +776,83 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
     );
   }
 
+  /// C3: hasil pengajuan jamak — SEMUA kode retur + barang yang gagal disimpan
+  /// (paritas panel hasil di web).
+  Widget _kartuHasil(MasColors m, AppNav nav, ReturAjukanBanyak h) {
+    return MasCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        _judul(
+          m,
+          h.lengkap ? 'Pengajuan Return Terkirim' : 'Pengajuan Return Terkirim Sebagian',
+          h.lengkap
+              ? '${h.kode.length} pengajuan return sedang menunggu verifikasi — tiap barang '
+                  'diproses dengan nomor return sendiri.'
+              : h.pesan,
+        ),
+        for (final r in h.returns)
+          _Opsi(
+            pilih: true,
+            kotak: true,
+            onTap: () => nav.go(MasScreen.returDetail, part: {'return_code': r.returnCode}),
+            isi: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text.rich(
+                TextSpan(children: [
+                  TextSpan(
+                      text: r.returnCode,
+                      style: masMono(size: 12.5, weight: FontWeight.w700, color: m.ink900)),
+                  TextSpan(text: ' · ${r.partNumber} × ${r.qty}'),
+                ]),
+                style: TextStyle(fontSize: 13, color: m.ink900),
+              ),
+              const SizedBox(height: 2),
+              Text('${r.name.isNotEmpty ? '${r.name} · ' : ''}${r.statusLabel} · Lihat →',
+                  style: TextStyle(fontSize: 11.5, color: m.ink500)),
+            ]),
+          ),
+        if (h.gagal.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          ReturKotak(
+            tone: MasPillTone.danger,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Barang berikut BELUM diajukan — ajukan ulang:',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              for (final g in h.gagal) Text('• ${g.partNumber} — ${g.pesan}'),
+            ]),
+          ),
+        ],
+        const SizedBox(height: 14),
+        Row(children: [
+          Expanded(
+            child: MasButton(
+              label: '← Pesanan',
+              primary: false,
+              expand: true,
+              onTap: () {
+                if (nav.canBack) {
+                  nav.back();
+                } else {
+                  nav.go(MasScreen.pesananDetail, part: {'order_code': _code});
+                }
+              },
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: MasButton(
+              label: 'Return Saya',
+              expand: true,
+              onTap: () {
+                // Form yang sudah terkirim tak boleh terbuka lagi lewat Kembali.
+                if (nav.canBack) nav.back();
+                nav.go(MasScreen.returSaya);
+              },
+            ),
+          ),
+        ]),
+      ]),
+    );
+  }
+
   Widget _indikator(MasColors m) {
     return Row(children: [
       for (var i = 0; i < _langkahNama.length; i++) ...[
@@ -767,42 +897,25 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
   // ── 1. Barang + alasan ──
   List<Widget> _langkahAlasan(
       MasColors m, OrderDetail o, ReturConfig cfg, ReturPesanan retur) {
-    final item = _item;
+    final dipilih = _dipilih;
     final alasan = _alasan;
     return [
-      _judul(m, 'Barang apa yang bermasalah?', 'Satu pengajuan untuk satu barang.'),
-      for (final it in o.items) _opsiBarang(m, it, retur),
-      if (item != null && _sisaQty(retur, item) > 1) ...[
-        const _Label('Jumlah yang diretur'),
-        Row(children: [
-          MasButton(
-            label: '−',
-            primary: false,
-            height: 34,
-            onTap: _qty > 1 ? () => setState(() => _qty -= 1) : null,
-          ),
-          SizedBox(
-            width: 44,
-            child: Text('$_qty',
-                textAlign: TextAlign.center,
-                style: masMono(size: 15, weight: FontWeight.w700, color: m.ink900)),
-          ),
-          MasButton(
-            label: '+',
-            primary: false,
-            height: 34,
-            onTap: _qty < _sisaQty(retur, item) ? () => setState(() => _qty += 1) : null,
-          ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-                _sisaQty(retur, item) < item.qty
-                    ? 'dari ${_sisaQty(retur, item)} pcs yang belum diretur'
-                    : 'dari ${item.qty} pcs',
-                style: TextStyle(fontSize: 12, color: m.ink500)),
-          ),
-        ]),
+      _judul(
+          m,
+          'Barang apa yang bermasalah?',
+          'Centang satu atau beberapa barang. Alasan, bukti & solusi berlaku untuk semua '
+              'barang yang dicentang — bila masalahnya berbeda, ajukan terpisah.'),
+      for (final it in o.items) ...[
+        _opsiBarang(m, it, retur),
+        if (_pilih.containsKey(it.partNumber) && _sisaQty(retur, it) > 1)
+          _barisQty(m, it, _pilih[it.partNumber] ?? 1, _sisaQty(retur, it)),
       ],
+      if (dipilih.length > 1)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Text('${dipilih.length} barang dipilih — tiap barang mendapat nomor return sendiri.',
+              style: TextStyle(fontSize: 12.5, color: m.ink600)),
+        ),
       const _Label('Alasan return', wajib: '*'),
       for (final a in cfg.alasan)
         _Opsi(
@@ -826,25 +939,38 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
           textCapitalization: TextCapitalization.sentences,
         ),
       ],
-      if (alasan != null && alasan.pn) ...[
-        const _Label('Part Number yang dipesan'),
-        MasInput(
-          controller: _pnDipesanCtrl,
-          hint: item?.partNumber ?? '',
-          mono: true,
-          autocorrect: false,
-          textCapitalization: TextCapitalization.characters,
-          onChanged: (_) => setState(() {}),
-        ),
+      if (alasan != null && alasan.pn && dipilih.isNotEmpty) ...[
         const _Label('Part Number yang diterima', wajib: '*'),
-        MasInput(
-          controller: _pnDiterimaCtrl,
-          hint: 'Lihat label / ukiran di barang',
-          mono: true,
-          autocorrect: false,
-          textCapitalization: TextCapitalization.characters,
-          onChanged: (_) => setState(() {}),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text('Lihat label / ukiran di barang — isi untuk tiap barang.',
+              style: TextStyle(fontSize: 12, color: m.ink500)),
         ),
+        for (final d in dipilih) ...[
+          Text.rich(
+            TextSpan(children: [
+              const TextSpan(text: 'Dipesan '),
+              TextSpan(
+                  text: d.$1.partNumber,
+                  style: masMono(size: 12, weight: FontWeight.w700, color: m.ink900)),
+              if (d.$1.name.isNotEmpty) TextSpan(text: ' · ${d.$1.name}'),
+            ]),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: m.ink600),
+          ),
+          const SizedBox(height: 4),
+          MasInput(
+            key: ValueKey('pn-terima-${d.$1.partNumber}'),
+            controller: _ctrlPnTerima(d.$1.partNumber),
+            hint: 'PN yang diterima',
+            mono: true,
+            autocorrect: false,
+            textCapitalization: TextCapitalization.characters,
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 8),
+        ],
       ],
       if (_reason.isNotEmpty) ...[
         _Label('Deskripsi masalah',
@@ -868,9 +994,10 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
     }
     final berjalan = st?.retur;
     return _Opsi(
-      pilih: _pn == it.partNumber,
+      pilih: _pilih.containsKey(it.partNumber),
+      kotak: true,
       aktif: st?.bisa ?? false,
-      onTap: () => _setPn(it.partNumber),
+      onTap: () => _centang(it.partNumber),
       isi: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text.rich(
             TextSpan(children: [
@@ -886,6 +1013,41 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
             '${(st?.qtyDiretur ?? 0) > 0 ? ' · ${st!.qtyDiretur} sudah diretur' : ''}'
             '${berjalan != null ? ' · Return ${berjalan.returnCode}: ${berjalan.statusLabel}' : ''}',
             style: TextStyle(fontSize: 11.5, color: m.ink500)),
+      ]),
+    );
+  }
+
+  /// C3: jumlah diretur untuk satu barang yang dicentang (1..sisa).
+  Widget _barisQty(MasColors m, OrderItemDetail it, int qty, int sisa) {
+    final pn = it.partNumber;
+    return Padding(
+      padding: const EdgeInsets.only(left: 28, bottom: 10),
+      child: Row(children: [
+        Text('Jumlah', style: TextStyle(fontSize: 12, color: m.ink600)),
+        const SizedBox(width: 8),
+        MasButton(
+          label: '−',
+          primary: false,
+          height: 34,
+          onTap: qty > 1 ? () => setState(() => _pilih[pn] = qty - 1) : null,
+        ),
+        SizedBox(
+          width: 40,
+          child: Text('$qty',
+              textAlign: TextAlign.center,
+              style: masMono(size: 15, weight: FontWeight.w700, color: m.ink900)),
+        ),
+        MasButton(
+          label: '+',
+          primary: false,
+          height: 34,
+          onTap: qty < sisa ? () => setState(() => _pilih[pn] = qty + 1) : null,
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(sisa < it.qty ? 'dari $sisa pcs yang belum diretur' : 'dari ${it.qty} pcs',
+              style: TextStyle(fontSize: 12, color: m.ink500)),
+        ),
       ]),
     );
   }
@@ -1115,20 +1277,24 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
 
   // ── 3. Solusi ──
   List<Widget> _langkahSolusi(MasColors m, ReturConfig cfg) {
-    final item = _item;
-    if (_solusi == 'refund' && item != null) {
+    final dipilih = _dipilih;
+    if (_solusi == 'refund' && dipilih.isNotEmpty) {
       // Barang/qty berubah (pembeli kembali ke langkah 1) → hitung ulang.
-      final kunci = '${item.partNumber}|$_qty';
+      final kunci = [for (final d in dipilih) '${d.$1.partNumber}|${d.$2}'].join(',');
       if (kunci != _perkiraanKunci) {
         _perkiraanKunci = kunci;
         _perkiraan = null;
         _perkiraanGagal = false;
-        final pn = item.partNumber;
-        final qty = _qty;
-        WidgetsBinding.instance.addPostFrameCallback((_) => _muatPerkiraan(pn, qty));
+        final barang = [for (final d in dipilih) (d.$1.partNumber, d.$2)];
+        WidgetsBinding.instance.addPostFrameCallback((_) => _muatPerkiraan(barang, kunci));
       }
     }
     final perkiraan = _perkiraan;
+    final total = perkiraan?.fold<int>(0, (a, p) => a + p.perkiraan) ?? 0;
+    final catatan = <String>{
+      for (final p in perkiraan ?? const <PerkiraanRefund>[])
+        if (p.catatan.isNotEmpty) p.catatan,
+    };
     return [
       _judul(m, 'Solusi yang Anda inginkan',
           'Keputusan akhir mengikuti hasil verifikasi & pemeriksaan gudang.'),
@@ -1143,7 +1309,7 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
               Text(s.ket, style: TextStyle(fontSize: 12, color: m.ink500)),
           ]),
         ),
-      if (_solusi == 'refund' && item != null)
+      if (_solusi == 'refund' && dipilih.isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(top: 4),
           child: perkiraan != null
@@ -1152,17 +1318,25 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
                     TextSpan(children: [
                       const TextSpan(text: 'Perkiraan refund: '),
                       TextSpan(
-                          text: formatRupiah(perkiraan.perkiraan),
+                          text: formatRupiah(total),
                           style: const TextStyle(fontWeight: FontWeight.w700)),
-                      TextSpan(text: ' untuk $_qty pcs.'),
+                      TextSpan(
+                          text: dipilih.length == 1
+                              ? ' untuk ${dipilih.first.$2} pcs.'
+                              : ' untuk ${dipilih.length} barang.'),
                     ]),
                     style: TextStyle(fontSize: 12.5, color: m.ink600, height: 1.4),
                   ),
-                  if (perkiraan.catatan.isNotEmpty)
+                  if (perkiraan.length > 1 && perkiraan.length == dipilih.length)
+                    for (var i = 0; i < perkiraan.length; i++)
+                      Text(
+                          '• ${dipilih[i].$1.partNumber} × ${dipilih[i].$2}: '
+                          '${formatRupiah(perkiraan[i].perkiraan)}',
+                          style: TextStyle(fontSize: 12, color: m.ink600, height: 1.4)),
+                  for (final c in catatan)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
-                      child: Text(perkiraan.catatan,
-                          style: TextStyle(fontSize: 11.5, color: m.ink500, height: 1.4)),
+                      child: Text(c, style: TextStyle(fontSize: 11.5, color: m.ink500, height: 1.4)),
                     ),
                 ])
               : Text(
@@ -1178,8 +1352,8 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
 
   // ── 4. Review ──
   List<Widget> _langkahReview(MasColors m, ReturConfig cfg) {
-    final item = _item;
-    if (item == null) return const [];
+    final dipilih = _dipilih;
+    if (dipilih.isEmpty) return const [];
     final alasan = _alasan;
     final nFoto = _fotos.where((f) => f.url != null).length;
     String solusiLabel = _solusi;
@@ -1191,11 +1365,13 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
     final mono = masMono(size: 12.5, weight: FontWeight.w700, color: m.ink900);
     final baris = <(String, Widget)>[
       (
-        'Barang',
+        dipilih.length > 1 ? 'Barang (${dipilih.length})' : 'Barang',
         Text.rich(TextSpan(children: [
-          const TextSpan(text: 'Part Number: '),
-          TextSpan(text: item.partNumber, style: mono),
-          TextSpan(text: '\n${item.name} · $_qty pcs'),
+          for (var i = 0; i < dipilih.length; i++) ...[
+            TextSpan(text: i == 0 ? 'Part Number: ' : '\n\nPart Number: '),
+            TextSpan(text: dipilih[i].$1.partNumber, style: mono),
+            TextSpan(text: '\n${dipilih[i].$1.name} · ${dipilih[i].$2} pcs'),
+          ],
         ]), style: biasa),
       ),
       ('Alasan', Text('${alasan?.label ?? ''}${_detail.isNotEmpty ? ' — $_detail' : ''}', style: biasa)),
@@ -1203,14 +1379,12 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
         (
           'Part Number',
           Text.rich(TextSpan(children: [
-            const TextSpan(text: 'dipesan '),
-            TextSpan(
-                text: _pnDipesanCtrl.text.trim().isNotEmpty
-                    ? _pnDipesanCtrl.text.trim().toUpperCase()
-                    : item.partNumber,
-                style: mono),
-            const TextSpan(text: '\nditerima '),
-            TextSpan(text: _pnDiterimaCtrl.text.trim().toUpperCase(), style: mono),
+            for (var i = 0; i < dipilih.length; i++) ...[
+              TextSpan(text: i == 0 ? 'dipesan ' : '\ndipesan '),
+              TextSpan(text: dipilih[i].$1.partNumber, style: mono),
+              const TextSpan(text: ' · diterima '),
+              TextSpan(text: _pnTerima(dipilih[i].$1.partNumber), style: mono),
+            ],
           ]), style: biasa),
         ),
       if (_deskCtrl.text.trim().isNotEmpty)
@@ -1271,7 +1445,8 @@ class _KartuRetur extends StatelessWidget {
             Text(
                 gudang
                     ? 'Order ${r.orderCode} · ${r.username} · ${r.reasonLabel}\n'
-                        'Solusi: ${r.resolution ?? r.requestedResolution} · ${fmtDate(r.submittedAt)}'
+                        'Solusi: ${r.labelSolusi.isNotEmpty ? r.labelSolusi : (r.resolution ?? r.requestedResolution)}'
+                        ' · ${fmtDate(r.submittedAt)}'
                     : '${r.returnCode} · ${r.reasonLabel} · ${fmtDate(r.submittedAt)}',
                 style: TextStyle(fontSize: 11.5, color: m.ink500, height: 1.4)),
           ]),
