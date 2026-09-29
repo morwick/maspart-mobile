@@ -1926,6 +1926,30 @@ class ApiService {
         const [];
   }
 
+  /// Daftar pesanan admin dengan cari/filter/paginasi (masukan penguji
+  /// 2026-09-29) — paritas web `cariAdminOrders`. `q` dicari di server: kode
+  /// PO, username/nama pembeli, nama penerima, resi, PN/nama barang.
+  static Future<AdminOrdersPage> adminOrdersCari({
+    String status = '',
+    String q = '',
+    int offset = 0,
+    int limit = 50,
+  }) async {
+    final kata = q.trim();
+    final data = _Api._obj(await _Api.get('/api/admin/orders', query: {
+      if (status.isNotEmpty) 'status': status,
+      if (kata.isNotEmpty) 'q': kata.length > 100 ? kata.substring(0, 100) : kata,
+      'offset': offset,
+      'limit': limit,
+    }));
+    return AdminOrdersPage.fromJson(data);
+  }
+
+  /// Jumlah pesanan per status untuk chip ringkasan (paritas web).
+  static Future<AdminOrdersRingkasan> adminOrdersRingkasan() async =>
+      AdminOrdersRingkasan.fromJson(
+          _Api._obj(await _Api.get('/api/admin/orders/ringkasan')));
+
   static Future<OrderDetail> adminOrder(String code) async {
     final data = await _Api.get('/api/admin/orders/${Uri.encodeComponent(code)}');
     return OrderDetail.fromJson(_Api._obj(data));
