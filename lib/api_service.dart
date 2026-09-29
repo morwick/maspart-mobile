@@ -1968,14 +1968,18 @@ class ApiService {
 
   /// Catat refund pesanan SUDAH ditransfer (T-6) → tanda "perlu refund"
   /// ditutup + pembeli dikabari. Padanan web `adminRefundDibayar`.
+  /// QA2-P2: tanda ditutup SEBESAR nominal; `finalRefund` (refund terakhir)
+  /// menutup seluruh sisa walau nominalnya lebih kecil dari saran.
   static Future<void> adminRefundDibayar(
-          String code, int jumlah, String referensi, String keterangan) =>
+          String code, int jumlah, String referensi, String keterangan,
+          {bool finalRefund = false}) =>
       _Api.post(
         '/api/admin/orders/${Uri.encodeComponent(code)}/refund-dibayar',
         body: {
           'jumlah': jumlah,
           'referensi': referensi,
           'keterangan': keterangan.isEmpty ? null : keterangan,
+          'final': finalRefund,
         },
       );
 

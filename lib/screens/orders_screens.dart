@@ -796,6 +796,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         text: o.saranRefund > 0 ? '${o.saranRefund}' : '');
     final refCtl = TextEditingController();
     final ketCtl = TextEditingController();
+    var refundFinal = false;   // QA2-P2
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) {
@@ -814,8 +815,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   children: [
                     Text(
                       'Catat HANYA setelah transfernya benar-benar berhasil. Tanda '
-                      '"perlu refund" ditutup (admin lain tak akan mentransfer lagi) '
-                      'dan pembeli dikabari dananya sudah dikembalikan.',
+                      '"perlu refund" ditutup SEBESAR nominal ini (admin lain tak akan '
+                      'mentransfer lagi) dan pembeli dikabari dananya sudah dikembalikan.',
                       style: TextStyle(fontSize: 12.5, color: m.warn600),
                     ),
                     const SizedBox(height: 10),
@@ -845,6 +846,31 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       controller: ketCtl,
                       hint: 'Keterangan (opsional)',
                       height: 40,
+                    ),
+                    InkWell(
+                      onTap: () => setLocal(() => refundFinal = !refundFinal),
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Checkbox(
+                            value: refundFinal,
+                            activeColor: m.brand600,
+                            visualDensity: VisualDensity.compact,
+                            onChanged: (v) => setLocal(() => refundFinal = v ?? false),
+                          ),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 10),
+                              child: Text(
+                                'Ini refund TERAKHIR — tutup sisa tanda walau nominalnya lebih '
+                                'kecil dari saran (mis. dipotong biaya yang disepakati). Tanpa '
+                                'centang, tanda ditutup sebesar nominal ini saja.',
+                                style: TextStyle(fontSize: 12, color: m.ink600),
+                              ),
+                            ),
+                          ),
+                        ]),
+                      ),
                     ),
                   ],
                 ),
@@ -876,7 +902,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       _error = null;
     });
     try {
-      await ApiService.adminRefundDibayar(_code, jumlah, ref, ket);
+      await ApiService.adminRefundDibayar(_code, jumlah, ref, ket,
+          finalRefund: refundFinal);
       if (!mounted) return;
       setState(() => _busy = false);
       nav.toast('Refund dicatat sudah dibayar — pembeli dikabari.');
