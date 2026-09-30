@@ -1,11 +1,13 @@
 // lib/screens/pesanan_detail_screen.dart
 // Detail satu pesanan (sisi pembeli): progres, rincian barang, pengiriman,
-// pembayaran Midtrans, aksi pembeli, dan chat dengan gudang.
+// pembayaran (RajaOngkir VA/QRIS; Midtrans untuk pesanan lama), aksi pembeli,
+// dan chat dengan gudang.
 //
-// Alur bayar: pesanan baru datang ke sini dengan `autopay: true` → WebView Snap
-// langsung terbuka. Apa pun hasil WebView, kebenaran pembayaran tetap diambil
-// dari `paymentStatus()` (yang dikonfirmasi webhook Midtrans), bukan dari
-// tebakan URL — makanya setelah WebView ditutup kita polling.
+// Alur bayar: pesanan QRIS (dan Snap Midtrans lama) datang ke sini dengan
+// `autopay: true` → halaman bayar langsung terbuka di WebView. Pesanan VA tidak:
+// nomor VA tampil langsung di layar ini. Kebenaran pembayaran selalu diambil dari
+// `paymentStatus()` (dikonfirmasi callback gateway), bukan dari tebakan URL —
+// makanya selama menunggu pembayaran kita polling.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -21,6 +23,7 @@ import '../theme/mas_theme.dart';
 import '../utils.dart';
 import '../widgets/beli_lagi.dart';
 import '../widgets/mas_ui.dart';
+import '../widgets/pilih_metode_bayar.dart';
 import '../widgets/order_chat.dart';
 import '../widgets/penilaian.dart';
 import '../widgets/retur_ui.dart';
@@ -51,6 +54,13 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
   /// ditelan diam-diam sehingga pembeli mengira pembayarannya hilang (audit
   /// 2026-09-28 KL-11). Hilang lagi begitu cek berikutnya berhasil.
   String? _galatBayar;
+
+  /// Tagihan RajaOngkir habis/dibatalkan sementara pesanan masih menunggu
+  /// pembayaran (dari `paymentStatus().tagihanHabis`) → tawarkan tagihan baru.
+  bool _tagihanHabis = false;
+
+  /// Sedang mengganti metode / membuat ulang tagihan.
+  bool _gantiBusy = false;
 
   /// Perjalanan paket dari kurir — hanya ada setelah admin mengisi resi.
   TrackingResult? _track;
@@ -128,7 +138,7 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
   }
 
   /// Auto-poll selama pembayaran gateway masih menunggu — status berubah
-  /// sendiri begitu webhook Midtrans masuk, tanpa pembeli menekan apa pun.
+  /// sendiri begitu callback gateway masuk, tanpa pembeli menekan apa pun.
   void _syncPolling() {
     final o = _order;
     final perlu = o != null &&
@@ -164,7 +174,7 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
     if (widget.args['autopay'] != true || url.isEmpty) return;
     // QA e2e 2026-09-29 #13: hanya pesanan yang MASIH menunggu pembayaran —
     // detail yang dibangun ulang (Kembali dari layar lain) untuk pesanan yang
-    // sudah lunas/batal dulu membuka Midtrans lagi.
+    // sudah lunas/batal dulu membuka halaman bayar lagi.
     if (_order?.status != 'menunggu_pembayaran') return;
     await _openSnap(url);
   }
@@ -181,8 +191,10 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
     if (outcome == SnapOutcome.gagal) {
       setState(() => _error = _pesanSnapGagal);
     }
-    // Apa pun hasilnya, tanyakan ke server — itulah kebenarannya. Snap bilang
-    // "selesai" tapi server belum melihat uangnya → beri tahu pembeli.
+    // Apa pun hasilnya, tanyakan ke server — itulah kebenarannya. Halaman bayar
+    // bilang "selesai" tapi server belum melihat uangnya → beri tahu pembeli.
+    // (Halaman RajaOngkir tak punya pengalihan "selesai": pembeli menutupnya
+    // sendiri → hasilnya `ditutup`, tetap dicek di sini.)
     await _checkPayment(manual: outcome == SnapOutcome.selesai);
     await _load();
   }
@@ -206,7 +218,10 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
       }
       if (!mounted) return;
       final err = r.error;
-      setState(() => _galatBayar = (err != null && err.isNotEmpty) ? err : null);
+      setState(() {
+        _galatBayar = (err != null && err.isNotEmpty) ? err : null;
+        _tagihanHabis = r.tagihanHabis && !r.paid;
+      });
       if (manual && !r.paid && (err == null || err.isEmpty)) {
         AppNav.of(context).toast(
             'Pembayaran belum terdeteksi — tunggu beberapa saat lalu cek lagi.');
@@ -358,6 +373,121 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
     if (uri == null) return;
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       if (mounted) AppNav.of(context).toast('Tidak bisa membuka $url');
+    }
+  }
+
+  /// Ganti metode / buat ulang tagihan RajaOngkir (QRIS habis, salah pilih
+  /// bank VA). Padanan web "Ganti metode pembayaran". Server menjaga hanya ada
+  /// SATU tagihan yang bisa dibayar: VA lama dibatalkan dulu, QRIS yang masih
+  /// berlaku ditolak (pesannya diteruskan apa adanya).
+  Future<void> _gantiMetode() async {
+    final o = _order;
+    if (o == null || _gantiBusy) return;
+    final nav = AppNav.of(context);
+    PaymentMethods metode;
+    try {
+      metode = await ApiService.paymentMethods();
+    } on ApiException catch (e) {
+      nav.toast(e.message);
+      return;
+    }
+    if (!mounted) return;
+    if (!metode.isRajaOngkir) {
+      nav.toast('Metode pembayaran tidak bisa diganti saat ini.');
+      return;
+    }
+    final pilih = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final m = ctx.mas;
+        return Container(
+          constraints:
+              BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.85),
+          decoration: BoxDecoration(
+            color: m.paper,
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(MasRadii.sheet)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(_tagihanHabis ? 'Buat Tagihan Baru' : 'Ganti Metode Pembayaran',
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: m.ink900)),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Total ${formatRupiah(o.total)}. Tagihan lama ditutup lalu dibuat '
+                    'tagihan baru — batas bayar pesanan tidak berubah.',
+                    style: TextStyle(fontSize: 12.5, color: m.ink600, height: 1.45),
+                  ),
+                  const SizedBox(height: 12),
+                  PilihMetodeBayar(
+                    kanal: [
+                      for (final c in metode.channels)
+                        if (c.code != 'snap') c,
+                    ],
+                    // Belum ada yang dipilih: ketuk petak = langsung buat tagihan.
+                    value: null,
+                    total: o.total,
+                    onChanged: (code) => Navigator.pop(ctx, code),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    if (pilih == null || !mounted) return;
+    setState(() => _gantiBusy = true);
+    try {
+      final r = await ApiService.ulangPembayaran(_code, pilih);
+      if (!mounted) return;
+      setState(() {
+        _tagihanHabis = false;
+        _galatBayar = null;
+      });
+      await _load();
+      if (!mounted) return;
+      if (r['sudah_dibayar'] == true) {
+        nav.toast('Tagihan sebelumnya ternyata sudah dibayar — pesanan diproses.');
+        return;
+      }
+      nav.toast('Tagihan baru dibuat.');
+      final baru = _order;
+      final url = baru?.paymentUrl ?? '';
+      // QRIS: QR-nya ada di halaman bayar → langsung tampilkan (paritas alur
+      // checkout). VA: nomornya sudah tampil di layar ini.
+      if (pilih == 'qris' &&
+          url.isNotEmpty &&
+          baru?.status == 'menunggu_pembayaran') {
+        await _openSnap(url);
+      }
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Metode belum bisa diganti',
+              style: TextStyle(fontSize: 16)),
+          content: Text(e.message, style: const TextStyle(fontSize: 13.5)),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+          ],
+        ),
+      );
+      if (mounted && e.statusCode == 409) await _load();
+    } finally {
+      if (mounted) setState(() => _gantiBusy = false);
     }
   }
 
@@ -988,6 +1118,12 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
     final gateway = o.paymentMethod == 'gateway';
     final menungguBayar = o.status == 'menunggu_pembayaran';
     final lunas = ['diproses', 'dikirim', 'selesai'].contains(o.status);
+    final kanal = (o.paymentChannel ?? '').toLowerCase();
+    // 'snap' = pesanan lama Midtrans: metode dipilih di halaman Midtrans.
+    final snap = kanal == 'snap';
+    final qris = kanal == 'qris';
+    final va = kanal.startsWith('va_');
+    final url = o.paymentUrl ?? '';
 
     return MasSectionCard(
       title: 'Pembayaran',
@@ -1007,19 +1143,43 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                           size: 13, weight: FontWeight.w700, color: m.ink900),
                     ),
                     TextSpan(
-                      text: o.paymentChannel == 'snap'
+                      text: snap
                           ? ' — pilih metode (VA / QRIS / e-wallet / kartu) di halaman pembayaran Midtrans.'
-                          : o.paymentChannel != null &&
-                                  o.paymentChannel!.isNotEmpty
-                              ? ' via ${o.paymentChannel!.toUpperCase()}.'
-                              : '.',
+                          : qris
+                              ? ' lewat QRIS — pindai dengan e-wallet atau m-banking apa pun.'
+                              : va
+                                  ? ' ke Virtual Account ${namaBankKanal(kanal)} — transfer '
+                                      'tepat sesuai nominal dari m-banking/ATM.'
+                                  : kanal.isNotEmpty
+                                      ? ' via ${kanal.toUpperCase()}.'
+                                      : '.',
                     ),
                   ]),
                   style: TextStyle(fontSize: 13, color: m.ink700, height: 1.55),
                 ),
                 const SizedBox(height: 12),
 
-                if (o.paymentVa != null && o.paymentVa!.isNotEmpty) ...[
+                if (_tagihanHabis && !snap) ...[
+                  _alert(
+                    m,
+                    'Tagihan ${qris ? 'QRIS ' : ''}sudah kedaluwarsa. Buat tagihan baru '
+                    'untuk melanjutkan pembayaran.',
+                    tone: MasPillTone.warn,
+                  ),
+                  const SizedBox(height: 8),
+                  MasButton(
+                    label: _gantiBusy ? 'Memproses…' : 'Buat Tagihan Baru',
+                    icon: Icons.refresh_rounded,
+                    expand: true,
+                    loading: _gantiBusy,
+                    onTap: _gantiBusy ? null : _gantiMetode,
+                  ),
+                  const SizedBox(height: 10),
+                ],
+
+                if (!_tagihanHabis &&
+                    o.paymentVa != null &&
+                    o.paymentVa!.isNotEmpty) ...[
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -1029,7 +1189,10 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Nomor Virtual Account',
+                        Text(
+                            va
+                                ? 'Nomor Virtual Account ${namaBankKanal(kanal)}'
+                                : 'Nomor Virtual Account',
                             style:
                                 TextStyle(fontSize: 11.5, color: m.ink500)),
                         const SizedBox(height: 3),
@@ -1041,10 +1204,12 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                                     weight: FontWeight.w700,
                                     color: m.ink900)),
                           ),
-                          IconButton(
+                          TextButton.icon(
                             icon: Icon(Icons.copy_rounded,
-                                size: 16, color: m.ink500),
-                            visualDensity: VisualDensity.compact,
+                                size: 16, color: m.brand700),
+                            label: Text('Salin',
+                                style: TextStyle(
+                                    fontSize: 12.5, color: m.brand700)),
                             onPressed: () =>
                                 _copy(o.paymentVa!, 'Nomor VA'),
                           ),
@@ -1055,35 +1220,31 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                   const SizedBox(height: 10),
                 ],
 
-                if (o.paymentQr != null && o.paymentQr!.isNotEmpty) ...[
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: m.ink50,
-                      borderRadius: BorderRadius.circular(MasRadii.input),
-                    ),
-                    child: Column(children: [
-                      Text('Scan QRIS',
-                          style: TextStyle(fontSize: 11.5, color: m.ink500)),
-                      const SizedBox(height: 8),
-                      if (o.paymentQr!.startsWith('http'))
-                        Image.network(o.paymentQr!,
-                            width: 200, height: 200, fit: BoxFit.contain)
-                      else
-                        SelectableText(o.paymentQr!,
-                            style: masMono(size: 10, color: m.ink600)),
-                    ]),
-                  ),
-                  const SizedBox(height: 10),
-                ],
-
-                if (o.paymentUrl != null && o.paymentUrl!.isNotEmpty) ...[
+                // QRIS: payment_qr berisi STRING mentah QRIS (bukan gambar) —
+                // QR-nya digambar halaman bayar RajaOngkir, jadi cukup dibuka.
+                if (!_tagihanHabis && url.isNotEmpty) ...[
                   MasButton(
-                    label: 'Buka Halaman Pembayaran',
-                    icon: Icons.lock_outline_rounded,
+                    label: snap
+                        ? 'Buka Halaman Pembayaran'
+                        : qris
+                            ? 'Tampilkan QRIS'
+                            : 'Lihat Cara Bayar',
+                    icon: qris
+                        ? Icons.qr_code_2
+                        : snap
+                            ? Icons.lock_outline_rounded
+                            : Icons.help_outline_rounded,
+                    primary: snap || qris,
                     expand: true,
-                    onTap: () => _openSnap(o.paymentUrl!),
+                    onTap: () => _openSnap(url),
                   ),
+                  const SizedBox(height: 6),
+                  if (qris)
+                    Text(
+                      'Pindai QR dari HP lain, atau simpan tangkapan layar QR lalu '
+                      'unggah di aplikasi e-wallet / m-banking Anda.',
+                      style: TextStyle(fontSize: 11.5, color: m.ink500, height: 1.4),
+                    ),
                   const SizedBox(height: 10),
                 ],
 
@@ -1101,6 +1262,18 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                   loading: _checking,
                   onTap: () => _checkPayment(manual: true),
                 ),
+                // Ganti metode hanya untuk tagihan RajaOngkir (bukan Snap lama).
+                if (!snap && !_tagihanHabis && (qris || va)) ...[
+                  const SizedBox(height: 8),
+                  MasButton(
+                    label: _gantiBusy ? 'Memproses…' : 'Ganti Metode Pembayaran',
+                    primary: false,
+                    height: 38,
+                    expand: true,
+                    loading: _gantiBusy,
+                    onTap: _gantiBusy ? null : _gantiMetode,
+                  ),
+                ],
                 const SizedBox(height: 10),
                 _alert(m, 'Status diperbarui otomatis setelah pembayaran masuk.'),
               ],
@@ -1168,7 +1341,7 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
               if (['menunggu_pembayaran', 'menunggu_verifikasi']
                   .contains(o.status)) ...[
                 // Bukti transfer manual HANYA untuk order non-gateway —
-                // pembayaran Midtrans terverifikasi otomatis lewat webhook.
+                // pembayaran gateway terverifikasi otomatis lewat callback.
                 // QA e2e 2026-09-29 #1: dan hanya selama MENUNGGU PEMBAYARAN;
                 // bukti yang sudah terkirim cukup ditampilkan tautannya.
                 if (!gateway) ...[

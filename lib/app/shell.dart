@@ -362,9 +362,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     setState(() {
       _navigated = true;
-      // QA e2e 2026-09-29 #13: `autopay` (buka Snap otomatis sesudah
-      // checkout) hanya berlaku SEKALI — jangan ikut tersimpan di riwayat,
-      // kalau tidak tiap Kembali ke detail pesanan membuka Midtrans lagi.
+      // QA e2e 2026-09-29 #13: `autopay` (buka halaman bayar otomatis
+      // sesudah checkout) hanya berlaku SEKALI — jangan ikut tersimpan di
+      // riwayat, kalau tidak tiap Kembali ke detail pesanan membukanya lagi.
       _history.add((_screen, _tanpaAutopay(_args)));
       _screen = target;
       if (part == null) _args = _tanpaAutopay(_args);
@@ -432,7 +432,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         duration: const Duration(seconds: 3),
         // Flutter kini membuat SnackBar ber-action MENETAP (persist default =
         // action != null) — tanpa ini toast "masuk keranjang → Lihat" tak
-        // pernah hilang dan ikut menutupi tombol "Check status" Midtrans.
+        // pernah hilang dan ikut menutupi tombol "Cek Status Pembayaran".
         persist: false,
         action: (actionLabel == null || onAction == null)
             ? null

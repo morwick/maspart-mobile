@@ -1250,13 +1250,27 @@ class ApiService {
     return TrackingResult.fromJson(_Api._obj(data));
   }
 
-  /// Status pembayaran satu order — dipakai untuk polling setelah user
-  /// menyelesaikan Snap Midtrans.
+  /// Status pembayaran satu order — dipakai untuk polling selama pesanan
+  /// menunggu pembayaran (VA/QRIS RajaOngkir, atau Snap Midtrans pesanan lama).
   static Future<PaymentStatus> paymentStatus(String code) async {
     final data = await _Api.get(
       '/api/orders/${Uri.encodeComponent(code)}/payment/status',
     );
     return PaymentStatus.fromJson(_Api._obj(data));
+  }
+
+  /// Ganti metode / buat ulang tagihan RajaOngkir untuk pesanan yang masih
+  /// menunggu pembayaran (QRIS habis, salah pilih bank VA). Padanan web
+  /// `ulangPembayaran`. Balasan: `{ok, order}` atau `{ok, sudah_dibayar: true,
+  /// …}` bila tagihan lama ternyata sudah dibayar (cukup muat ulang pesanan).
+  /// Penolakan server (QRIS lama masih berlaku, sisa waktu < 1 jam, pesanan
+  /// Midtrans, …) → `ApiException` berisi pesan `detail`.
+  static Future<Map<String, dynamic>> ulangPembayaran(String code, String channel) async {
+    final data = await _Api.post(
+      '/api/orders/${Uri.encodeComponent(code)}/payment/ulang',
+      body: {'payment_channel': channel},
+    );
+    return _Api._obj(data);
   }
 
   /// Buat pesanan. INGAT: satu pesanan = satu gudang. Keranjang yang barangnya
@@ -2154,10 +2168,10 @@ class ApiService {
         body: {'alasan': alasan},
       );
 
-  /// Lunasi MANUAL pesanan yang dibayar di luar Midtrans (audit 2026-09-28
-  /// T-4) — padanan web `adminLunasiManual`. Server mengecek Midtrans dulu &
-  /// menutup tagihannya; `pesan` terisi bila pembeli ternyata sudah membayar
-  /// lewat Midtrans. [bukti] (opsional) = foto struk / PDF bukti transfer —
+  /// Lunasi MANUAL pesanan yang dibayar di luar gateway (RajaOngkir/Midtrans;
+  /// audit 2026-09-28 T-4) — padanan web `adminLunasiManual`. Server mengecek
+  /// gateway dulu & menutup tagihannya; `pesan` terisi bila pembeli ternyata
+  /// sudah membayar lewat gateway. [bukti] (opsional) = foto struk / PDF bukti transfer —
   /// tampil di kolom "Bukti" daftar pesanan.
   static Future<String?> adminLunasiManual(
     String code,

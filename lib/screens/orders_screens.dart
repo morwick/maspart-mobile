@@ -856,7 +856,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               'Uang HARUS dikembalikan ke pembeli (transfer manual) — '
                               'pesanan ditandai perlu refund, retur yang masih berjalan '
                               'ditutup, dan tidak bisa dihidupkan lagi.'
-                          : 'Batalkan $_code ($total)? Tagihan Midtrans pembeli DITUTUP, '
+                          : 'Batalkan $_code ($total)? Tagihan gateway pembayaran pembeli DITUTUP, '
                               'tahanan stok dilepas, voucher & poin dikembalikan. Pesanan '
                               'batal TIDAK BISA dihidupkan lagi.',
                       style: TextStyle(
@@ -1123,9 +1123,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Hanya bila uang SUDAH MASUK di luar Midtrans (mis. transfer '
-                      'langsung). Server mengecek Midtrans dulu, lalu menutup '
-                      'tagihannya, mengunci stok, dan mengabari gudang untuk mengirim.',
+                      'Hanya bila uang SUDAH MASUK di luar gateway pembayaran '
+                      '(RajaOngkir/Midtrans), mis. transfer langsung. Server mengecek '
+                      'gateway dulu, lalu menutup tagihannya, mengunci stok, dan '
+                      'mengabari gudang untuk mengirim.',
                       style: TextStyle(fontSize: 12.5, color: m.warn600),
                     ),
                     const SizedBox(height: 12),
@@ -1969,10 +1970,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       children: [
         MasKeyValue(
           label: 'Metode',
-          value: gateway ? 'Gateway (Midtrans)' : (o.paymentMethod.isNotEmpty ? o.paymentMethod : 'Manual'),
+          value: gateway
+              ? ((o.paymentChannel ?? '').toLowerCase() == 'snap'
+                  ? 'Gateway (Midtrans)'
+                  : 'Gateway (RajaOngkir)')
+              : (o.paymentMethod.isNotEmpty ? o.paymentMethod : 'Manual'),
         ),
         if (o.paymentChannel != null && o.paymentChannel!.isNotEmpty)
-          MasKeyValue(label: 'Kanal', value: o.paymentChannel!.toUpperCase()),
+          MasKeyValue(label: 'Kanal', value: labelKanalBayar(o.paymentChannel)),
         if (o.paymentRef != null && o.paymentRef!.isNotEmpty)
           MasKeyValue(label: 'Referensi', value: o.paymentRef!, mono: true),
         if (o.paymentVa != null && o.paymentVa!.isNotEmpty)
@@ -2118,7 +2123,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
                 // Pesanan BELUM DIBAYAR tak boleh didorong maju dari sini (audit
                 // 2026-09-28 T-4): "Diproses" dulu = lunas tanpa uang. Pelunasan
-                // di luar Midtrans lewat "Lunasi manual" (bukti + ketik kode).
+                // di luar gateway lewat "Lunasi manual" (bukti + ketik kode).
                 if (o.status == 'menunggu_pembayaran') ...[
                   Text('Pesanan belum dibayar.',
                       style: TextStyle(fontSize: 12.5, color: m.ink500)),

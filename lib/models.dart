@@ -5,6 +5,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'utils.dart';
+
 // ── Helper parsing ───────────────────────────────────────────────────
 // Backend kadang mengirim angka sebagai string ("1.500") dan kadang sebagai
 // num. Helper ini memaafkan keduanya supaya UI tak pernah crash karena tipe.
@@ -1989,15 +1991,56 @@ class PaymentInfo {
       );
 }
 
+/// Satu metode bayar dari `/api/payments/methods`. RajaOngkir: 'qris' atau
+/// 'va_<bank>' (bca, bni, bri, mandiri, …); Midtrans (pesanan lama): 'snap'.
 class PaymentChannel {
   final String code;
   final String label;
 
-  const PaymentChannel({required this.code, this.label = ''});
+  /// 'qris' | 'bank_transfer' | 'snap'.
+  final String paymentType;
+  final String bankCode;
+
+  /// Batas nominal kanal (RajaOngkir: min Rp 10.000, QRIS maks Rp 10 jt).
+  /// 0 = tanpa batas.
+  final int minAmount;
+  final int maxAmount;
+  final String logoUrl;
+
+  const PaymentChannel({
+    required this.code,
+    this.label = '',
+    this.paymentType = '',
+    this.bankCode = '',
+    this.minAmount = 0,
+    this.maxAmount = 0,
+    this.logoUrl = '',
+  });
+
+  bool get isQris => code == 'qris';
+  bool get isVa => code.startsWith('va_');
+
+  /// Alasan kanal ini tak bisa dipakai untuk [total], atau null bila boleh.
+  /// Sama dengan pemeriksaan server (`payments.cek_kanal`) — server tetap
+  /// memeriksa ulang, ini hanya supaya pembeli tak memilih yang pasti ditolak.
+  String? alasanTakBisa(num total) {
+    if (minAmount > 0 && total < minAmount) {
+      return 'Minimal ${formatRupiah(minAmount)}';
+    }
+    if (maxAmount > 0 && total > maxAmount) {
+      return 'Maksimal ${formatRupiah(maxAmount)}';
+    }
+    return null;
+  }
 
   factory PaymentChannel.fromJson(Map<String, dynamic> j) => PaymentChannel(
         code: _s(j['code']),
         label: _s(j['label']),
+        paymentType: _s(j['payment_type']),
+        bankCode: _s(j['bank_code']),
+        minAmount: _i(j['min_amount']),
+        maxAmount: _i(j['max_amount']),
+        logoUrl: _s(j['logo_url']),
       );
 }
 
@@ -2005,12 +2048,51 @@ class PaymentMethods {
   final bool gatewayAvailable;
   final List<PaymentChannel> channels;
 
-  const PaymentMethods({this.gatewayAvailable = false, this.channels = const []});
+  /// 'komerce' (RajaOngkir — pembeli memilih VA/QRIS di aplikasi) | 'midtrans'
+  /// (Snap — metode dipilih di halaman Midtrans). Kosong = backend lama → anggap
+  /// Midtrans (perilaku sebelum pembaruan ini).
+  final String gateway;
+  final String gatewayNama;
+
+  const PaymentMethods({
+    this.gatewayAvailable = false,
+    this.channels = const [],
+    this.gateway = '',
+    this.gatewayNama = '',
+  });
+
+  bool get isRajaOngkir => gateway == 'komerce';
 
   factory PaymentMethods.fromJson(Map<String, dynamic> j) => PaymentMethods(
         gatewayAvailable: _b(j['gateway_available']),
         channels: _list(j['channels'], PaymentChannel.fromJson),
+        gateway: _s(j['gateway']),
+        gatewayNama: _s(j['gateway_nama']),
       );
+}
+
+/// Nama bank dari kode kanal 'va_bca' → 'BCA' (untuk label VA pesanan).
+String namaBankKanal(String? channel) {
+  const nama = {
+    'bca': 'BCA', 'bni': 'BNI', 'bri': 'BRI', 'mandiri': 'Mandiri',
+    'permata': 'Permata', 'cimb': 'CIMB Niaga', 'bsi': 'BSI', 'bjb': 'BJB',
+    'dbs': 'DBS', 'bnc': 'Bank Neo Commerce',
+    'sahabat_sampoerna': 'Bank Sahabat Sampoerna',
+  };
+  final c = (channel ?? '').toLowerCase();
+  if (!c.startsWith('va_')) return c.toUpperCase();
+  final k = c.substring(3);
+  return nama[k] ?? k.toUpperCase();
+}
+
+/// Label metode bayar pesanan untuk pembeli/admin/invoice.
+/// 'snap' = pesanan lama Midtrans (metode dipilih di halaman Midtrans).
+String labelKanalBayar(String? channel) {
+  final c = (channel ?? '').toLowerCase();
+  if (c == 'snap') return 'Pembayaran Online (Midtrans)';
+  if (c == 'qris') return 'QRIS';
+  if (c.startsWith('va_')) return 'Virtual Account ${namaBankKanal(c)}';
+  return c.isEmpty ? 'Pembayaran Online' : c.toUpperCase();
 }
 
 /// Satu baris manifest kurir.
@@ -2071,11 +2153,17 @@ class PaymentStatus {
   final String? gatewayStatus;
   final String? error;
 
+  /// Tagihan RajaOngkir kedaluwarsa/dibatalkan sementara pesanan masih
+  /// menunggu pembayaran (QRIS bisa habis lebih cepat dari batas bayar) →
+  /// tawarkan "Buat tagihan baru" (`ApiService.ulangPembayaran`).
+  final bool tagihanHabis;
+
   const PaymentStatus({
     this.status = '',
     this.paid = false,
     this.gatewayStatus,
     this.error,
+    this.tagihanHabis = false,
   });
 
   factory PaymentStatus.fromJson(Map<String, dynamic> j) => PaymentStatus(
@@ -2083,6 +2171,7 @@ class PaymentStatus {
         paid: _b(j['paid']),
         gatewayStatus: _sOrNull(j['gateway_status']),
         error: _sOrNull(j['error']),
+        tagihanHabis: _b(j['tagihan_habis']),
       );
 }
 

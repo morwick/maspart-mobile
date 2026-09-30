@@ -30,11 +30,9 @@ String _payLabel(OrderDetail o) {
   if (o.paymentMethod == 'manual') return 'Transfer Manual';
   final ch = (o.paymentChannel ?? '').toLowerCase();
   if (ch.isEmpty) return '-';
-  // 'snap' = halaman Midtrans; metodenya (VA/QRIS/kartu) dipilih di sana.
-  if (ch == 'snap') return 'Pembayaran Online (Midtrans)';
-  if (ch == 'qris') return 'QRIS';
-  if (ch.startsWith('va_')) return 'Virtual Account ${ch.substring(3).toUpperCase()}';
-  return ch.toUpperCase();
+  // 'snap' = halaman Midtrans (pesanan lama); 'qris' / 'va_<bank>' = RajaOngkir.
+  // Satu sumber label dengan layar pesanan (paritas web `labelKanalBayar`).
+  return labelKanalBayar(ch);
 }
 
 String _courierLabel(OrderDetail o) {

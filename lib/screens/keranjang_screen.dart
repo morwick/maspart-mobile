@@ -31,6 +31,7 @@ import '../utils.dart';
 import '../widgets/voucher_tiket.dart';
 import '../widgets/alamat_form.dart';
 import '../widgets/mas_ui.dart';
+import '../widgets/pilih_metode_bayar.dart';
 import 'pilih_lokasi_screen.dart';
 
 class KeranjangScreen extends StatefulWidget {
@@ -100,6 +101,14 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   /// #11: `/payments/methods` GAGAL dimuat (bukan "gateway mati") — dulu
   /// dianggap belum aktif dan checkout tertutup sampai layar dibuka ulang.
   bool _gatewayGagal = false;
+
+  /// Metode bayar dari server. RajaOngkir: pembeli memilih QRIS / VA bank di
+  /// sini (paritas web `kanalPilih`); Midtrans (gateway lama): kanal 'snap',
+  /// metode dipilih di halaman Midtrans.
+  PaymentMethods? _metode;
+
+  /// Kanal yang DIPILIH pembeli. Null = pakai bawaan ([_kanalEfektif]).
+  String? _kanalPilih;
   bool _busy = false;
   String? _error;
 
@@ -308,6 +317,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         setState(() {
           _gatewayOn = m.gatewayAvailable;
           _gatewayGagal = false;
+          _metode = m;
         });
       }
     } on ApiException catch (e) {
@@ -770,6 +780,43 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     return t < 0 ? 0 : t;
   }
 
+  // ── Metode bayar (RajaOngkir) ───────────────────────────────────────
+
+  bool get _pilihKanal => _metode?.isRajaOngkir ?? false;
+
+  /// Kanal RajaOngkir yang boleh untuk [total] (min/maks per kanal).
+  List<PaymentChannel> _kanalBoleh(int total) => [
+        for (final c in _metode?.channels ?? const <PaymentChannel>[])
+          if (c.code != 'snap' && c.alasanTakBisa(total) == null) c,
+      ];
+
+  /// Kanal yang akan dikirim: pilihan pembeli bila masih boleh untuk total
+  /// sekarang, selain itu QRIS, selain itu VA pertama. Null = tak ada kanal
+  /// yang menerima total ini (mis. di bawah Rp 10.000). Midtrans → 'snap'.
+  String? get _kanalEfektif {
+    if (!_pilihKanal) return 'snap';
+    final boleh = _kanalBoleh(_totalTampil);
+    if (boleh.isEmpty) return null;
+    if (_kanalPilih != null && boleh.any((c) => c.code == _kanalPilih)) {
+      return _kanalPilih;
+    }
+    return boleh.any((c) => c.isQris) ? 'qris' : boleh.first.code;
+  }
+
+  /// Pesan bila tak satu pun kanal menerima total ini.
+  String _pesanTanpaKanal(int total) {
+    final minimal = (_metode?.channels ?? const <PaymentChannel>[])
+        .map((c) => c.minAmount)
+        .where((n) => n > 0)
+        .fold<int?>(null, (a, b) => a == null || b < a ? b : a);
+    if (minimal != null && total < minimal) {
+      return 'Minimal pembayaran online ${formatRupiah(minimal)} (total pesanan '
+          '${formatRupiah(total)}). Tambah barang ke pesanan ini dulu.';
+    }
+    return 'Tidak ada metode pembayaran untuk total ${formatRupiah(total)}. '
+        'Hubungi admin.';
+  }
+
   // ── Checkout ────────────────────────────────────────────────────────
 
   /// [buatBaru] = pembeli memilih "Tetap buat pesanan baru" setelah server
@@ -834,13 +881,20 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       return;
     }
     final tampil = _totalTampil;
+    // Kanal dicek SETELAH ongkir pasti: batas minimal kanal (Rp 10.000) berlaku
+    // untuk total akhir, bukan subtotal sebelum ongkir terhitung.
+    final kanal = _kanalEfektif;
+    if (kanal == null) {
+      setState(() => _error = _pesanTanpaKanal(tampil));
+      return;
+    }
 
     // Kunci lama hanya untuk permintaan IDENTIK setelah percobaan tanpa jawaban
     // pasti; selain itu percobaan baru = kunci baru (paritas web).
     final sig = [
       for (final i in beli) '${i.partNumber}x${i.qty}',
       _noteCtl.text.trim(), _ambilSendiri, _rate?.courier, _rate?.service,
-      _ongkir, _poinPakai, _vKode.join(','), tampil,
+      _ongkir, _poinPakai, _vKode.join(','), tampil, kanal,
       _nameCtl.text.trim(), _phoneCtl.text.trim(), _addressCtl.text.trim(),
       _postalCtl.text.trim(), _lat, _lon,
     ].join('|');
@@ -875,9 +929,9 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         pickup: _ambilSendiri,
         weightGrams: _weightGrams,
         paymentMethod: 'gateway',
-        // Midtrans Snap — semua metode (VA/QRIS/e-wallet/kartu) dipilih di
-        // halaman bayar, jadi kanalnya cukup 'snap'.
-        paymentChannel: 'snap',
+        // RajaOngkir: QRIS / VA bank pilihan pembeli. Midtrans (gateway lama):
+        // 'snap' — metodenya dipilih di halaman Midtrans.
+        paymentChannel: kanal,
         recipientName: _nameCtl.text.trim(),
         recipientPhone: _phoneCtl.text.trim(),
         recipientAddress: _addressCtl.text.trim(),
@@ -901,10 +955,14 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       // lain (dan barang yang ditambahkan sementara itu) tetap tersimpan.
       await _cart.removeAll(pnDipesan);
 
+      // VA: nomornya tampil langsung di detail pesanan (salin → bayar dari
+      // m-banking) — tak perlu membuka halaman bayar. QRIS & Snap Midtrans:
+      // QR / metode ada di halaman bayar → langsung dibuka.
+      final kanalJadi = res.payment?.channel ?? kanal;
       final ke = {
         'order_code': res.orderCode,
         'payment_url': res.payment?.url ?? '',
-        'autopay': true,
+        'autopay': !kanalJadi.startsWith('va_'),
       };
       if (!mounted) {
         // #28: pembeli sudah meninggalkan keranjang saat pesanan selesai
@@ -1906,11 +1964,13 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
 
   Widget _pembayaran(MasColors m) => MasCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('💳 Pembayaran Online',
+          Text(_pilihKanal ? '💳 Metode Pembayaran' : '💳 Pembayaran Online',
               style: TextStyle(
                   fontSize: 14, fontWeight: FontWeight.w600, color: m.ink900)),
-          const SizedBox(height: 8),
-          if (_gatewayOn)
+          const SizedBox(height: 12),
+          if (_gatewayOn && _pilihKanal)
+            ..._pilihanKanal(m)
+          else if (_gatewayOn)
             Text(
               'Setelah pesanan dibuat, Anda diarahkan ke halaman pembayaran aman '
               'Midtrans untuk memilih metode — Virtual Account, QRIS, e-wallet, '
@@ -1927,6 +1987,40 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
             _alert(m, 'Pembayaran online belum aktif. Hubungi admin.'),
         ]),
       );
+
+  /// QRIS + petak Virtual Account (RajaOngkir) — paritas web `PilihMetodeBayar`.
+  List<Widget> _pilihanKanal(MasColors m) {
+    final total = _totalTampil;
+    final kanal = _kanalEfektif;
+    return [
+      if (kanal == null) ...[
+        _alert(m, _pesanTanpaKanal(total)),
+        const SizedBox(height: 8),
+      ],
+      PilihMetodeBayar(
+        kanal: [
+          for (final c in _metode?.channels ?? const <PaymentChannel>[])
+            if (c.code != 'snap') c,
+        ],
+        value: kanal,
+        total: total,
+        enabled: !_busy,
+        onChanged: (code) => setState(() => _kanalPilih = code),
+      ),
+      const SizedBox(height: 12),
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(Icons.lock_outline_rounded, size: 14, color: m.ink500),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            'Dibayar lewat RajaOngkir & dicek otomatis. Nomor VA / kode QR muncul '
+            'di halaman pesanan setelah pesanan dibuat.',
+            style: TextStyle(fontSize: 11.5, color: m.ink500, height: 1.45),
+          ),
+        ),
+      ]),
+    ];
+  }
 
   Widget _catatan(MasColors m) => MasCard(
         child: _field(

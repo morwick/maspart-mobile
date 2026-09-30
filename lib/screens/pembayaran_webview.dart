@@ -1,13 +1,16 @@
 // lib/screens/pembayaran_webview.dart
-// Halaman pembayaran Midtrans Snap di dalam aplikasi.
+// Halaman pembayaran gateway di dalam aplikasi.
 //
-// Snap adalah halaman web — pembeli memilih sendiri metodenya (VA / QRIS /
-// e-wallet / kartu) di sana. Kita cukup memuatnya, lalu mengawasi kapan Snap
-// mengarahkan pembeli ke URL selesai/gagal dan menutup WebView.
+// • RajaOngkir (gateway utama): halaman bayar satu tagihan — menampilkan QRIS
+//   atau nomor VA + cara bayar. Tak ada pengalihan "selesai": pembeli menutup
+//   sendiri (→ `ditutup`) atau menekan "Sudah Bayar".
+// • Midtrans Snap (pesanan lama): pembeli memilih metodenya di sana; kita
+//   mengawasi kapan Snap mengarahkan ke URL selesai/gagal lalu menutup WebView.
 //
 // PENTING: hasil yang dikembalikan halaman ini hanya SINYAL, bukan bukti bayar.
 // Kebenaran pembayaran selalu datang dari `ApiService.paymentStatus()` (yang
-// dikonfirmasi webhook Midtrans di backend) — layar pemanggil wajib polling.
+// dikonfirmasi callback gateway di backend) — layar pemanggil wajib polling,
+// apa pun hasilnya (termasuk `ditutup`).
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -16,15 +19,16 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../api_service.dart';
 import '../theme/mas_theme.dart';
 
-/// Bagaimana pembeli meninggalkan halaman Snap.
+/// Bagaimana pembeli meninggalkan halaman bayar. (Nama lama `Snap` dipertahankan.)
 enum SnapOutcome {
-  /// Snap mengarahkan ke URL "finish" — kemungkinan besar sudah bayar.
+  /// Snap mengarahkan ke URL "finish", atau "Sudah Bayar" dikonfirmasi server.
   selesai,
 
   /// Snap mengarahkan ke URL "error"/"unfinish".
   gagal,
 
-  /// Pembeli menutup sendiri halamannya.
+  /// Pembeli menutup sendiri halamannya (satu-satunya jalan keluar halaman
+  /// RajaOngkir selain "Sudah Bayar") — pemanggil tetap mengecek status.
   ditutup,
 }
 
@@ -53,6 +57,12 @@ class _PembayaranWebViewState extends State<PembayaranWebView> {
   /// shopeeid://, intent://, dst.) adalah aplikasi lain.
   static const _skemaWebView = {'http', 'https', 'about', 'data', 'blob', 'javascript'};
 
+  /// Halaman Snap Midtrans (pesanan lama)? Hanya di sana URL pengalihan
+  /// selesai/gagal ditebak — halaman RajaOngkir adalah aplikasi satu halaman
+  /// yang tak pernah mengalihkan ke URL "finish".
+  late final bool _snap =
+      (Uri.tryParse(widget.url)?.host ?? '').toLowerCase().contains('midtrans');
+
   @override
   void initState() {
     super.initState();
@@ -67,15 +77,15 @@ class _PembayaranWebViewState extends State<PembayaranWebView> {
             if (mounted) setState(() => _loading = false);
           },
           onNavigationRequest: (req) {
-            final outcome = _outcomeOf(req.url);
+            final outcome = _snap ? _outcomeOf(req.url) : null;
             if (outcome != null) {
               _close(outcome);
               return NavigationDecision.prevent;
             }
-            // KL-8 (audit 2026-09-28): Snap mengarahkan GoPay/ShopeePay ke
-            // skema aplikasi (gojek://, shopeeid://, intent://…). Dulu
-            // di-`navigate` → WebView menampilkan halaman galat dan pembayaran
-            // e-wallet gagal. Serahkan ke sistem, WebView tetap di Snap.
+            // KL-8 (audit 2026-09-28): halaman bayar bisa mengarahkan ke skema
+            // aplikasi (gojek://, shopeeid://, intent://…). Dulu di-`navigate`
+            // → WebView menampilkan halaman galat dan pembayaran e-wallet gagal.
+            // Serahkan ke sistem, WebView tetap di halaman bayar.
             final skema = (Uri.tryParse(req.url)?.scheme ?? '').toLowerCase();
             if (skema.isNotEmpty && !_skemaWebView.contains(skema)) {
               _bukaLuar(req.url);
