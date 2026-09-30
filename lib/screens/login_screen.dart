@@ -1,6 +1,7 @@
 // lib/screens/login_screen.dart — panel merek grafit di atas (medan baut/mur 3D,
 // widgets/login_backdrop.dart), form di bawahnya, footer menempel ke dasar
 // layar. Paritas dengan web frontend/src/app/login/page.tsx.
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -11,6 +12,7 @@ import '../widgets/mas_ui.dart';
 import '../widgets/login_backdrop.dart';
 import '../api_service.dart';
 import '../auth_storage.dart';
+import '../config.dart';
 import '../app/shell.dart';
 import 'lengkapi_profil_screen.dart';
 
@@ -147,6 +149,13 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _masukGoogle() async {
     if (_loading || _googleBusy || _googleClientId.isEmpty) return;
     FocusScope.of(context).unfocus();
+    final iOS = defaultTargetPlatform == TargetPlatform.iOS;
+    // Tanpa iOS Client ID, SDK Google melempar exception native → app crash.
+    if (iOS && AppConfig.googleIosClientId.isEmpty) {
+      setState(() => _error =
+          'Login Google di iPhone belum dikonfigurasi (iOS Client ID kosong). Gunakan username & password.');
+      return;
+    }
     setState(() {
       _googleBusy = true;
       _error = null;
@@ -154,7 +163,9 @@ class _LoginScreenState extends State<LoginScreen> {
     AuthStorage.persist = _remember;
     try {
       final g = GoogleSignIn(
-          scopes: const ['email'], serverClientId: _googleClientId);
+          clientId: iOS ? AppConfig.googleIosClientId : null,
+          scopes: const ['email'],
+          serverClientId: _googleClientId);
       // Keluar dulu supaya pemilih akun SELALU tampil — tanpa ini akun Google
       // terakhir dipakai diam-diam dan pembeli tak bisa ganti akun.
       try {

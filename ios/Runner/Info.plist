@@ -24,8 +24,31 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<!-- Reversed client ID OAuth "Maspart iOS" (callback login Google) -->
+				<string>com.googleusercontent.apps.793205866762-1inn0gb4tvm94df5aiu0gh6hpfn4e8dd</string>
+			</array>
+		</dict>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Kamera dipakai untuk memotret atau merekam bukti retur dan pesanan.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Mikrofon dipakai saat merekam video bukti retur.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Galeri dipakai untuk memilih foto atau video bukti retur dan pesanan.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
