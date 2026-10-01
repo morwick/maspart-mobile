@@ -839,6 +839,121 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 }
 
+/// Badge jumlah keranjang di header. Umpan balik "+ Keranjang" berhasil:
+/// saat badge MUNCUL (0 → n) ia membal masuk; saat jumlah BERTAMBAH badge
+/// meletup (membesar lalu memantul balik) & angkanya bergulir naik. Saat
+/// berkurang angka bergulir turun tanpa letupan. "Kurangi animasi" di HP →
+/// angka berganti statis (pagar sama dengan login_backdrop/promo_banner).
+class _CartBadge extends StatefulWidget {
+  final int count;
+  final Color color;
+  final Color ring;
+
+  const _CartBadge({required this.count, required this.color, required this.ring});
+
+  @override
+  State<_CartBadge> createState() => _CartBadgeState();
+}
+
+class _CartBadgeState extends State<_CartBadge> with SingleTickerProviderStateMixin {
+  late final AnimationController _pop =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 550));
+
+  /// Letupan: cepat membesar 1 → 1,45, lalu memantul kembali ke 1.
+  static final _letup = TweenSequence<double>([
+    TweenSequenceItem(
+        tween: Tween(begin: 1.0, end: 1.45).chain(CurveTween(curve: Curves.easeOut)),
+        weight: 30),
+    TweenSequenceItem(
+        tween: Tween(begin: 1.45, end: 1.0).chain(CurveTween(curve: Curves.elasticOut)),
+        weight: 70),
+  ]);
+
+  /// true = animasi berjalan adalah "muncul" (skala 0 → 1), bukan letupan.
+  bool _muncul = true;
+  /// Arah gulir angka: naik (jumlah bertambah) atau turun.
+  bool _naik = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // Badge baru dibangun saat keranjang berubah dari kosong → berisi.
+    _pop.forward();
+  }
+
+  @override
+  void didUpdateWidget(_CartBadge old) {
+    super.didUpdateWidget(old);
+    if (widget.count == old.count) return;
+    _naik = widget.count > old.count;
+    if (_naik) {
+      _muncul = false;
+      _pop.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _pop.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final diam = MediaQuery.disableAnimationsOf(context);
+    final label = widget.count > 99 ? '99+' : '${widget.count}';
+
+    final badge = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      constraints: const BoxConstraints(minWidth: 16),
+      height: 16,
+      decoration: BoxDecoration(
+        color: widget.color,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: widget.ring, width: 1.5),
+      ),
+      child: ClipRect(
+        child: AnimatedSwitcher(
+          duration: diam ? Duration.zero : const Duration(milliseconds: 260),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          // Angka baru masuk dari bawah & yang lama keluar ke atas (naik),
+          // atau sebaliknya (turun) — efek odometer.
+          transitionBuilder: (child, anim) {
+            final masuk = child.key == ValueKey(label);
+            final dy = (masuk == _naik) ? 1.0 : -1.0;
+            return SlideTransition(
+              position: Tween(begin: Offset(0, dy), end: Offset.zero).animate(anim),
+              child: FadeTransition(opacity: anim, child: child),
+            );
+          },
+          child: Text(
+            label,
+            key: ValueKey(label),
+            style: const TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (diam) return badge;
+    return AnimatedBuilder(
+      animation: _pop,
+      builder: (context, child) => Transform.scale(
+        scale: _muncul
+            ? Curves.elasticOut.transform(_pop.value)
+            : _letup.transform(_pop.value),
+        child: child,
+      ),
+      child: badge,
+    );
+  }
+}
+
 class _Header extends StatelessWidget {
   final String title;
   final String subtitle;
@@ -957,26 +1072,7 @@ class _Header extends StatelessWidget {
         Positioned(
           right: -3,
           top: -3,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            constraints: const BoxConstraints(minWidth: 16),
-            height: 16,
-            decoration: BoxDecoration(
-              color: m.brand600,
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: m.paper, width: 1.5),
-            ),
-            child: Center(
-              child: Text(
-                cartCount > 99 ? '99+' : '$cartCount',
-                style: const TextStyle(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
+          child: _CartBadge(count: cartCount, color: m.brand600, ring: m.paper),
         ),
     ]);
   }
