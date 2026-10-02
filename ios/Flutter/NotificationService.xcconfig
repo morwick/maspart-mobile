@@ -1,0 +1,4 @@
+// Target NotificationService (ios/NotificationService): hanya butuh versi
+// aplikasi dari pubspec (FLUTTER_BUILD_NAME/NUMBER) — sengaja TIDAK menyertakan
+// xcconfig Pods milik Runner (framework plugin tak boleh ditautkan ke extension).
+#include "Generated.xcconfig"

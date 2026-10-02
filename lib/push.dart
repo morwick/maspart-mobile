@@ -1,11 +1,18 @@
-// lib/push.dart — push notifikasi SISTEM (baki notifikasi Android) via Firebase
-// Cloud Messaging: perubahan status pesanan & notifikasi lonceng lainnya.
+// lib/push.dart — push notifikasi SISTEM (Android & iPhone) via Firebase Cloud
+// Messaging: perubahan status pesanan, notifikasi lonceng & siaran promo.
 //
-// Mode TIDUR: selama android/app/google-services.json belum ada, plugin Google
-// Services tidak diterapkan (lihat android/app/build.gradle.kts), sehingga
-// Firebase.initializeApp() gagal → [Push.aktif] = false dan SEMUA fungsi di sini
-// jadi no-op diam-diam. Aplikasi berjalan normal; lonceng dalam aplikasi tetap
-// bekerja lewat polling. Taruh file itu + build ulang → push langsung aktif.
+// Mode TIDUR: selama file konfigurasi Firebase belum ada —
+// android/app/google-services.json (Android) / ios/Runner/GoogleService-Info.plist
+// (iOS) — Firebase.initializeApp() gagal → [Push.aktif] = false dan SEMUA fungsi
+// di sini jadi no-op diam-diam. Aplikasi berjalan normal; lonceng dalam aplikasi
+// tetap bekerja lewat polling. Taruh file itu + build ulang → push langsung aktif.
+//
+// iOS: FCM mengirim lewat APNs → butuh kunci APNs (.p8, akun Apple Developer
+// berbayar) di Firebase. Tanpa itu getAPNSToken() null → token tak didaftarkan.
+// Notifikasi saat aplikasi TERBUKA ditampilkan iOS sendiri
+// (setForegroundNotificationPresentationOptions), bukan notifikasi lokal seperti
+// Android — supaya gambar promo dari Notification Service Extension
+// (ios/NotificationService) ikut tampil & tak dobel.
 //
 // Alur:
 //   • main()        → Push.init()     : Firebase, kanal "pesanan", pendengar.
@@ -45,8 +52,10 @@ Future<void> _pushLatarBelakang(RemoteMessage message) async {
 class Push {
   Push._();
 
-  /// true = Firebase berhasil diinisialisasi (google-services.json terpasang).
+  /// true = Firebase berhasil diinisialisasi (file konfigurasi Firebase terpasang).
   static bool aktif = false;
+
+  static bool get _ios => defaultTargetPlatform == TargetPlatform.iOS;
 
   /// Tautan web dari push yang diketuk tapi BELUM dibuka shell. Diisi walau
   /// shell belum ada (cold start / masih di layar login); shell mendengarkan
@@ -90,8 +99,10 @@ class Push {
   static String? _tokenTerdaftar;
 
   static Future<void> init() async {
-    // Hanya Android yang dikonfigurasi (iOS belum punya GoogleService-Info.plist).
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    if (kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.android && !_ios)) {
+      return;
+    }
     try {
       await Firebase.initializeApp();
     } catch (e) {
@@ -105,6 +116,13 @@ class Push {
       await _lokal.initialize(
         settings: const InitializationSettings(
           android: AndroidInitializationSettings(_ikon),
+          // Izin diminta FirebaseMessaging.requestPermission() di daftarkan();
+          // plugin lokal di iOS hanya dipakai membersihkan baki (semuaDibaca).
+          iOS: DarwinInitializationSettings(
+            requestAlertPermission: false,
+            requestBadgePermission: false,
+            requestSoundPermission: false,
+          ),
         ),
         onDidReceiveNotificationResponse: (r) => _buka(r.payload),
       );
@@ -113,7 +131,12 @@ class Push {
       await android?.createNotificationChannel(_kanal);
       await android?.createNotificationChannel(_kanalPromo);
 
-      // Latar depan: FCM TIDAK menampilkan notifikasi sendiri → tampilkan lokal.
+      // Latar depan: Android — FCM TIDAK menampilkan notifikasi sendiri →
+      // tampilkan lokal. iOS — biarkan sistem yang menampilkan (lihat atas).
+      if (_ios) {
+        await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+            alert: true, badge: true, sound: true);
+      }
       FirebaseMessaging.onMessage.listen(_tampilkanDepan);
       // Diketuk saat aplikasi di latar belakang.
       FirebaseMessaging.onMessageOpenedApp.listen((m) => _buka(_tautanDari(m)));
@@ -130,12 +153,26 @@ class Push {
     }
   }
 
-  /// Minta izin notifikasi (Android 13+) lalu daftarkan token ke server.
+  /// Minta izin notifikasi (Android 13+ / iOS) lalu daftarkan token ke server.
   /// Dipanggil tiap sesi dibuka (login baru maupun login otomatis).
   static Future<void> daftarkan() async {
     if (!aktif) return;
     try {
-      await FirebaseMessaging.instance.requestPermission();
+      final izin = await FirebaseMessaging.instance.requestPermission();
+      if (_ios) {
+        if (izin.authorizationStatus == AuthorizationStatus.denied) return;
+        // Token FCM di iOS baru ada setelah token APNs tiba (asinkron, bisa
+        // beberapa detik). null terus = kunci APNs/akun Apple belum siap.
+        String? apns;
+        for (var i = 0; i < 5 && apns == null; i++) {
+          apns = await FirebaseMessaging.instance.getAPNSToken();
+          if (apns == null) await Future.delayed(const Duration(seconds: 2));
+        }
+        if (apns == null) {
+          debugPrint('Push: token APNs belum tersedia — push iOS belum bisa');
+          return;
+        }
+      }
       final token = await FirebaseMessaging.instance.getToken();
       if (token != null && token.isNotEmpty) await _kirim(token);
       _subRefresh ??= FirebaseMessaging.instance.onTokenRefresh.listen(_kirim);
@@ -146,7 +183,7 @@ class Push {
 
   static Future<void> _kirim(String token) async {
     try {
-      final siap = await ApiService.daftarPerangkat(token, 'android');
+      final siap = await ApiService.daftarPerangkat(token, _ios ? 'ios' : 'android');
       _tokenTerdaftar = token;
       // aktif=false = server belum punya Firebase/migrasi — bukan galat.
       if (!siap) debugPrint('Push: token diterima, push server belum aktif');
@@ -216,6 +253,7 @@ class Push {
     final promo = m.data['jenis']?.toString() == 'promo';
     final badge = promo ? null : IkonBadge.dariData(m.data);
     if (badge != null) IkonBadge.pasang(badge);
+    if (_ios) return; // sudah ditampilkan sistem (presentation options)
     try {
       final judul = m.notification?.title ?? m.data['judul']?.toString() ?? '';
       final isi = m.notification?.body ?? m.data['isi']?.toString() ?? '';
