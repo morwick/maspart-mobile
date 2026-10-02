@@ -55,6 +55,10 @@ class MasSectionCard extends StatelessWidget {
   /// Timpa gaya judul — dipakai kartu tabel markdown agar judul Part Number
   /// tampil mono. Null = gaya baku (tak ada perubahan bagi pemakai lama).
   final TextStyle? titleStyle;
+  /// Ikon kecil di depan judul — pengganti emoji (emoji tampil sebagai kotak
+  /// "?" di sebagian perangkat, mis. simulator iOS 26).
+  final IconData? icon;
+  final Color? iconColor;
   const MasSectionCard({
     super.key,
     required this.title,
@@ -62,6 +66,8 @@ class MasSectionCard extends StatelessWidget {
     this.trailing,
     this.margin = EdgeInsets.zero,
     this.titleStyle,
+    this.icon,
+    this.iconColor,
   });
 
   @override
@@ -85,6 +91,10 @@ class MasSectionCard extends StatelessWidget {
               border: Border(bottom: BorderSide(color: m.ink150)),
             ),
             child: Row(children: [
+              if (icon != null) ...[
+                Icon(icon, size: 17, color: iconColor ?? m.ink600),
+                const SizedBox(width: 7),
+              ],
               Expanded(
                 child: Text(title,
                     style: titleStyle?.copyWith(color: titleStyle?.color ?? m.ink900) ??

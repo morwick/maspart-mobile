@@ -389,31 +389,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   Expanded(child: Divider(color: m.ink200)),
                 ]),
                 const SizedBox(height: 16),
-                SizedBox(
-                  height: 50,
-                  child: OutlinedButton(
-                    onPressed: (_loading || _googleBusy) ? null : _masukGoogle,
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: m.paper,
-                      side: BorderSide(color: m.ink300),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                    child: _googleBusy
-                        ? SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: m.brand600),
-                          )
-                        : Row(mainAxisSize: MainAxisSize.min, children: [
-                            Text('G',
-                                style: TextStyle(
-                                    fontSize: 18, fontWeight: FontWeight.w800, color: m.info600)),
-                            const SizedBox(width: 10),
-                            Text('Masuk dengan Google',
-                                style: TextStyle(
-                                    fontSize: 15, fontWeight: FontWeight.w600, color: m.ink800)),
-                          ]),
-                  ),
+                _TombolSosial(
+                  logo: const _LogoGoogle(size: 19),
+                  label: 'Masuk dengan Google',
+                  busy: _googleBusy,
+                  onTap: (_loading || _googleBusy) ? null : _masukGoogle,
                 ),
                 const SizedBox(height: 8),
                 Text('Pembeli baru? Masuk dengan Google — akun dibuat otomatis, lalu isi alamat kirim.',
@@ -487,4 +467,89 @@ class _LoginScreenState extends State<LoginScreen> {
 class _GoogleGagal implements Exception {
   final String pesan;
   const _GoogleGagal(this.pesan);
+}
+
+/// Tombol masuk pihak ketiga (Google) — putih bergaris, logo di kiri label,
+/// tinggi & tipografi sama dengan input form.
+class _TombolSosial extends StatelessWidget {
+  final Widget logo;
+  final String label;
+  final bool busy;
+  final VoidCallback? onTap;
+
+  const _TombolSosial({required this.logo, required this.label, required this.busy, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final m = context.mas;
+    return SizedBox(
+      height: 50,
+      child: OutlinedButton(
+        onPressed: onTap,
+        style: OutlinedButton.styleFrom(
+          backgroundColor: m.paper,
+          disabledBackgroundColor: m.paper,
+          foregroundColor: m.ink900,
+          side: BorderSide(color: m.ink300),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+        ),
+        child: busy
+            ? SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, color: m.ink600),
+              )
+            : Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                SizedBox(width: 24, height: 24, child: Center(child: logo)),
+                const SizedBox(width: 10),
+                Text(label,
+                    style: TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w600, letterSpacing: -0.1, color: m.ink900)),
+              ]),
+      ),
+    );
+  }
+}
+
+/// Logo "G" Google empat warna, digambar langsung (tanpa aset/SVG).
+class _LogoGoogle extends StatelessWidget {
+  final double size;
+  const _LogoGoogle({required this.size});
+
+  @override
+  Widget build(BuildContext context) =>
+      CustomPaint(size: Size.square(size), painter: _LogoGooglePainter());
+}
+
+class _LogoGooglePainter extends CustomPainter {
+  static const _biru = Color(0xFF4285F4);
+  static const _hijau = Color(0xFF34A853);
+  static const _kuning = Color(0xFFFBBC05);
+  static const _merah = Color(0xFFEA4335);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final tebal = w * 0.2;
+    final r = (w - tebal) / 2;
+    final c = Offset(w / 2, w / 2);
+    final kotak = Rect.fromCircle(center: c, radius: r);
+    double rad(double deg) => deg * 3.1415926535 / 180;
+    Paint cat(Color warna) => Paint()
+      ..color = warna
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = tebal;
+    // Sudut Flutter: 0° = arah jam 3, searah jarum jam. Celah "G" di kanan atas.
+    canvas.drawArc(kotak, rad(-140), rad(95), false, cat(_merah));
+    canvas.drawArc(kotak, rad(135), rad(85), false, cat(_kuning));
+    canvas.drawArc(kotak, rad(45), rad(90), false, cat(_hijau));
+    canvas.drawArc(kotak, rad(0), rad(45), false, cat(_biru));
+    // Palang horizontal biru dari tengah ke tepi kanan.
+    canvas.drawRect(Rect.fromLTRB(w / 2, c.dy - tebal / 2, w, c.dy + tebal / 2),
+        Paint()..color = _biru);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

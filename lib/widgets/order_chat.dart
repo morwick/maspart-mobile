@@ -112,7 +112,8 @@ class _OrderChatState extends State<OrderChat> {
     final m = context.mas;
 
     return MasSectionCard(
-      title: widget.title.startsWith('💬') ? widget.title : '💬 ${widget.title}',
+      title: widget.title,
+      icon: Icons.chat_bubble_outline,
       children: [
         if (_loading)
           const Padding(

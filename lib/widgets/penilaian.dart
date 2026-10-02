@@ -527,9 +527,12 @@ class _NilaiSheetState extends State<_NilaiSheet> {
                     ? SizedBox(
                         width: 18, height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2, color: m.brand600))
-                    : Text('📷\nTambah Foto\n${d.foto.length}/${_cfg.maksFoto}',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 10, height: 1.25, color: m.brand700)),
+                    : Column(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.photo_camera_outlined, size: 16, color: m.brand700),
+                        Text('Tambah Foto\n${d.foto.length}/${_cfg.maksFoto}',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 10, height: 1.25, color: m.brand700)),
+                      ]),
               ),
             ),
         ]),
@@ -625,7 +628,7 @@ class _PenilaianPesananCardState extends State<PenilaianPesananCard> {
             style: TextStyle(fontSize: 13, color: m.ink600, height: 1.45),
           ),
           const SizedBox(height: 10),
-          MasButton(label: '⭐ Nilai Pesanan', expand: true, onTap: _buka),
+          MasButton(label: 'Nilai Pesanan', icon: Icons.star_rounded, expand: true, onTap: _buka),
         ]);
       } else {
         isi = Text('Batas waktu penilaian sudah lewat.',
@@ -646,13 +649,20 @@ class _PenilaianPesananCardState extends State<PenilaianPesananCard> {
           _UlasanBaris(r: r, bisaBalas: widget.peran == PeranPenilaian.gudang, onChange: widget.onChange),
         if (pembeli && p.bisaUbah) ...[
           const SizedBox(height: 10),
-          MasButton(label: '✏️ Ubah Penilaian (1x)', primary: false, height: 36, onTap: _buka),
+          MasButton(
+              label: 'Ubah Penilaian (1x)',
+              icon: Icons.edit_outlined,
+              primary: false,
+              height: 36,
+              onTap: _buka),
         ],
       ]);
     }
 
     return MasSectionCard(
-      title: '⭐ Penilaian${p.layanan?.diubah == true ? ' · diubah' : ''}',
+      title: 'Penilaian${p.layanan?.diubah == true ? ' · diubah' : ''}',
+      icon: Icons.star_rounded,
+      iconColor: const Color(0xFFF5A623),
       children: [
         Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 14), child: isi),
       ],
@@ -778,9 +788,10 @@ class _UlasanBarisState extends State<_UlasanBaris> {
                         style: TextStyle(fontSize: 11, color: m.ink400)),
                   ]),
                 )
-              : TextButton(
+              : TextButton.icon(
                   onPressed: () => setState(() => _buka = true),
-                  child: Text('💬 Balas ulasan',
+                  icon: Icon(Icons.chat_bubble_outline, size: 15, color: m.brand700),
+                  label: Text('Balas ulasan',
                       style: TextStyle(fontSize: 12.5, color: m.brand700)),
                 ),
       ]),
