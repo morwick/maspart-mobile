@@ -1049,6 +1049,22 @@ class ApiService {
         (data['profile'] as Map?)?.cast<String, dynamic>() ?? const {});
   }
 
+  /// Ganti foto profil — server mengompres (maks 512 px) & membuang EXIF.
+  static Future<BuyerProfile> uploadFotoProfil(Uint8List bytes,
+      {String filename = 'profil.jpg'}) async {
+    final data = _Api._obj(await _Api.multipart('/api/buyer/profile/foto',
+        files: [(field: 'file', bytes: bytes, filename: filename)]));
+    return BuyerProfile.fromJson(
+        (data['profile'] as Map?)?.cast<String, dynamic>() ?? const {});
+  }
+
+  /// Hapus foto profil → kembali ke avatar inisial.
+  static Future<BuyerProfile> hapusFotoProfil() async {
+    final data = _Api._obj(await _Api.delete('/api/buyer/profile/foto'));
+    return BuyerProfile.fromJson(
+        (data['profile'] as Map?)?.cast<String, dynamic>() ?? const {});
+  }
+
   static Future<List<Alamat>> listAlamat() async {
     final data = _Api._obj(await _Api.get('/api/buyer/alamat'));
     return (data['alamat'] as List?)
@@ -2198,13 +2214,31 @@ class ApiService {
   // Admin: user & izin
   // ────────────────────────────────────────────────────────────────────
 
-  static Future<List<AdminUser>> listUsers() async {
+  static Future<List<AdminUser>> listUsers() async => (await listUsersLengkap()).users;
+
+  /// Daftar user + gudang utama beserta akun pemroses pesanannya (penanda
+  /// AKUN GUDANG di Manajemen User).
+  static Future<({List<AdminUser> users, List<GudangUtama> gudangUtama})>
+      listUsersLengkap() async {
     final data = _Api._obj(await _Api.get('/api/admin/users'));
-    return (data['users'] as List?)
-            ?.whereType<Map>()
-            .map((e) => AdminUser.fromJson(e.cast<String, dynamic>()))
-            .toList() ??
-        const [];
+    List<T> daftar<T>(String k, T Function(Map<String, dynamic>) f) =>
+        (data[k] as List?)?.whereType<Map>().map((e) => f(e.cast<String, dynamic>())).toList() ??
+        <T>[];
+    return (
+      users: daftar('users', AdminUser.fromJson),
+      gudangUtama: daftar('gudang_utama', GudangUtama.fromJson),
+    );
+  }
+
+  /// Tandai/cabut AKUN GUDANG; [keys] (opsional) = gudang yang sekaligus
+  /// dipegang. Gudang yang diambil berpindah dari akun lamanya. Server menolak
+  /// melepas gudang / mencabut tanda akun yang masih memegang gudang.
+  static Future<List<String>> setGudangCabang(String username,
+      {required bool akunGudang, List<String>? keys}) async {
+    final data = _Api._obj(await _Api.put(
+        '/api/admin/users/${Uri.encodeComponent(username)}/gudang-cabang',
+        body: {'akun_gudang': akunGudang, 'keys': ?keys}));
+    return [for (final g in (data['gudang_cabang'] as List?) ?? const []) '$g'];
   }
 
   static Future<void> createUser({

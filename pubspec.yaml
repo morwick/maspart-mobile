@@ -104,6 +104,8 @@ flutter:
 
   assets:
     - assets/logo.png
+    # Kop surat PT. Mas Automobil Sejahtera — invoice PDF (salinan frontend/public/kop/ web).
+    - assets/kop/
     # Gambar banner promo etalase (salinan frontend/public/promo/ web).
     - assets/promo/
     # Ilustrasi petak KATEGORI etalase (render PNG dari frontend/public/kategori/*.svg).

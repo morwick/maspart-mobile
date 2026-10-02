@@ -358,7 +358,18 @@ class _UserEdit {
   final String? password;
   final bool? isActive;
   final bool hapus;
-  const _UserEdit({this.role, this.password, this.isActive, this.hapus = false});
+  /// Buka lembar "Atur gudang" (gudang yang pesanannya diproses akun ini).
+  final bool aturGudang;
+  /// Tanda akun gudang diubah (null = tidak diubah).
+  final bool? akunGudang;
+  const _UserEdit({
+    this.role,
+    this.password,
+    this.isActive,
+    this.hapus = false,
+    this.aturGudang = false,
+    this.akunGudang,
+  });
 
   bool get adaPerubahan => role != null || password != null || isActive != null;
 }
@@ -370,8 +381,34 @@ class UsersScreen extends StatefulWidget {
   State<UsersScreen> createState() => _UsersScreenState();
 }
 
+/// Filter daftar user (paritas web). "gudang" = akun pemroses pesanan gudang.
+enum _Saring { semua, gudang, staf, pembeli, admin }
+
+const _saringLabel = {
+  _Saring.semua: 'Semua',
+  _Saring.gudang: 'Akun gudang',
+  _Saring.staf: 'Staf lain',
+  _Saring.pembeli: 'Pembeli',
+  _Saring.admin: 'Admin',
+};
+
+bool _cocok(AdminUser u, _Saring s) => switch (s) {
+      _Saring.gudang => u.akunGudang,
+      _Saring.staf => u.role == 'user' && !u.akunGudang,
+      _Saring.pembeli => u.role == 'pembeli',
+      _Saring.admin => u.role == 'admin',
+      _Saring.semua => true,
+    };
+
+// Akun SEE_ALL melihat semua gudang — tak bisa dijadikan akun satu gudang
+// (backend menolak). Paritas web admin/users.
+const _seeAll = {'mas'};
+bool _bisaJadiAkunGudang(AdminUser u) => u.role == 'user' && !_seeAll.contains(u.username);
+
 class _UsersScreenState extends State<UsersScreen> {
   List<AdminUser> _users = [];
+  List<GudangUtama> _gudangUtama = [];
+  _Saring _saring = _Saring.semua;
   bool _loading = true;
   bool _busy = false;
   String? _error;
@@ -389,10 +426,11 @@ class _UsersScreenState extends State<UsersScreen> {
       _error = null;
     });
     try {
-      final u = await ApiService.listUsers();
+      final d = await ApiService.listUsersLengkap();
       if (!mounted) return;
       setState(() {
-        _users = u;
+        _users = d.users;
+        _gudangUtama = d.gudangUtama;
         _loading = false;
       });
     } on ApiException catch (e) {
@@ -438,9 +476,15 @@ class _UsersScreenState extends State<UsersScreen> {
     final aku = AppNav.of(context).username;
     final edit = await showDialog<_UserEdit>(
       context: context,
-      builder: (ctx) => _UbahUserDialog(user: u, bolehHapus: u.username != aku),
+      builder: (ctx) => _UbahUserDialog(
+          user: u, bolehHapus: u.username != aku, bolehAkunGudang: _bisaJadiAkunGudang(u)),
     );
     if (edit == null || !mounted) return;
+
+    if (edit.aturGudang) {
+      await _aturGudang(u);
+      return;
+    }
 
     if (edit.hapus) {
       final ok = await _confirm(
@@ -459,6 +503,17 @@ class _UsersScreenState extends State<UsersScreen> {
       return;
     }
 
+    if (edit.akunGudang != null) {
+      final ya = edit.akunGudang!;
+      await _jalankan(
+        () async => ApiService.setGudangCabang(u.username, akunGudang: ya),
+        ya
+            ? "'${u.username}' ditandai sebagai akun gudang — kini bisa dipilih di Lokasi Gudang."
+            : "Tanda akun gudang '${u.username}' dicabut.",
+      );
+      if (!mounted) return;
+    }
+
     if (!edit.adaPerubahan) return;
     await _jalankan(
       () => ApiService.updateUser(
@@ -468,6 +523,98 @@ class _UsersScreenState extends State<UsersScreen> {
         isActive: edit.isActive,
       ),
       "Perubahan untuk '${u.username}' tersimpan.",
+    );
+  }
+
+  /// Tandai gudang yang Pesanan Masuk-nya diproses akun [u]. Gudang milik akun
+  /// lain BERPINDAH (dikonfirmasi); gudang yang sudah dipegang terkunci —
+  /// setiap gudang wajib punya akun pemroses, jadi melepas = tandai akun lain.
+  Future<void> _aturGudang(AdminUser u) async {
+    final m = context.mas;
+    final pilih = {for (final g in _gudangUtama) if (g.akun == u.username) g.key};
+    final keys = await showModalBottomSheet<List<String>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: m.paper,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(MasRadii.sheet))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('Akun gudang · ${u.username}',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: m.ink900)),
+                const SizedBox(height: 4),
+                Text(
+                  'Centang gudang yang Pesanan Masuk-nya diproses akun ini. Gudang milik '
+                  'akun lain akan dipindah ke akun ini. Untuk melepas gudang, tandai akun '
+                  'penggantinya — setiap gudang wajib punya akun pemroses.',
+                  style: TextStyle(fontSize: 12, color: m.ink500, height: 1.45),
+                ),
+                const SizedBox(height: 12),
+                if (_gudangUtama.isEmpty)
+                  Text('Belum ada gudang utama — atur di Lokasi Gudang.',
+                      style: TextStyle(fontSize: 12.5, color: m.ink400))
+                else
+                  Flexible(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(MasRadii.card),
+                        border: Border.all(color: m.ink150),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: SingleChildScrollView(
+                        child: Column(children: [
+                          for (final g in _gudangUtama)
+                            _CheckRow(
+                              value: pilih.contains(g.key),
+                              locked: g.akun == u.username,
+                              label: g.display,
+                              subtitle: g.akun == u.username
+                                  ? 'Dipegang akun ini'
+                                  : 'Sekarang: ${g.akun}',
+                              onChanged: (v) => setSheet(
+                                  () => v ? pilih.add(g.key) : pilih.remove(g.key)),
+                            ),
+                        ]),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                MasButton(
+                  label: 'Simpan',
+                  expand: true,
+                  height: 42,
+                  onTap: () => Navigator.pop(ctx, pilih.toList()),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (keys == null || !mounted) return;
+
+    final pindah = [
+      for (final g in _gudangUtama)
+        if (keys.contains(g.key) && g.akun != u.username) g,
+    ];
+    if (pindah.isEmpty) return; // tak ada perubahan
+    final ok = await _confirm(
+      context,
+      judul: 'Pindahkan gudang?',
+      pesan: '${pindah.map((g) => '• ${g.display}: dari ${g.akun} → ${u.username}').join('\n')}'
+          '\n\nPesanan masuk gudang tersebut akan diproses akun ini.',
+      tombol: 'Pindahkan',
+    );
+    if (!ok || !mounted) return;
+    await _jalankan(
+      () async => ApiService.setGudangCabang(u.username, akunGudang: true, keys: keys),
+      "'${u.username}' kini akun gudang ${pindah.map((g) => g.display).join(', ')}.",
     );
   }
 
@@ -535,9 +682,32 @@ class _UsersScreenState extends State<UsersScreen> {
               subtitle: 'Tambahkan akun pertama lewat tombol Tambah.',
             )
           else ...[
-            Text('${_users.length} akun',
-                style: TextStyle(fontSize: 12.5, color: m.ink500)),
-            const SizedBox(height: 8),
+            // Saring — "Akun gudang" = pemroses Pesanan Masuk sebuah gudang.
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                for (final s in _Saring.values)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ChoiceChip(
+                      label: Text(
+                          '${_saringLabel[s]} ${_users.where((u) => _cocok(u, s)).length}'),
+                      selected: _saring == s,
+                      showCheckmark: false,
+                      onSelected: (_) => setState(() => _saring = s),
+                      labelStyle: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: _saring == s ? Colors.white : m.ink700),
+                      selectedColor: m.brand600,
+                      backgroundColor: m.paper,
+                      side: BorderSide(color: _saring == s ? m.brand600 : m.ink200),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+              ]),
+            ),
+            const SizedBox(height: 10),
             Container(
               decoration: BoxDecoration(
                 color: m.paper,
@@ -547,11 +717,13 @@ class _UsersScreenState extends State<UsersScreen> {
               ),
               clipBehavior: Clip.antiAlias,
               child: Column(
-                children: [for (final u in _users) _baris(m, u, aku)],
+                children: [
+                  for (final u in _users.where((u) => _cocok(u, _saring))) _baris(m, u, aku),
+                ],
               ),
             ),
             const SizedBox(height: 8),
-            Text('Ketuk baris untuk ubah peran, reset password, aktif/nonaktif, atau hapus.',
+            Text('Ketuk baris untuk ubah peran, reset password, aktif/nonaktif, akun gudang, atau hapus.',
                 style: TextStyle(fontSize: 11.5, color: m.ink400)),
           ],
         ],
@@ -590,6 +762,10 @@ class _UsersScreenState extends State<UsersScreen> {
                   const SizedBox(height: 4),
                   Wrap(spacing: 6, runSpacing: 4, children: [
                     MasPill(label: u.role, tone: _roleTone(u.role)),
+                    if (u.akunGudang && !u.pegangGudang)
+                      const MasPill(label: 'Akun gudang', tone: MasPillTone.info),
+                    for (final g in u.gudangCabang)
+                      MasPill(label: 'Gudang $g', tone: MasPillTone.info),
                     MasPill(
                       label: u.isActive ? 'aktif' : 'nonaktif',
                       tone: u.isActive
@@ -714,7 +890,9 @@ class _TambahUserDialogState extends State<_TambahUserDialog> {
 class _UbahUserDialog extends StatefulWidget {
   final AdminUser user;
   final bool bolehHapus;
-  const _UbahUserDialog({required this.user, required this.bolehHapus});
+  final bool bolehAkunGudang;
+  const _UbahUserDialog(
+      {required this.user, required this.bolehHapus, this.bolehAkunGudang = false});
 
   @override
   State<_UbahUserDialog> createState() => _UbahUserDialogState();
@@ -724,6 +902,7 @@ class _UbahUserDialogState extends State<_UbahUserDialog> {
   final _pw = TextEditingController();
   late String _role = widget.user.role;
   late bool _aktif = widget.user.isActive;
+  late bool _akunGudang = widget.user.akunGudang;
 
   @override
   void dispose() {
@@ -777,6 +956,39 @@ class _UbahUserDialogState extends State<_UbahUserDialog> {
               onChanged: (v) => setState(() => _aktif = v),
             ),
           ),
+          if (widget.bolehAkunGudang) ...[
+            const SizedBox(height: 14),
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(MasRadii.card),
+                border: Border.all(color: m.ink150),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: _CheckRow(
+                value: _akunGudang,
+                locked: u.pegangGudang,
+                label: 'Akun gudang',
+                subtitle: u.pegangGudang
+                    ? 'Memegang ${u.gudangCabang.join(', ')} — pindahkan gudangnya dulu untuk mencabut.'
+                    : 'Bisa dipilih sebagai Akun Cabang di Lokasi Gudang.',
+                onChanged: (v) => setState(() => _akunGudang = v),
+              ),
+            ),
+            if (u.akunGudang) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: MasButton(
+                  label: 'Atur gudang…',
+                  icon: Icons.warehouse_outlined,
+                  primary: false,
+                  height: 38,
+                  expand: true,
+                  onTap: () => Navigator.pop(context, const _UserEdit(aturGudang: true)),
+                ),
+              ),
+            ],
+          ],
           if (widget.bolehHapus) ...[
             const SizedBox(height: 14),
             SizedBox(
@@ -811,6 +1023,7 @@ class _UbahUserDialogState extends State<_UbahUserDialog> {
               role: _role == u.role ? null : _role,
               password: pw.isEmpty ? null : pw,
               isActive: _aktif == u.isActive ? null : _aktif,
+              akunGudang: _akunGudang == u.akunGudang ? null : _akunGudang,
             ),
           ),
           child: Text('Simpan',
@@ -2361,13 +2574,14 @@ class _GudangScreenState extends State<GudangScreen> {
       final g = await ApiService.adminGudang();
       List<AdminUser>? akun;
       try {
-        // Key/Akun = username staf cabang aktif (role 'user'); admin & pembeli
-        // tak memproses pesanan cabang, 'mas' melihat semua gudang.
+        // Akun cabang = HANYA akun bertanda "akun gudang" di Manajemen User
+        // (server juga menolak akun lain). Server lama tanpa tanda → perilaku
+        // lama: staf aktif role 'user' selain 'mas' (melihat semua gudang).
         akun = (await ApiService.listUsers())
             .where((u) =>
-                u.role == 'user' &&
                 u.isActive &&
-                u.username.toLowerCase() != 'mas')
+                (u.akunGudangFlag ??
+                    (u.role == 'user' && u.username.toLowerCase() != 'mas')))
             .toList()
           ..sort((a, b) => a.username.compareTo(b.username));
       } on ApiException {
@@ -2725,6 +2939,13 @@ class _GudangScreenState extends State<GudangScreen> {
           dropdownColor: m.paper,
           items: [
             const DropdownMenuItem(value: '', child: Text('— pilih akun —')),
+            if (akun.isEmpty)
+              const DropdownMenuItem(
+                value: '__kosong__',
+                enabled: false,
+                child: Text('Belum ada akun gudang — tandai di Manajemen User',
+                    overflow: TextOverflow.ellipsis),
+              ),
             if (r.akun.isNotEmpty && !ada)
               DropdownMenuItem(
                 value: r.akun,
