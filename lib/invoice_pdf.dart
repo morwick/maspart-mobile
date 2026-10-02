@@ -32,8 +32,41 @@ const _paid = {'diproses', 'dikirim', 'selesai'};
 
 bool invoiceTersedia(OrderDetail o) => _paid.contains(o.status);
 
+/// Invoice bercap LUNAS? TEMPO (migrasi 048): dari status bayar tagihannya —
+/// pesanan tempo sudah berinvoice saat diproses, tetapi bisa BELUM LUNAS.
+bool invoiceLunas(OrderDetail o) => o.isTempo ? sudahLunas(o) : _paid.contains(o.status);
+
+/// Teks cap invoice (paritas web `capInvoice`).
+String capInvoice(OrderDetail o) => invoiceLunas(o) ? 'LUNAS' : 'BELUM LUNAS';
+
+const _bulanTgl = [
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+];
+
+/// Kolom ke-2 kotak info: "Tanggal Bayar", atau "Jatuh Tempo" untuk tempo
+/// belum lunas (paritas web `infoBayar`).
+(String, String) infoBayar(OrderDetail o) {
+  if (o.isTempo && !invoiceLunas(o)) {
+    final jt = DateTime.tryParse(o.tempo?.jatuhTempo ?? '');
+    final termin = o.tempo?.terminHari ?? 30;
+    return (
+      'Jatuh Tempo',
+      jt != null
+          ? '${jt.day} ${_bulanTgl[jt.month - 1]} ${jt.year}'
+          : '$termin hari setelah barang dikirim',
+    );
+  }
+  return ('Tanggal Bayar', tanggalInvoice(o.paidAt));
+}
+
 /// Label metode pembayaran (persis web `labelBayar`).
 String _payLabel(OrderDetail o) {
+  if (o.isTempo) {
+    final termin = o.tempo?.terminHari ?? 30;
+    final ch = (o.paymentChannel ?? '').toLowerCase();
+    return 'Tempo $termin hari${invoiceLunas(o) && ch.isNotEmpty ? ' · ${labelKanalBayar(ch)}' : ''}';
+  }
   if (o.paymentMethod == 'manual') return 'Transfer Manual';
   final ch = (o.paymentChannel ?? '').toLowerCase();
   if (ch.isEmpty) return '-';
@@ -224,6 +257,7 @@ Future<List<int>> buildInvoicePdf(OrderDetail o) async {
   ]);
 
   // ── Judul + cap LUNAS ──────────────────────────────────────────────────
+  final capWarna = invoiceLunas(o) ? brand : PdfColor.fromInt(0xFFB91C1C);
   final judul = pw.Row(
     crossAxisAlignment: pw.CrossAxisAlignment.start,
     mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -236,21 +270,22 @@ Future<List<int>> buildInvoicePdf(OrderDetail o) async {
       // Cap LUNAS: bingkai ganda gaya stempel. Radius kecil — ⛔ JANGAN
       // circular(999): paket `pdf` tak membatasi radius ke setengah tinggi
       // kotak → busur raksasa menutupi kepala invoice.
+      // Pesanan TEMPO belum dibayar: cap BELUM LUNAS merah (paritas web).
       pw.Container(
         padding: const pw.EdgeInsets.all(2.5),
         decoration: pw.BoxDecoration(
-          border: pw.Border.all(color: brand, width: 1.7),
+          border: pw.Border.all(color: capWarna, width: 1.7),
           borderRadius: pw.BorderRadius.circular(4),
         ),
         child: pw.Container(
-          width: 74,
+          width: invoiceLunas(o) ? 74 : 104,
           padding: const pw.EdgeInsets.symmetric(vertical: 4),
           alignment: pw.Alignment.center,
           decoration: pw.BoxDecoration(
-            border: pw.Border.all(color: brand, width: 0.6),
+            border: pw.Border.all(color: capWarna, width: 0.6),
             borderRadius: pw.BorderRadius.circular(3),
           ),
-          child: pw.Text('LUNAS', style: gaya(12, bold: true, color: brand)),
+          child: pw.Text(capInvoice(o), style: gaya(12, bold: true, color: capWarna)),
         ),
       ),
     ],
@@ -269,7 +304,7 @@ Future<List<int>> buildInvoicePdf(OrderDetail o) async {
     decoration: pw.BoxDecoration(color: brand50, borderRadius: pw.BorderRadius.circular(4)),
     child: pw.Row(children: [
       info('Tanggal Pesanan', tanggalInvoice(o.createdAt)),
-      info('Tanggal Bayar', tanggalInvoice(o.paidAt)),
+      info(infoBayar(o).$1, infoBayar(o).$2),
       info('Metode Pembayaran', _payLabel(o)),
     ]),
   );

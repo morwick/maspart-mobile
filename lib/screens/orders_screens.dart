@@ -499,6 +499,8 @@ class _BermasalahScreenState extends State<BermasalahScreen> {
         'Pesanan lunas belum tercatat di Accurate — buat manual, lalu tandai beres di halaman pesanan.'),
     'accurate_batal': ('Pesanan batal, penawaran Accurate masih ada',
         'Hapus/batalkan penawaran (dan dokumen turunannya bila sudah diproses) di Accurate, lalu tandai beres.'),
+    'piutang_lewat': ('Tagihan tempo lewat > 30 hari',
+        'Pelanggan tempo belum membayar lebih dari 30 hari setelah jatuh tempo — tagih, atau tandai lunas bila sudah dibayar.'),
     'retur_accurate': ('Retur: dokumen Accurate belum dibuat',
         'Retur Penjualan / Pengiriman pengganti belum dibuat di Accurate — stok & omzet belum dikoreksi.'),
   };
@@ -1240,7 +1242,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           bukti: bukti, buktiNama: buktiNama.isEmpty ? null : buktiNama);
       if (!mounted) return;
       setState(() => _busy = false);
-      nav.toast(pesan ?? 'Pesanan dilunasi manual — gudang sudah dikabari.');
+      nav.toast(pesan ??
+          ((_order?.isTempo ?? false)
+              ? 'Tagihan tempo ditandai lunas — limit pelanggan dipulihkan.'
+              : 'Pesanan dilunasi manual — gudang sudah dikabari.'));
       await _load();
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -1974,8 +1979,31 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               ? ((o.paymentChannel ?? '').toLowerCase() == 'snap'
                   ? 'Gateway (Midtrans)'
                   : 'Gateway (RajaOngkir)')
-              : (o.paymentMethod.isNotEmpty ? o.paymentMethod : 'Manual'),
+              : o.isTempo
+                  ? 'Tempo ${o.tempo?.terminHari ?? 30} hari'
+                  : (o.paymentMethod.isNotEmpty ? o.paymentMethod : 'Manual'),
         ),
+        // TEMPO (migrasi 048): status tagihan terpisah dari status kirim.
+        if (o.isTempo && o.tempo != null) ...[
+          MasKeyValue(
+            label: 'Tagihan tempo',
+            value: o.tempo!.lunas
+                ? 'Lunas'
+                : o.status == 'batal'
+                    ? 'Gugur (pesanan batal)'
+                    : 'Sisa ${formatRupiah(o.tempo!.sisaTagihan)}',
+            valueColor: o.tempo!.lunas ? m.brand700 : (o.tempo!.tahap == 'lewat' ? m.danger600 : null),
+          ),
+          if (!o.tempo!.lunas && o.status != 'batal')
+            MasKeyValue(
+              label: 'Jatuh tempo',
+              value: o.tempo!.jatuhTempo != null
+                  ? '${tglJatuhTempo(o.tempo!.jatuhTempo)}${o.tempo!.tahap == 'lewat' ? ' (lewat ${o.tempo!.hariLewat} hari)' : ''}'
+                  : 'dihitung saat dikirim',
+            ),
+          if (o.tempo!.potonganRetur > 0)
+            MasKeyValue(label: 'Dipotong retur', value: formatRupiah(o.tempo!.potonganRetur)),
+        ],
         if (o.paymentChannel != null && o.paymentChannel!.isNotEmpty)
           MasKeyValue(label: 'Kanal', value: labelKanalBayar(o.paymentChannel)),
         if (o.paymentRef != null && o.paymentRef!.isNotEmpty)
@@ -2124,6 +2152,25 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 // Pesanan BELUM DIBAYAR tak boleh didorong maju dari sini (audit
                 // 2026-09-28 T-4): "Diproses" dulu = lunas tanpa uang. Pelunasan
                 // di luar gateway lewat "Lunasi manual" (bukti + ketik kode).
+                // TEMPO: barang sudah diproses, tagihannya belum lunas → tandai
+                // lunas lewat alur yang sama (alasan + bukti, gateway dicek dulu).
+                if (o.isTempo &&
+                    o.tempo != null &&
+                    !o.tempo!.lunas &&
+                    !['batal', 'menunggu_pembayaran'].contains(o.status)) ...[
+                  Text('Tagihan tempo belum lunas (sisa ${formatRupiah(o.tempo!.sisaTagihan)}).',
+                      style: TextStyle(fontSize: 12.5, color: m.ink500)),
+                  const SizedBox(height: 7),
+                  MasButton(
+                    label: 'Tandai tagihan tempo lunas…',
+                    primary: false,
+                    expand: true,
+                    height: 40,
+                    loading: _busy,
+                    onTap: _busy ? null : _lunasiManual,
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 if (o.status == 'menunggu_pembayaran') ...[
                   Text('Pesanan belum dibayar.',
                       style: TextStyle(fontSize: 12.5, color: m.ink500)),
@@ -2522,5 +2569,151 @@ class _BuktiTransfer extends StatelessWidget {
                 fontSize: 12, fontWeight: FontWeight.w600, color: m.brand700)),
       ),
     ]);
+  }
+}
+
+// ── Piutang Tempo (admin, migrasi 048) — paritas web /admin/piutang ──────────
+// Umur piutang pesanan TEMPO yang belum dibayar + per pelanggan. "Tandai lunas"
+// ada di detail pesanan (alur Lunasi manual: alasan + bukti, gateway dicek dulu).
+class PiutangScreen extends StatefulWidget {
+  const PiutangScreen({super.key});
+
+  @override
+  State<PiutangScreen> createState() => _PiutangScreenState();
+}
+
+class _PiutangScreenState extends State<PiutangScreen> {
+  PiutangData? _data;
+  bool _loading = true;
+  String? _error;
+  String _filter = '';
+
+  static const _kelompok = <(String, String)>[
+    ('belum_kirim', 'Belum dikirim'),
+    ('belum_jatuh_tempo', 'Belum jatuh tempo'),
+    ('lewat_1_30', 'Lewat 1–30 hari'),
+    ('lewat_31_60', 'Lewat 31–60 hari'),
+    ('lewat_60_plus', 'Lewat > 60 hari'),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final d = await ApiService.adminPiutang();
+      if (!mounted) return;
+      setState(() {
+        _data = d;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final m = context.mas;
+    final nav = AppNav.of(context);
+    if (_loading && _data == null) return const Center(child: CircularProgressIndicator());
+    final d = _data;
+    if (d == null) return MasErrorState(message: _error ?? 'Piutang gagal dimuat.', onRetry: _load);
+    final pelanggan = [
+      for (final p in d.perPelanggan)
+        (p, _filter.isEmpty ? p.orders : p.orders.where((o) => o.kelompok == _filter).toList()),
+    ].where((e) => _filter.isEmpty || e.$2.isNotEmpty).toList();
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+        children: [
+          MasCard(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Total piutang', style: TextStyle(fontSize: 11.5, color: m.ink500)),
+              Text(formatRupiah(d.ringkasan['total'] ?? 0),
+                  style: masMono(size: 18, weight: FontWeight.w700, color: m.ink900)),
+              Text('${d.jumlah['total'] ?? 0} pesanan',
+                  style: TextStyle(fontSize: 11.5, color: m.ink500)),
+            ]),
+          ),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final (k, label) in _kelompok)
+              FilterChip(
+                label: Text('$label · ${formatRupiah(d.ringkasan[k] ?? 0)}',
+                    style: const TextStyle(fontSize: 12)),
+                selected: _filter == k,
+                onSelected: (_) => setState(() => _filter = _filter == k ? '' : k),
+              ),
+          ]),
+          const SizedBox(height: 12),
+          if (pelanggan.isEmpty)
+            const MasEmpty(
+              icon: Icons.account_balance_wallet_outlined,
+              title: 'Tidak ada piutang',
+              subtitle: 'Pengaturan tempo per pelanggan ada di Manajemen User (ikon dompet).',
+            ),
+          for (final (p, orders) in pelanggan)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: MasSectionCard(
+                title: p.customerName.isNotEmpty ? p.customerName : p.username,
+                trailing: p.tempo.beku
+                    ? MasPill(
+                        label: p.tempo.bekuManual ? 'Dibekukan' : 'Beku · ${p.tempo.lewat} lewat',
+                        tone: MasPillTone.danger,
+                        height: 20)
+                    : null,
+                children: [
+                  MasKeyValue(
+                    label: '@${p.username}',
+                    value: 'terpakai ${formatRupiah(p.tempo.terpakai)}'
+                        '${p.tempo.aktif ? ' / ${formatRupiah(p.tempo.limit)}' : ''}',
+                  ),
+                  for (final o in orders)
+                    InkWell(
+                      onTap: () => nav.go(MasScreen.orderDetail, part: {'order_code': o.orderCode}),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        child: Row(children: [
+                          Expanded(
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text(o.orderCode,
+                                  style: masMono(size: 13, weight: FontWeight.w600, color: m.ink900)),
+                              Text(
+                                  '${orderStatusLabel(o.status)} · '
+                                  '${o.jatuhTempo != null ? 'JT ${tglJatuhTempo(o.jatuhTempo)}' : 'belum dikirim'}'
+                                  '${o.hariLewat > 0 ? ' · lewat ${o.hariLewat} hari' : ''}',
+                                  style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: o.hariLewat > 0 ? m.danger600 : m.ink500)),
+                            ]),
+                          ),
+                          Text(formatRupiah(o.sisa),
+                              style: masMono(size: 13, weight: FontWeight.w700, color: m.ink900)),
+                          const SizedBox(width: 4),
+                          Icon(Icons.chevron_right_rounded, size: 18, color: m.ink400),
+                        ]),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }

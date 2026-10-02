@@ -19,7 +19,10 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # 2.3.0+19: total checkout ber-PPN eksklusif + header X-App-Version. APK live
 # 2.2.5+18 menghitung total tanpa PPN — server membedakannya lewat versi ini
 # (paksa-update 426), jadi JANGAN turunkan (audit 2026-09-28 KL-3).
-version: 2.3.0+19
+# 2.4.0+20: pembayaran TEMPO (migrasi 048). APK lama menampilkan pesanan tempo
+# yang belum dibayar sebagai "lunas" — set versi minimum sebelum mengaktifkan
+# tempo untuk pelanggan yang memakai aplikasi.
+version: 2.4.0+20
 
 environment:
   sdk: ^3.12.0

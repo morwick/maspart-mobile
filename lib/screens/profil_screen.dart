@@ -12,6 +12,7 @@ import 'package:image_picker/image_picker.dart';
 import '../api_service.dart';
 import '../app/nav.dart';
 import '../theme/mas_theme.dart';
+import '../utils.dart';
 import '../widgets/alamat_form.dart';
 import '../widgets/mas_ui.dart';
 
@@ -750,6 +751,15 @@ class _ProfilScreenState extends State<ProfilScreen> {
     return MasCard(
       padding: EdgeInsets.zero,
       child: Column(children: [
+        // Pembayaran TEMPO (migrasi 048) — hanya pelanggan tempo (paritas web).
+        if (_profil?.tempo != null) ...[
+          baris(Icons.account_balance_wallet_outlined, 'Tagihan Tempo',
+              () => nav.go(MasScreen.tagihanTempo),
+              ket: _profil!.tempo!.lewat > 0
+                  ? '${_profil!.tempo!.lewat} lewat jatuh tempo'
+                  : 'sisa limit ${formatRupiah(_profil!.tempo!.sisa)}'),
+          Divider(height: 1, color: m.ink150),
+        ],
         // Beli Lagi (pola Tokopedia) — riwayat barang yang pernah dibeli.
         if (nav.isBuyer) ...[
           baris(Icons.replay_rounded, 'Beli Lagi',

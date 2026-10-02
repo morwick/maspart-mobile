@@ -408,6 +408,10 @@ bool _bisaJadiAkunGudang(AdminUser u) => u.role == 'user' && !_seeAll.contains(u
 class _UsersScreenState extends State<UsersScreen> {
   List<AdminUser> _users = [];
   List<GudangUtama> _gudangUtama = [];
+
+  /// Pengaturan TEMPO per akun pembeli (migrasi 048). null = belum ada / gagal
+  /// dimuat (tombol Tempo disembunyikan).
+  Map<String, TempoAdmin>? _tempo;
   _Saring _saring = _Saring.semua;
   bool _loading = true;
   bool _busy = false;
@@ -433,12 +437,121 @@ class _UsersScreenState extends State<UsersScreen> {
         _gudangUtama = d.gudangUtama;
         _loading = false;
       });
+      try {
+        final t = await ApiService.adminTempo();
+        if (mounted) setState(() => _tempo = {for (final a in t) a.username: a});
+      } on ApiException {
+        if (mounted) setState(() => _tempo = null);   // pra-migrasi 048 → tanpa tempo
+      }
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
         _error = e.message;
         _loading = false;
       });
+    }
+  }
+
+  /// Atur pembayaran TEMPO satu akun pembeli (paritas web /admin/pelanggan).
+  /// Hanya akun yang sudah ditautkan ke pelanggan Accurate (lewat web).
+  Future<void> _aturTempo(AdminUser u) async {
+    final t = _tempo?[u.username]?.tempo ?? const TempoAkun();
+    var aktif = t.aktif;
+    var beku = t.bekuManual;
+    final terminCtl = TextEditingController(text: '${t.terminHari}');
+    final limitCtl = TextEditingController(text: t.limit > 0 ? '${t.limit}' : '');
+    final alasanCtl = TextEditingController(text: t.bekuAlasan);
+    final simpan = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
+        final m = ctx.mas;
+        return Padding(
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(ctx).viewInsets.bottom),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Pembayaran tempo — ${u.username}',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: m.ink900)),
+            const SizedBox(height: 4),
+            Text(
+              'Pelanggan bisa checkout tanpa bayar dulu; tagihan jatuh tempo N hari setelah barang '
+              'dikirim. Lewat jatuh tempo → beku otomatis sampai dilunasi.',
+              style: TextStyle(fontSize: 12, color: m.ink500, height: 1.4),
+            ),
+            if (!t.tertaut) ...[
+              const SizedBox(height: 8),
+              Text('Akun belum ditautkan ke pelanggan Accurate — tautkan lewat web (Pelanggan Accurate) '
+                  'sebelum mengaktifkan tempo.',
+                  style: TextStyle(fontSize: 12, color: m.danger600, height: 1.4)),
+            ],
+            if (t.jumlahTagihan > 0) ...[
+              const SizedBox(height: 8),
+              Text('Terpakai ${formatRupiah(t.terpakai)} dari ${t.jumlahTagihan} tagihan terbuka.',
+                  style: TextStyle(fontSize: 12, color: m.ink600)),
+            ],
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Tempo aktif'),
+              value: aktif,
+              onChanged: (!t.tertaut && !aktif) ? null : (v) => setLocal(() => aktif = v),
+            ),
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: terminCtl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Termin (hari)'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: TextField(
+                  controller: limitCtl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Limit kredit (Rp)'),
+                ),
+              ),
+            ]),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Bekukan manual'),
+              value: beku,
+              onChanged: (v) => setLocal(() => beku = v),
+            ),
+            if (beku)
+              TextField(
+                controller: alasanCtl,
+                maxLength: 300,
+                decoration: const InputDecoration(labelText: 'Alasan pembekuan (wajib)'),
+              ),
+            const SizedBox(height: 12),
+            MasButton(label: 'Simpan', expand: true, onTap: () => Navigator.pop(ctx, true)),
+          ]),
+        );
+      }),
+    );
+    if (simpan != true || !mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _info = null;
+    });
+    try {
+      await ApiService.adminSetTempo(
+        u.username,
+        aktif: aktif,
+        terminHari: int.tryParse(terminCtl.text.trim()) ?? 30,
+        limit: int.tryParse(limitCtl.text.replaceAll(RegExp(r'\D'), '')) ?? 0,
+        beku: beku,
+        bekuAlasan: alasanCtl.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() => _info = "Pengaturan tempo '${u.username}' disimpan.");
+      await _muat();
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -773,6 +886,12 @@ class _UsersScreenState extends State<UsersScreen> {
                           : MasPillTone.neutral,
                       dot: true,
                     ),
+                    if (_tempo?[u.username]?.tempo.aktif ?? false)
+                      MasPill(
+                        label: 'Tempo ${_tempo![u.username]!.tempo.terminHari} hr · '
+                            'sisa ${formatRupiah(_tempo![u.username]!.tempo.sisa)}',
+                        tone: _tempo![u.username]!.tempo.beku ? MasPillTone.danger : MasPillTone.warn,
+                      ),
                   ]),
                   if (u.createdAt != null) ...[
                     const SizedBox(height: 4),
@@ -783,6 +902,12 @@ class _UsersScreenState extends State<UsersScreen> {
               ),
             ),
             const SizedBox(width: 8),
+            if (u.role == 'pembeli' && _tempo != null)
+              IconButton(
+                tooltip: 'Pembayaran tempo',
+                icon: Icon(Icons.account_balance_wallet_outlined, size: 20, color: m.ink500),
+                onPressed: _busy ? null : () => _aturTempo(u),
+              ),
             Icon(Icons.chevron_right_rounded, size: 18, color: m.ink400),
           ]),
         ),

@@ -1289,6 +1289,22 @@ class ApiService {
     return _Api._obj(data);
   }
 
+  // ── Pembayaran TEMPO (TOP + limit kredit, migrasi 048) — paritas web ──
+
+  /// Halaman "Tagihan Tempo": limit, terpakai, tagihan terbuka & riwayat lunas.
+  static Future<TempoSaya> tempoSaya() async =>
+      TempoSaya.fromJson(_Api._obj(await _Api.get('/api/tempo/saya')));
+
+  /// Buat/ganti tagihan VA/QRIS untuk SISA tagihan tempo satu pesanan (padanan
+  /// web `bayarTempo`). Balasan `{ok, order}` atau `{ok, sudah_dibayar: true}`.
+  static Future<Map<String, dynamic>> bayarTempo(String code, String channel) async {
+    final data = await _Api.post(
+      '/api/orders/${Uri.encodeComponent(code)}/tempo/bayar',
+      body: {'payment_channel': channel},
+    );
+    return _Api._obj(data);
+  }
+
   /// Buat pesanan. INGAT: satu pesanan = satu gudang. Keranjang yang barangnya
   /// tersebar di beberapa gudang harus dipesan bergantian per gudang.
   ///
@@ -2209,6 +2225,37 @@ class ApiService {
 
   static Future<SalesRecap> salesRecap() async =>
       SalesRecap.fromJson(_Api._obj(await _Api.get('/api/admin/sales')));
+
+  /// Pengaturan & pemakaian TEMPO semua akun pembeli (padanan web `adminGetTempo`).
+  static Future<List<TempoAdmin>> adminTempo() async {
+    final data = _Api._obj(await _Api.get('/api/admin/tempo'));
+    return (data['akun'] as List?)
+            ?.whereType<Map>()
+            .map((e) => TempoAdmin.fromJson(e.cast<String, dynamic>()))
+            .toList() ??
+        const [];
+  }
+
+  /// Simpan pengaturan tempo satu akun (padanan web `adminSetTempo`).
+  static Future<void> adminSetTempo(
+    String username, {
+    required bool aktif,
+    required int terminHari,
+    required int limit,
+    required bool beku,
+    String? bekuAlasan,
+  }) =>
+      _Api.put('/api/admin/tempo/${Uri.encodeComponent(username)}', body: {
+        'aktif': aktif,
+        'termin_hari': terminHari,
+        'limit': limit,
+        'beku': beku,
+        'beku_alasan': beku ? bekuAlasan : null,
+      });
+
+  /// Piutang tempo: umur piutang + per pelanggan (padanan web `adminGetPiutang`).
+  static Future<PiutangData> adminPiutang() async =>
+      PiutangData.fromJson(_Api._obj(await _Api.get('/api/admin/piutang')));
 
   // ────────────────────────────────────────────────────────────────────
   // Admin: user & izin

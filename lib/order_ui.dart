@@ -104,18 +104,63 @@ MasPillTone orderStatusTone(String status) =>
 const List<String> kOrderFlow = ['diproses', 'dikirim', 'selesai'];
 
 /// Tahapan progres pesanan untuk stepper. `done` = milestone sudah tercapai.
+/// Pesanan TEMPO (`tempoLunas` != null, migrasi 048): Pesanan Tempo → Dikirim →
+/// Selesai → Lunas — barang bisa selesai sebelum tagihannya dibayar (paritas web).
 List<({String label, bool done})> orderProgress(String status,
-    {bool pickup = false}) {
-  final paid = ['diproses', 'dikirim', 'selesai'].contains(status);
+    {bool pickup = false, bool? tempoLunas}) {
+  final jalan = ['diproses', 'dikirim', 'selesai'].contains(status);
+  final kirim = (
+    label: pickup ? 'Siap Diambil' : 'Dikirim',
+    done: ['dikirim', 'selesai'].contains(status)
+  );
+  if (tempoLunas != null) {
+    return [
+      (label: 'Pesanan Tempo', done: jalan),
+      kirim,
+      (label: 'Selesai', done: status == 'selesai'),
+      (label: 'Lunas', done: tempoLunas),
+    ];
+  }
   return [
-    (label: 'Dibayar', done: paid),
-    (label: 'Diproses', done: paid),
-    (
-      label: pickup ? 'Siap Diambil' : 'Dikirim',
-      done: ['dikirim', 'selesai'].contains(status)
-    ),
+    (label: 'Dibayar', done: jalan),
+    (label: 'Diproses', done: jalan),
+    kirim,
     (label: 'Selesai', done: status == 'selesai'),
   ];
+}
+
+/// Uang pesanan sudah masuk? TEMPO: dari `lunas` server (bisa sudah dikirim tapi
+/// belum dibayar). Lainnya: status diproses/dikirim/selesai seperti biasa.
+bool sudahLunas(OrderSummary o) {
+  if (o.isTempo) return o.status != 'batal' && (o.lunasTempo ?? o.tempo?.lunas ?? false);
+  return ['diproses', 'dikirim', 'selesai'].contains(o.status);
+}
+
+/// "12 Nov 2026" dari tanggal YYYY-MM-DD (jatuh tempo, tanpa jam).
+String tglJatuhTempo(String? iso) {
+  final d = DateTime.tryParse((iso ?? '').length >= 10 ? iso!.substring(0, 10) : '');
+  if (d == null) return '—';
+  const bulan = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  return '${d.day} ${bulan[d.month - 1]} ${d.year}';
+}
+
+/// Lencana singkat tagihan tempo untuk kartu/daftar pesanan (paritas web
+/// `lencanaTempo`). Null = bukan pesanan tempo / tak perlu lencana.
+(String, MasPillTone)? lencanaTempo(TempoOrderInfo? t) {
+  if (t == null) return null;
+  switch (t.tahap) {
+    case 'lunas':
+      return ('Tempo · Lunas', MasPillTone.brand);
+    case 'belum_kirim':
+      return ('Tempo · belum berjalan', MasPillTone.info);
+    case 'lewat':
+      return ('Tempo · lewat ${t.hariLewat} hari', MasPillTone.danger);
+    case 'jatuh_tempo_hari_ini':
+      return ('Tempo · jatuh tempo hari ini', MasPillTone.warn);
+    case 'berjalan':
+      return ('Tempo · JT ${tglJatuhTempo(t.jatuhTempo)}', MasPillTone.warn);
+  }
+  return null;
 }
 
 /// Format timestamp backend ke waktu lokal yang enak dibaca.
@@ -141,12 +186,16 @@ class OrderStepper extends StatelessWidget {
 
   /// Pesanan diambil sendiri → langkah ketiga berbunyi "Siap Diambil".
   final bool pickup;
-  const OrderStepper({super.key, required this.status, this.pickup = false});
+
+  /// Pesanan TEMPO: status lunas tagihannya (null = bukan tempo).
+  final bool? tempoLunas;
+  const OrderStepper(
+      {super.key, required this.status, this.pickup = false, this.tempoLunas});
 
   @override
   Widget build(BuildContext context) {
     final m = context.mas;
-    final steps = orderProgress(status, pickup: pickup);
+    final steps = orderProgress(status, pickup: pickup, tempoLunas: tempoLunas);
     final batal = status == 'batal';
 
     return Row(

@@ -171,13 +171,30 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
       'sudah membayar, pembayaran tetap tercatat dan pesanan diproses begitu '
       'tersambung lagi.';
 
+  /// Pesanan TEMPO (migrasi 048) yang barangnya sudah diproses tetapi
+  /// tagihannya belum lunas.
+  bool _tempoTerbuka(OrderDetail o) =>
+      o.isTempo &&
+      o.tempo != null &&
+      !o.tempo!.lunas &&
+      o.tempo!.sisaTagihan > 0 &&
+      ['diproses', 'dikirim', 'selesai'].contains(o.status);
+
+  /// Ada tagihan VA/QRIS yang sedang ditunggu: pesanan gateway belum dibayar,
+  /// atau tagihan tempo yang sudah dibuat.
+  bool _tagihanTampil(OrderDetail o) =>
+      (o.paymentMethod == 'gateway' && o.status == 'menunggu_pembayaran') ||
+      (_tempoTerbuka(o) && (o.paymentRef ?? '').isNotEmpty);
+
+  /// Nominal tagihan online: sisa tagihan tempo, atau total pesanan.
+  num _nominalBayar(OrderDetail o) =>
+      _tempoTerbuka(o) ? o.tempo!.sisaTagihan : o.total;
+
   /// Auto-poll selama pembayaran gateway masih menunggu — status berubah
   /// sendiri begitu callback gateway masuk, tanpa pembeli menekan apa pun.
   void _syncPolling() {
     final o = _order;
-    final perlu = o != null &&
-        o.paymentMethod == 'gateway' &&
-        o.status == 'menunggu_pembayaran';
+    final perlu = o != null && _tagihanTampil(o);
     if (perlu && _poll == null) {
       _poll = Timer.periodic(const Duration(seconds: 8), (_) => _checkPayment());
     } else if (!perlu) {
@@ -437,6 +454,8 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
       nav.toast('Metode pembayaran tidak bisa diganti saat ini.');
       return;
     }
+    final tempo = o.isTempo;
+    final nominal = _nominalBayar(o);
     final pilih = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -458,15 +477,21 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(_tagihanHabis ? 'Buat Tagihan Baru' : 'Ganti Metode Pembayaran',
+                  Text(
+                      tempo && (o.paymentRef ?? '').isEmpty
+                          ? 'Bayar Tagihan Tempo'
+                          : _tagihanHabis ? 'Buat Tagihan Baru' : 'Ganti Metode Pembayaran',
                       style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
                           color: m.ink900)),
                   const SizedBox(height: 4),
                   Text(
-                    'Total ${formatRupiah(o.total)}. Tagihan lama ditutup lalu dibuat '
-                    'tagihan baru — batas bayar pesanan tidak berubah.',
+                    tempo
+                        ? 'Sisa tagihan ${formatRupiah(nominal)}. Pilih metode — tagihan lama '
+                            '(bila ada) ditutup lebih dulu.'
+                        : 'Total ${formatRupiah(o.total)}. Tagihan lama ditutup lalu dibuat '
+                            'tagihan baru — batas bayar pesanan tidak berubah.',
                     style: TextStyle(fontSize: 12.5, color: m.ink600, height: 1.45),
                   ),
                   const SizedBox(height: 12),
@@ -477,7 +502,7 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                     ],
                     // Belum ada yang dipilih: ketuk petak = langsung buat tagihan.
                     value: null,
-                    total: o.total,
+                    total: nominal,
                     onChanged: (code) => Navigator.pop(ctx, code),
                   ),
                 ],
@@ -490,7 +515,9 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
     if (pilih == null || !mounted) return;
     setState(() => _gantiBusy = true);
     try {
-      final r = await ApiService.ulangPembayaran(_code, pilih);
+      final r = tempo
+          ? await ApiService.bayarTempo(_code, pilih)
+          : await ApiService.ulangPembayaran(_code, pilih);
       if (!mounted) return;
       setState(() {
         _tagihanHabis = false;
@@ -509,7 +536,7 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
       // checkout). VA: nomornya sudah tampil di layar ini.
       if (pilih == 'qris' &&
           url.isNotEmpty &&
-          baru?.status == 'menunggu_pembayaran') {
+          (tempo || baru?.status == 'menunggu_pembayaran')) {
         await _openSnap(url);
       }
     } on ApiException catch (e) {
@@ -535,6 +562,56 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
   void _copy(String text, String label) {
     Clipboard.setData(ClipboardData(text: text));
     AppNav.of(context).toast('$label disalin');
+  }
+
+  /// Kartu tagihan TEMPO: sisa tagihan, potongan retur, jatuh tempo (paritas web).
+  Widget _kartuTempo(MasColors m, OrderDetail o) {
+    final t = o.tempo!;
+    final lewat = t.tahap == 'lewat';
+    final String ket;
+    if (t.tahap == 'belum_kirim') {
+      ket = 'Jatuh tempo dihitung saat barang dikirim.';
+    } else if (lewat) {
+      ket = 'Lewat jatuh tempo ${t.hariLewat} hari (${tglJatuhTempo(t.jatuhTempo)}) — segera lunasi.';
+    } else if (t.tahap == 'jatuh_tempo_hari_ini') {
+      ket = 'Jatuh tempo hari ini.';
+    } else {
+      ket = 'Jatuh tempo ${tglJatuhTempo(t.jatuhTempo)} (${t.hariLagi} hari lagi).';
+    }
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: lewat ? m.danger50 : m.ink50,
+        borderRadius: BorderRadius.circular(MasRadii.input),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Pembayaran Tempo · ${t.terminHari} hari setelah barang dikirim',
+            style: TextStyle(fontSize: 11.5, color: m.ink500)),
+        const SizedBox(height: 4),
+        if (t.lunas)
+          Text('Tagihan lunas${t.dibayarAt != null ? ' · ${fmtDate(t.dibayarAt)}' : ''}',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: m.ink900))
+        else if (o.status == 'batal')
+          Text('Tagihan dibatalkan bersama pesanan.',
+              style: TextStyle(fontSize: 13, color: m.ink700))
+        else ...[
+          Row(children: [
+            Expanded(child: Text('Sisa tagihan', style: TextStyle(fontSize: 13, color: m.ink700))),
+            Text(formatRupiah(t.sisaTagihan),
+                style: masMono(size: 16, weight: FontWeight.w700, color: m.ink900)),
+          ]),
+          if (t.potonganRetur > 0)
+            Text(
+                'Sudah dipotong refund retur ${formatRupiah(t.potonganRetur)} dari total '
+                '${formatRupiah(o.total)}.',
+                style: TextStyle(fontSize: 11.5, color: m.ink500)),
+          const SizedBox(height: 4),
+          Text(ket,
+              style: TextStyle(
+                  fontSize: 12.5, color: lewat ? m.danger600 : m.ink700, height: 1.4)),
+        ],
+      ]),
+    );
   }
 
   /// Buat & buka Invoice PDF (pesanan lunas). Setara "Cetak Invoice" web.
@@ -612,7 +689,11 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
             const SizedBox(height: 14),
           ],
 
-          MasCard(child: OrderStepper(status: o.status, pickup: o.pickup)),
+          MasCard(
+              child: OrderStepper(
+                  status: o.status,
+                  pickup: o.pickup,
+                  tempoLunas: o.isTempo ? (o.tempo?.lunas ?? false) : null)),
           const SizedBox(height: 14),
 
           _items(m, o),
@@ -1177,8 +1258,9 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
 
   Widget _pembayaran(MasColors m, OrderDetail o) {
     final gateway = o.paymentMethod == 'gateway';
-    final menungguBayar = o.status == 'menunggu_pembayaran';
-    final lunas = ['diproses', 'dikirim', 'selesai'].contains(o.status);
+    final tagihan = _tagihanTampil(o);
+    final nominal = _nominalBayar(o);
+    final lunas = sudahLunas(o);
     final kanal = (o.paymentChannel ?? '').toLowerCase();
     // 'snap' = pesanan lama Midtrans: metode dipilih di halaman Midtrans.
     final snap = kanal == 'snap';
@@ -1194,12 +1276,33 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (gateway && menungguBayar) ...[
+              if (o.isTempo && o.tempo != null && o.status != 'menunggu_pembayaran') ...[
+                _kartuTempo(m, o),
+                const SizedBox(height: 10),
+              ],
+              if (_tempoTerbuka(o) && (o.paymentRef ?? '').isEmpty) ...[
+                if (o.tempo!.bisaBayarOnline)
+                  MasButton(
+                    label: _gantiBusy ? 'Memproses…' : 'Bayar Sekarang (VA / QRIS)',
+                    icon: Icons.payments_outlined,
+                    expand: true,
+                    loading: _gantiBusy,
+                    onTap: _gantiBusy ? null : _gantiMetode,
+                  )
+                else
+                  Text(
+                    'Bayar dengan transfer ke rekening perusahaan, lalu kabari admin '
+                    'lewat chat pesanan ini.',
+                    style: TextStyle(fontSize: 12, color: m.ink600, height: 1.45),
+                  ),
+                const SizedBox(height: 10),
+              ],
+              if (tagihan) ...[
                 Text.rich(
                   TextSpan(children: [
                     const TextSpan(text: 'Bayar '),
                     TextSpan(
-                      text: formatRupiah(o.total),
+                      text: formatRupiah(nominal),
                       style: masMono(
                           size: 13, weight: FontWeight.w700, color: m.ink900),
                     ),
@@ -1349,7 +1452,7 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
               if (o.status == 'menunggu_verifikasi')
                 _alert(m, 'Menunggu verifikasi pembayaran.'),
 
-              if (lunas)
+              if (lunas && !o.isTempo)
                 _alert(
                   m,
                   'Pembayaran terverifikasi. Status: ${orderStatusLabel(o.status, pickup: o.pickup)}.',

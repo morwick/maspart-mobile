@@ -88,8 +88,10 @@ void main() {
         'Ringkasan', 'Pencarian', 'Data', 'Penjualan', 'Tools Pembelajaran AI', 'Sistem',
       ]);
       expect(isi(secs, 'Data'), containsAll([MasScreen.users, MasScreen.gudang]));
-      expect(isi(secs, 'Penjualan'),
-          [MasScreen.orders, MasScreen.bermasalah, MasScreen.penjualan]);
+      expect(isi(secs, 'Penjualan'), [
+        MasScreen.orders, MasScreen.bermasalah, MasScreen.adminChat,
+        MasScreen.penjualan, MasScreen.piutang,
+      ]);
       expect(isi(secs, 'Tools Pembelajaran AI'),
           containsAll([MasScreen.feedback, MasScreen.fotopart, MasScreen.imageindex]));
       expect(isi(secs, 'Sistem'),

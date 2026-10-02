@@ -106,6 +106,9 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
 
   /// Kanal yang DIPILIH pembeli. Null = pakai bawaan ([_kanalEfektif]).
   String? _kanalPilih;
+
+  /// Pembeli memilih "Bayar Tempo" (hanya akun TEMPO, migrasi 048).
+  bool _pilihTempo = false;
   bool _busy = false;
   String? _error;
 
@@ -769,6 +772,22 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
 
   // ── Metode bayar (RajaOngkir) ───────────────────────────────────────
 
+  /// Ringkasan TEMPO akun ini; null = bukan pelanggan tempo (paritas web).
+  TempoAkun? get _tempo => (_metode?.tempo?.aktif ?? false) ? _metode!.tempo : null;
+  bool get _pakaiTempo => _pilihTempo && _tempo != null;
+
+  /// Kenapa tempo tak bisa dipakai untuk [total] (null = boleh). Server
+  /// mengulang cek ini dengan total final.
+  String? _alasanTempo(int total) {
+    final t = _tempo;
+    if (t == null) return 'Pembayaran tempo tidak aktif.';
+    if (!t.boleh) return t.alasan ?? 'Pembayaran tempo sedang tidak bisa dipakai.';
+    if (total > t.sisa) {
+      return 'Total ${formatRupiah(total)} melebihi sisa limit tempo ${formatRupiah(t.sisa)}.';
+    }
+    return null;
+  }
+
   bool get _pilihKanal => _metode?.isRajaOngkir ?? false;
 
   /// Kanal RajaOngkir yang boleh untuk [total] (min/maks per kanal).
@@ -832,12 +851,12 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           'Lengkapi alamat penerima (nama, no. HP, alamat, kode pos) dulu.');
       return;
     }
-    if (!_gatewayOn && _gatewayGagal) {
+    if (!_pakaiTempo && !_gatewayOn && _gatewayGagal) {
       // #11: galat sesaat saat membuka keranjang — cek sekali lagi dulu.
       await _loadGateway(coba: 2);
       if (!mounted) return;
     }
-    if (!_gatewayOn) {
+    if (!_pakaiTempo && !_gatewayOn) {
       setState(() => _error = _gatewayGagal
           ? 'Metode pembayaran belum bisa dicek (koneksi bermasalah). Coba lagi '
               'sebentar.'
@@ -868,10 +887,18 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       return;
     }
     final tampil = _totalTampil;
+    final tempo = _pakaiTempo;
     // Kanal dicek SETELAH ongkir pasti: batas minimal kanal (Rp 10.000) berlaku
-    // untuk total akhir, bukan subtotal sebelum ongkir terhitung.
-    final kanal = _kanalEfektif;
-    if (kanal == null) {
+    // untuk total akhir, bukan subtotal sebelum ongkir terhitung. TEMPO: tanpa
+    // kanal — yang dicek sisa limit.
+    final kanal = tempo ? null : _kanalEfektif;
+    if (tempo) {
+      final alasan = _alasanTempo(tampil);
+      if (alasan != null) {
+        setState(() => _error = alasan);
+        return;
+      }
+    } else if (kanal == null) {
       setState(() => _error = _pesanTanpaKanal(tampil));
       return;
     }
@@ -881,7 +908,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     final sig = [
       for (final i in beli) '${i.partNumber}x${i.qty}',
       _noteCtl.text.trim(), _ambilSendiri, _rate?.courier, _rate?.service,
-      _ongkir, _poinPakai, _vKode.join(','), tampil, kanal,
+      _ongkir, _poinPakai, _vKode.join(','), tampil, tempo ? 'tempo' : kanal,
       _nameCtl.text.trim(), _phoneCtl.text.trim(), _addressCtl.text.trim(),
       _postalCtl.text.trim(), _lat, _lon,
     ].join('|');
@@ -915,9 +942,9 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         expectedTotal: tampil,
         pickup: _ambilSendiri,
         weightGrams: _weightGrams,
-        paymentMethod: 'gateway',
+        paymentMethod: tempo ? 'tempo' : 'gateway',
         // RajaOngkir: QRIS / VA bank pilihan pembeli. Midtrans (gateway lama):
-        // 'snap' — metodenya dipilih di halaman Midtrans.
+        // 'snap' — metodenya dipilih di halaman Midtrans. Tempo: tanpa kanal.
         paymentChannel: kanal,
         recipientName: _nameCtl.text.trim(),
         recipientPhone: _phoneCtl.text.trim(),
@@ -945,11 +972,12 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       // VA: nomornya tampil langsung di detail pesanan (salin → bayar dari
       // m-banking) — tak perlu membuka halaman bayar. QRIS & Snap Midtrans:
       // QR / metode ada di halaman bayar → langsung dibuka.
-      final kanalJadi = res.payment?.channel ?? kanal;
+      final kanalJadi = res.payment?.channel ?? kanal ?? '';
       final ke = {
         'order_code': res.orderCode,
         'payment_url': res.payment?.url ?? '',
-        'autopay': !kanalJadi.startsWith('va_'),
+        // Tempo: tak ada yang dibayar sekarang — pesanan langsung diproses.
+        'autopay': !tempo && !kanalJadi.startsWith('va_'),
       };
       if (!mounted) {
         // #28: pembeli sudah meninggalkan keranjang saat pesanan selesai
@@ -982,6 +1010,13 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           kode == 'pesanan_serupa' &&
           kodePesanan.isNotEmpty) {
         ulangBaru = await _tawarPesananSerupa(e, kodePesanan, pnDipesan);
+        return;
+      }
+      if (kode.startsWith('tempo_')) {
+        // Limit / beku / tak aktif menurut server → pesanan TIDAK dibuat. Muat
+        // ulang ringkasan tempo supaya sisa limit di layar sama dengan server.
+        setState(() => _error = e.message);
+        await _loadGateway();
         return;
       }
       setState(() => _error = e.isJaringan
@@ -1985,7 +2020,13 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
               style: TextStyle(
                   fontSize: 14, fontWeight: FontWeight.w600, color: m.ink900)),
           const SizedBox(height: 12),
-          if (_gatewayOn && _pilihKanal)
+          if (_tempo != null) ...[
+            ..._pilihanTempo(m),
+            const SizedBox(height: 12),
+          ],
+          if (_pakaiTempo)
+            _catatanTempo(m)
+          else if (_gatewayOn && _pilihKanal)
             ..._pilihanKanal(m)
           else if (_gatewayOn)
             Text(
@@ -2004,6 +2045,85 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
             _alert(m, 'Pembayaran online belum aktif. Hubungi admin.'),
         ]),
       );
+
+  /// Pilihan "Bayar Tempo" / "Bayar Sekarang" (akun TEMPO saja, paritas web).
+  List<Widget> _pilihanTempo(MasColors m) {
+    final t = _tempo!;
+    final alasan = _alasanTempo(_totalTampil);
+    Widget kartu({required bool aktif, required String label, required String judul,
+        required String ket, bool merah = false, required VoidCallback onTap}) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Material(
+          color: aktif ? m.brand50 : m.paper,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: BorderSide(color: aktif ? m.brand600 : m.ink200, width: aktif ? 1.5 : 1),
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: _busy ? null : onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(6)),
+                  child: Text(label,
+                      style: const TextStyle(
+                          fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFF1B211D))),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(judul,
+                        style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: m.ink900)),
+                    const SizedBox(height: 2),
+                    Text(ket,
+                        style: TextStyle(fontSize: 11.5, color: merah ? m.danger600 : m.ink500, height: 1.35)),
+                  ]),
+                ),
+                Icon(aktif ? Icons.radio_button_checked : Icons.radio_button_off,
+                    size: 20, color: aktif ? m.brand600 : m.ink300),
+              ]),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return [
+      kartu(
+        aktif: _pakaiTempo,
+        label: 'TEMPO',
+        judul: 'Bayar Tempo (${t.terminHari} hari)',
+        ket: alasan ??
+            'Sisa limit ${formatRupiah(t.sisa)} · jatuh tempo ${t.terminHari} hari setelah barang dikirim',
+        merah: alasan != null,
+        onTap: () => setState(() => _pilihTempo = true),
+      ),
+      kartu(
+        aktif: !_pakaiTempo,
+        label: 'ONLINE',
+        judul: 'Bayar Sekarang',
+        ket: 'QRIS atau Virtual Account — dicek otomatis',
+        onTap: () => setState(() => _pilihTempo = false),
+      ),
+    ];
+  }
+
+  Widget _catatanTempo(MasColors m) => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(Icons.receipt_long_outlined, size: 14, color: m.ink500),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            'Pesanan langsung diproses gudang tanpa bayar dulu. Tagihannya jatuh tempo '
+            '${_tempo?.terminHari ?? 30} hari setelah barang dikirim — lihat & bayar di menu '
+            'Tagihan Tempo.',
+            style: TextStyle(fontSize: 11.5, color: m.ink500, height: 1.45),
+          ),
+        ),
+      ]);
 
   /// QRIS + petak Virtual Account (RajaOngkir) — paritas web `PilihMetodeBayar`.
   List<Widget> _pilihanKanal(MasColors m) {

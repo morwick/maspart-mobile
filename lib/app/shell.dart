@@ -40,6 +40,7 @@ import '../screens/part_detail_screen.dart';
 import '../screens/pesanan_detail_screen.dart';
 import '../screens/pesanan_screen.dart';
 import '../screens/poin_screen.dart';
+import '../screens/tagihan_tempo_screen.dart';
 import '../screens/profil_screen.dart';
 import '../screens/voucher_screen.dart';
 import '../screens/pilih_lokasi_screen.dart';
@@ -113,11 +114,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// sekali lagi untuk keluar" supaya aplikasi tak tertutup tak sengaja.
   DateTime? _lastBackAt;
 
+  /// Akun pembeli TEMPO (migrasi 048) → menu "Tagihan Tempo" tampil.
+  bool _tempoAktif = false;
+
   List<NavSection> get _sections => buildNavSections(
         role: _role,
         allowed: _allowedMenus,
         branch: _branch,
         gudangKelola: _gudangKelola,
+        tempoAktif: _tempoAktif,
       );
 
   @override
@@ -292,6 +297,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // dengan server; /me hanya cadangan untuk token non-JWT.
       if (dariToken.isEmpty) _cart.load(username);
       _applyHomeAndGuard();
+      if (_role == 'pembeli') {
+        // Menu "Tagihan Tempo" hanya untuk pelanggan tempo — dibaca dari profil.
+        ApiService.buyerProfile().then((p) {
+          if (mounted && (p.tempo != null) != _tempoAktif) {
+            setState(() => _tempoAktif = p.tempo != null);
+          }
+        }).catchError((_) {});
+      }
     }).catchError((_) {});
 
     // Izin menu efektif (persis Menu Control web) — berlaku untuk SEMUA peran,
@@ -518,6 +531,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         return PesananScreen(args: args);
       case MasScreen.poin:
         return const PoinScreen();
+      case MasScreen.tagihanTempo:
+        return const TagihanTempoScreen();
       case MasScreen.voucher:
         return const VoucherScreen();
       case MasScreen.pesananDetail:
@@ -556,6 +571,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         return const OrdersScreen();
       case MasScreen.bermasalah:
         return const BermasalahScreen();
+      case MasScreen.piutang:
+        return const PiutangScreen();
       case MasScreen.adminChat:
         return AdminChatScreen(args: args);
       case MasScreen.orderDetail:

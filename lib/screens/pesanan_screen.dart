@@ -21,18 +21,27 @@ const _kPaidStatus = {'diproses', 'dikirim', 'selesai'};
 class _OrderTab {
   final String key;
   final String label;
-  final bool Function(String status) match;
+  final bool Function(OrderSummary o) match;
   const _OrderTab(this.key, this.label, this.match);
 }
 
+/// Pesanan TEMPO yang tagihannya belum lunas (barang bisa sudah dikirim/selesai).
+bool tagihanTempoTerbuka(OrderSummary o) =>
+    o.isTempo &&
+    o.status != 'batal' &&
+    o.status != 'menunggu_pembayaran' &&
+    o.lunasTempo == false;
+
 final _orderTabs = <_OrderTab>[
-  _OrderTab('all', 'Semua', (s) => true),
+  _OrderTab('all', 'Semua', (o) => true),
   _OrderTab('belum', 'Belum Bayar',
-      (s) => s == 'menunggu_pembayaran' || s == 'menunggu_verifikasi'),
-  _OrderTab('diproses', 'Diproses', (s) => s == 'diproses'),
-  _OrderTab('dikirim', 'Dikirim', (s) => s == 'dikirim'),
-  _OrderTab('selesai', 'Selesai', (s) => s == 'selesai'),
-  _OrderTab('batal', 'Dibatalkan', (s) => s == 'batal'),
+      (o) => o.status == 'menunggu_pembayaran' || o.status == 'menunggu_verifikasi'),
+  // Hanya tampil bila ada isinya (akun tempo).
+  _OrderTab('tempo', 'Tagihan Tempo', tagihanTempoTerbuka),
+  _OrderTab('diproses', 'Diproses', (o) => o.status == 'diproses'),
+  _OrderTab('dikirim', 'Dikirim', (o) => o.status == 'dikirim'),
+  _OrderTab('selesai', 'Selesai', (o) => o.status == 'selesai'),
+  _OrderTab('batal', 'Dibatalkan', (o) => o.status == 'batal'),
 ];
 
 class PesananScreen extends StatefulWidget {
@@ -80,7 +89,7 @@ class _PesananScreenState extends State<PesananScreen> {
   /// Jumlah pesanan per tab (untuk badge hitungan).
   Map<String, int> get _counts => {
         for (final t in _orderTabs)
-          t.key: _orders.where((o) => t.match(o.status)).length,
+          t.key: _orders.where((o) => t.match(o)).length,
       };
 
   /// Pesanan setelah difilter tab + kata kunci (kode / gudang / nama barang /
@@ -90,7 +99,7 @@ class _PesananScreenState extends State<PesananScreen> {
         orElse: () => _orderTabs.first);
     final term = _q.trim().toLowerCase();
     return _orders
-        .where((o) => t.match(o.status))
+        .where((o) => t.match(o))
         .where((o) =>
             term.isEmpty ||
             o.orderCode.toLowerCase().contains(term) ||
@@ -358,7 +367,8 @@ class _PesananScreenState extends State<PesananScreen> {
       child: ListView(
         scrollDirection: Axis.horizontal,
         children: [
-          for (final t in _orderTabs) ...[
+          for (final t in _orderTabs)
+            if (t.key != 'tempo' || (counts['tempo'] ?? 0) > 0 || _tab == 'tempo') ...[
             _tabChip(m, t.label, counts[t.key] ?? 0, _tab == t.key,
                 () => setState(() => _tab = t.key)),
             const SizedBox(width: 6),
@@ -500,6 +510,14 @@ class _PesananScreenState extends State<PesananScreen> {
                       tone: orderStatusTone(o.status),
                       height: 20,
                     ),
+                    if (o.isTempo && o.status != 'batal' && lencanaTempo(o.tempo) != null) ...[
+                      const SizedBox(width: 4),
+                      MasPill(
+                        label: lencanaTempo(o.tempo)!.$1,
+                        tone: lencanaTempo(o.tempo)!.$2,
+                        height: 20,
+                      ),
+                    ],
                   ]),
                 ),
                 Container(height: 1, color: m.ink150),

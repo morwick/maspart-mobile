@@ -114,6 +114,10 @@ class BuyerProfile {
   /// URL foto profil; null = avatar inisial (belum unggah / migrasi 047 belum jalan).
   final String? avatarUrl;
 
+  /// Ringkasan TEMPO — hanya bila tempo aktif / masih ada tagihan (menu
+  /// "Tagihan Tempo"). Null = bukan pelanggan tempo / migrasi 048 belum jalan.
+  final TempoAkun? tempo;
+
   const BuyerProfile({
     required this.username,
     this.nama = '',
@@ -123,6 +127,7 @@ class BuyerProfile {
     this.gudangLabel,
     this.profileComplete = false,
     this.avatarUrl,
+    this.tempo,
   });
 
   factory BuyerProfile.fromJson(Map<String, dynamic> j) => BuyerProfile(
@@ -134,7 +139,256 @@ class BuyerProfile {
         gudangLabel: _sOrNull((j['gudang'] as Map?)?['label']),
         profileComplete: _b(j['profile_complete']),
         avatarUrl: _sOrNull(j['avatar_url']),
+        tempo: TempoAkun.tryParse(j['tempo']),
       );
+}
+
+// ── Pembayaran TEMPO (TOP + limit kredit, migrasi 048) — cerminan TempoAkun /
+// TempoOrderInfo di frontend/src/lib/api.ts ──
+
+/// Ringkasan tempo satu akun pembeli: limit, pemakaian, status beku.
+class TempoAkun {
+  final bool aktif;
+  final bool tertaut;
+  final int terminHari;
+  final int limit;
+  final int terpakai;
+  final int sisa;
+  final bool beku;
+  final bool bekuManual;
+  final String bekuAlasan;
+  final int lewat;
+  final int lewatNominal;
+  final int jumlahTagihan;
+
+  /// Boleh checkout tempo sekarang (selain cek total vs sisa limit).
+  final bool boleh;
+  final String? alasan;
+
+  const TempoAkun({
+    this.aktif = false,
+    this.tertaut = false,
+    this.terminHari = 30,
+    this.limit = 0,
+    this.terpakai = 0,
+    this.sisa = 0,
+    this.beku = false,
+    this.bekuManual = false,
+    this.bekuAlasan = '',
+    this.lewat = 0,
+    this.lewatNominal = 0,
+    this.jumlahTagihan = 0,
+    this.boleh = false,
+    this.alasan,
+  });
+
+  factory TempoAkun.fromJson(Map<String, dynamic> j) => TempoAkun(
+        aktif: _b(j['aktif']),
+        tertaut: _b(j['tertaut'], true),
+        terminHari: _i(j['termin_hari'], 30),
+        limit: _i(j['limit']),
+        terpakai: _i(j['terpakai']),
+        sisa: _i(j['sisa']),
+        beku: _b(j['beku']),
+        bekuManual: _b(j['beku_manual']),
+        bekuAlasan: _s(j['beku_alasan']),
+        lewat: _i(j['lewat']),
+        lewatNominal: _i(j['lewat_nominal']),
+        jumlahTagihan: _i(j['jumlah_tagihan']),
+        boleh: _b(j['boleh']),
+        alasan: _sOrNull(j['alasan']),
+      );
+
+  /// null bila server tak mengirim objek tempo (backend lama / bukan pelanggan tempo).
+  static TempoAkun? tryParse(dynamic v) =>
+      v is Map ? TempoAkun.fromJson(v.cast<String, dynamic>()) : null;
+}
+
+/// Tagihan satu pesanan TEMPO (dihitung server). `tahap`: belum_kirim |
+/// berjalan | jatuh_tempo_hari_ini | lewat | lunas | batal.
+class TempoOrderInfo {
+  final int terminHari;
+  final String? jatuhTempo; // YYYY-MM-DD (WIB); null = barang belum dikirim
+  final int hariLewat;
+  final int hariLagi;
+  final int potonganRetur;
+  final int sisaTagihan;
+  final bool lunas;
+  final String? dibayarAt;
+  final String tahap;
+  final bool bisaBayarOnline;
+
+  const TempoOrderInfo({
+    this.terminHari = 30,
+    this.jatuhTempo,
+    this.hariLewat = 0,
+    this.hariLagi = 0,
+    this.potonganRetur = 0,
+    this.sisaTagihan = 0,
+    this.lunas = false,
+    this.dibayarAt,
+    this.tahap = '',
+    this.bisaBayarOnline = false,
+  });
+
+  factory TempoOrderInfo.fromJson(Map<String, dynamic> j) => TempoOrderInfo(
+        terminHari: _i(j['termin_hari'], 30),
+        jatuhTempo: _sOrNull(j['jatuh_tempo']),
+        hariLewat: _i(j['hari_lewat']),
+        hariLagi: _i(j['hari_lagi']),
+        potonganRetur: _i(j['potongan_retur']),
+        sisaTagihan: _i(j['sisa_tagihan']),
+        lunas: _b(j['lunas']),
+        dibayarAt: _sOrNull(j['dibayar_at']),
+        tahap: _s(j['tahap']),
+        bisaBayarOnline: _b(j['bisa_bayar_online']),
+      );
+
+  static TempoOrderInfo? tryParse(dynamic v) =>
+      v is Map ? TempoOrderInfo.fromJson(v.cast<String, dynamic>()) : null;
+}
+
+/// Satu baris halaman "Tagihan Tempo" (GET /api/tempo/saya).
+class TagihanTempo {
+  final String orderCode;
+  final int total;
+  final String status;
+  final String createdAt;
+  final bool pickup;
+  final bool adaTagihanOnline;
+  final TempoOrderInfo tempo;
+
+  const TagihanTempo({
+    required this.orderCode,
+    this.total = 0,
+    this.status = '',
+    this.createdAt = '',
+    this.pickup = false,
+    this.adaTagihanOnline = false,
+    this.tempo = const TempoOrderInfo(),
+  });
+
+  factory TagihanTempo.fromJson(Map<String, dynamic> j) => TagihanTempo(
+        orderCode: _s(j['order_code']),
+        total: _i(j['total']),
+        status: _s(j['status']),
+        createdAt: _s(j['created_at']),
+        pickup: _b(j['pickup']),
+        adaTagihanOnline: _b(j['ada_tagihan_online']),
+        tempo: TempoOrderInfo.tryParse(j['tempo']) ?? const TempoOrderInfo(),
+      );
+}
+
+class TagihanLunas {
+  final String orderCode;
+  final int total;
+  final String paidAt;
+  const TagihanLunas({required this.orderCode, this.total = 0, this.paidAt = ''});
+  factory TagihanLunas.fromJson(Map<String, dynamic> j) => TagihanLunas(
+        orderCode: _s(j['order_code']),
+        total: _i(j['total']),
+        paidAt: _s(j['paid_at']),
+      );
+}
+
+class TempoSaya {
+  final bool tersedia; // false = migrasi 048 belum jalan
+  final TempoAkun akun;
+  final List<TagihanTempo> tagihan;
+  final List<TagihanLunas> lunas;
+  final bool bayarOnline;
+
+  const TempoSaya({
+    this.tersedia = false,
+    this.akun = const TempoAkun(),
+    this.tagihan = const [],
+    this.lunas = const [],
+    this.bayarOnline = false,
+  });
+
+  factory TempoSaya.fromJson(Map<String, dynamic> j) => TempoSaya(
+        tersedia: _b(j['tersedia']),
+        akun: TempoAkun.fromJson(j),
+        tagihan: _list(j['tagihan'], TagihanTempo.fromJson),
+        lunas: _list(j['lunas'], TagihanLunas.fromJson),
+        bayarOnline: _b(j['bayar_online']),
+      );
+}
+
+/// Pengaturan & pemakaian tempo satu akun pembeli (admin, GET /api/admin/tempo).
+class TempoAdmin {
+  final String username;
+  final bool isActive;
+  final String customerName;
+  final TempoAkun tempo;
+  const TempoAdmin({required this.username, this.isActive = true, this.customerName = '',
+      this.tempo = const TempoAkun()});
+  factory TempoAdmin.fromJson(Map<String, dynamic> j) => TempoAdmin(
+        username: _s(j['username']),
+        isActive: _b(j['is_active'], true),
+        customerName: _s(j['customer_name']),
+        tempo: TempoAkun.fromJson(j),
+      );
+}
+
+/// Satu pesanan di halaman Piutang Tempo (admin).
+class PiutangOrder {
+  final String orderCode;
+  final String status;
+  final int total;
+  final int potonganRetur;
+  final int sisa;
+  final String? jatuhTempo;
+  final int hariLewat;
+  final String tahap;
+  final String kelompok;
+  const PiutangOrder({required this.orderCode, this.status = '', this.total = 0, this.potonganRetur = 0,
+      this.sisa = 0, this.jatuhTempo, this.hariLewat = 0, this.tahap = '', this.kelompok = ''});
+  factory PiutangOrder.fromJson(Map<String, dynamic> j) => PiutangOrder(
+        orderCode: _s(j['order_code']),
+        status: _s(j['status']),
+        total: _i(j['total']),
+        potonganRetur: _i(j['potongan_retur']),
+        sisa: _i(j['sisa']),
+        jatuhTempo: _sOrNull(j['jatuh_tempo']),
+        hariLewat: _i(j['hari_lewat']),
+        tahap: _s(j['tahap']),
+        kelompok: _s(j['kelompok']),
+      );
+}
+
+class PiutangPelanggan {
+  final String username;
+  final String customerName;
+  final TempoAkun tempo;
+  final List<PiutangOrder> orders;
+  final int tertuaLewat;
+  const PiutangPelanggan({required this.username, this.customerName = '', this.tempo = const TempoAkun(),
+      this.orders = const [], this.tertuaLewat = 0});
+  factory PiutangPelanggan.fromJson(Map<String, dynamic> j) => PiutangPelanggan(
+        username: _s(j['username']),
+        customerName: _s(j['customer_name']),
+        tempo: TempoAkun.fromJson(j),
+        orders: _list(j['orders'], PiutangOrder.fromJson),
+        tertuaLewat: _i(j['tertua_lewat']),
+      );
+}
+
+class PiutangData {
+  /// Kunci: belum_kirim, belum_jatuh_tempo, lewat_1_30, lewat_31_60, lewat_60_plus, total.
+  final Map<String, int> ringkasan;
+  final Map<String, int> jumlah;
+  final List<PiutangPelanggan> perPelanggan;
+  const PiutangData({this.ringkasan = const {}, this.jumlah = const {}, this.perPelanggan = const []});
+  factory PiutangData.fromJson(Map<String, dynamic> j) {
+    Map<String, int> peta(dynamic v) =>
+        (v is Map) ? v.map((k, x) => MapEntry(k.toString(), _i(x))) : const {};
+    return PiutangData(
+      ringkasan: peta(j['ringkasan']),
+      jumlah: peta(j['jumlah']),
+      perPelanggan: _list(j['per_pelanggan'], PiutangPelanggan.fromJson),
+    );
+  }
 }
 
 class Alamat {
@@ -1524,7 +1778,7 @@ class PesananBermasalah {
   static const kunci = [
     'uang_perlu_dicek', 'kendala_gudang', 'bayar_macet',
     'belum_diambil', 'lunas_belum_dikirim', 'penawaran_gagal', 'retur_accurate',
-    'kirim_lama', 'accurate_batal',
+    'kirim_lama', 'accurate_batal', 'piutang_lewat',
   ];
 
   int get jumlah => daftar.values.fold(0, (n, l) => n + l.length);
@@ -1567,6 +1821,15 @@ class OrderSummary {
   /// ≤ batas hari retur) — tombol "↩ Ajukan Return" di kartu (migrasi 039).
   final bool bisaRetur;
 
+  /// payment_method ('gateway' | 'tempo' | 'manual'). Nama beda dari
+  /// [OrderDetail.paymentMethod] (field lama subkelas) — isinya sama.
+  final String metodeBayar;
+
+  /// HANYA pesanan TEMPO (migrasi 048): status bayar terpisah dari status kirim.
+  /// Null untuk pesanan lain → baca lunas dari statusnya (lihat `sudahLunas`).
+  final bool? lunasTempo;
+  final TempoOrderInfo? tempo;
+
   const OrderSummary({
     required this.orderCode,
     this.username = '',
@@ -1585,7 +1848,12 @@ class OrderSummary {
     this.bisaNilai = false,
     this.updatedAt,
     this.bisaRetur = false,
+    this.metodeBayar = '',
+    this.lunasTempo,
+    this.tempo,
   });
+
+  bool get isTempo => metodeBayar == 'tempo';
 
   factory OrderSummary.fromJson(Map<String, dynamic> j) => OrderSummary(
         orderCode: _s(j['order_code']),
@@ -1604,6 +1872,9 @@ class OrderSummary {
         bisaNilai: _b(j['bisa_nilai']),
         updatedAt: _sOrNull(j['updated_at']),
         bisaRetur: _b(j['bisa_retur']),
+        metodeBayar: _s(j['payment_method']),
+        lunasTempo: j['lunas'] is bool ? j['lunas'] as bool : null,
+        tempo: TempoOrderInfo.tryParse(j['tempo']),
         cuplikan: (j['items'] as List?)
                 ?.whereType<Map>()
                 .map((e) => OrderItemDetail.fromJson(e.cast<String, dynamic>()))
@@ -1821,6 +2092,9 @@ class OrderDetail extends OrderSummary {
     super.status,
     super.paymentProofUrl,
     super.createdAt,
+    super.metodeBayar,
+    super.lunasTempo,
+    super.tempo,
     this.note,
     this.gudangLat,
     this.gudangLon,
@@ -1908,6 +2182,9 @@ class OrderDetail extends OrderSummary {
         status: _s(j['status']),
         paymentProofUrl: _sOrNull(j['payment_proof_url']),
         createdAt: _s(j['created_at']),
+        metodeBayar: _s(j['payment_method']),
+        lunasTempo: j['lunas'] is bool && j['payment_method'] == 'tempo' ? j['lunas'] as bool : null,
+        tempo: TempoOrderInfo.tryParse(j['tempo']),
         note: _sOrNull(j['note']),
         gudangLat: _dOrNull(j['gudang_lat']),
         gudangLon: _dOrNull(j['gudang_lon']),
@@ -2092,11 +2369,15 @@ class PaymentMethods {
   final String gateway;
   final String gatewayNama;
 
+  /// Hanya akun yang diaktifkan TEMPO oleh admin (migrasi 048).
+  final TempoAkun? tempo;
+
   const PaymentMethods({
     this.gatewayAvailable = false,
     this.channels = const [],
     this.gateway = '',
     this.gatewayNama = '',
+    this.tempo,
   });
 
   bool get isRajaOngkir => gateway == 'komerce';
@@ -2106,6 +2387,7 @@ class PaymentMethods {
         channels: _list(j['channels'], PaymentChannel.fromJson),
         gateway: _s(j['gateway']),
         gatewayNama: _s(j['gateway_nama']),
+        tempo: TempoAkun.tryParse(j['tempo']),
       );
 }
 

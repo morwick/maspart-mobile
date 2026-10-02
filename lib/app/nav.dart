@@ -34,6 +34,7 @@ enum MasScreen {
   returSaya,
   returAjukan,
   returDetail,
+  tagihanTempo,
 
   // Cabang
   cabangPesanan,
@@ -46,6 +47,7 @@ enum MasScreen {
   // Admin
   orders,
   bermasalah,
+  piutang,
   adminChat,
   orderDetail,
   penjualan,
@@ -82,6 +84,7 @@ const Map<MasScreen, (String, String)> kScreenTitles = {
   MasScreen.toko: ('Belanja Part', 'Etalase part siap kirim dari gudang terdekat'),
   MasScreen.keranjang: ('Keranjang', 'Tinjau part, pilih ekspedisi, lalu bayar'),
   MasScreen.pesanan: ('Pesanan Saya', 'Riwayat & status pesanan'),
+  MasScreen.tagihanTempo: ('Tagihan Tempo', 'Bayar belakangan — limit & jatuh tempo'),
   MasScreen.pesananDetail: ('Detail Pesanan', ''),
   MasScreen.beliLagi: ('Beli Lagi', 'Barang yang pernah kamu beli'),
   MasScreen.pilihLokasi: ('Ganti Lokasi', 'Pilih gudang tempat Anda berbelanja'),
@@ -102,6 +105,7 @@ const Map<MasScreen, (String, String)> kScreenTitles = {
 
   MasScreen.orders: ('Pesanan', 'Kelola & verifikasi pesanan'),
   MasScreen.bermasalah: ('Pesanan Bermasalah', 'Pesanan yang butuh tindakan admin'),
+  MasScreen.piutang: ('Piutang Tempo', 'Tagihan tempo yang belum dibayar'),
   MasScreen.adminChat: ('Chat Pembeli', 'Semua percakapan pembeli ↔ gudang'),
   MasScreen.orderDetail: ('Detail Pesanan', ''),
   MasScreen.penjualan: ('Laporan Penjualan', 'Rekap omzet & barang terjual'),
@@ -152,6 +156,9 @@ const List<NavItem> _navBuyer = [
   NavItem('Asisten AI', Icons.smart_toy_rounded, MasScreen.asisten, permKey: 'ai'),
   NavItem('Chat', Icons.chat_bubble_outline_rounded, MasScreen.chat),
   NavItem('Pesanan Saya', Icons.receipt_long_outlined, MasScreen.pesanan),
+  // Pembayaran TEMPO (migrasi 048) — hanya tampil untuk akun tempo (lihat
+  // `tempoAktif` di buildNavSections; paritas web NAV_BUYER).
+  NavItem('Tagihan Tempo', Icons.account_balance_wallet_outlined, MasScreen.tagihanTempo),
   // Beli Lagi (pola Tokopedia/Shopee) — riwayat barang yang pernah dibeli.
   // Hanya di menu pembeli, jadi guard layar otomatis menolak peran lain.
   NavItem('Beli Lagi', Icons.replay_rounded, MasScreen.beliLagi),
@@ -202,6 +209,7 @@ const List<NavItem> _navPenjualan = [
   // Masukan penguji 2026-09-29 — paritas web NAV_ADMIN "/admin/chat".
   NavItem('Chat Pembeli', Icons.chat_bubble_outline_rounded, MasScreen.adminChat),
   NavItem('Laporan Penjualan', Icons.bar_chart_rounded, MasScreen.penjualan),
+  NavItem('Piutang Tempo', Icons.account_balance_wallet_outlined, MasScreen.piutang),
 ];
 
 const List<NavItem> _navAiTools = [
@@ -240,6 +248,9 @@ const Set<MasScreen> _kChildScreens = {
   MasScreen.returAjukan,
   MasScreen.returDetail,
   MasScreen.cabangReturDetail,
+  // Dibuka dari profil & notifikasi pengingat jatuh tempo — termasuk akun yang
+  // tempo-nya sudah dinonaktifkan tetapi masih punya tagihan.
+  MasScreen.tagihanTempo,
 };
 
 /// Bangun struktur drawer sesuai peran & izin — persis logika web (AppShell.tsx):
@@ -259,6 +270,7 @@ List<NavSection> buildNavSections({
   required Set<String>? allowed,
   String? branch,
   List<String> gudangKelola = const [],
+  bool tempoAktif = false,
 }) {
   final isAdmin = role == 'admin';
   final isBuyer = role == 'pembeli';
@@ -275,7 +287,11 @@ List<NavSection> buildNavSections({
 
   if (isBuyer) {
     return [
-      NavSection('Belanja', _navBuyer.where(show).toList()),
+      NavSection(
+          'Belanja',
+          _navBuyer
+              .where((it) => show(it) && (it.screen != MasScreen.tagihanTempo || tempoAktif))
+              .toList()),
     ].where((s) => s.items.isNotEmpty).toList();
   }
 
@@ -391,6 +407,9 @@ Set<MasScreen> accessibleScreens(List<NavSection> sections) => {
   if (seg.length >= 3 && seg[0] == 'cabang' && seg[1] == 'pesanan') {
     return (MasScreen.cabangPesananDetail, {'order_code': seg[2]});
   }
+  if (seg.length == 2 && seg[0] == 'admin' && seg[1] == 'piutang') {
+    return (MasScreen.piutang, <String, dynamic>{});
+  }
   if (seg.length >= 3 && seg[0] == 'admin' && seg[1] == 'orders') {
     return (MasScreen.orderDetail, {'order_code': seg[2]});
   }
@@ -438,6 +457,7 @@ Set<MasScreen> accessibleScreens(List<NavSection> sections) => {
       'poin': MasScreen.poin,
       'pesanan': MasScreen.pesanan,
       'profil': MasScreen.profil,
+      'tagihan-tempo': MasScreen.tagihanTempo,
     }[seg[0]];
     if (layar != null) return (layar, <String, dynamic>{});
   }
