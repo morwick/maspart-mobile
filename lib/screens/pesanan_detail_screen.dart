@@ -284,7 +284,9 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
       pickup ? 'Barang sudah diambil?' : 'Pesanan diterima?',
       pickup
           ? 'Konfirmasi bahwa barang sudah Anda ambil & periksa? Pesanan akan ditandai selesai.'
-          : 'Konfirmasi bahwa barang sudah Anda terima & periksa? Pesanan akan ditandai selesai.',
+          : 'Konfirmasi bahwa barang sudah Anda terima & periksa? Pesanan akan ditandai selesai.'
+              '${_order?.retur?.aktif == true ? '\n\nBarang bermasalah? Return masih bisa diajukan '
+                  '${_order!.retur!.batasHari} hari setelahnya.' : ''}',
     );
     if (ok != true) return;
     // Seperti Shopee: begitu pesanan diterima, langsung tawarkan penilaian.

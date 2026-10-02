@@ -5428,6 +5428,9 @@ class ReturPesanan {
   final bool aktif;
   final bool bisa;
   final String alasanTidak;
+  /// Paket belum dipastikan sampai (masih di jalan / kurir tak bisa dilacak) →
+  /// arahkan pembeli ke "Pesanan Diterima" dulu, bukan tombol mati.
+  final bool perluTerima;
   final String? batas;
   final int batasHari;
   final List<ReturPesananItem> items;
@@ -5437,6 +5440,7 @@ class ReturPesanan {
     this.aktif = false,
     this.bisa = false,
     this.alasanTidak = '',
+    this.perluTerima = false,
     this.batas,
     this.batasHari = 7,
     this.items = const [],
@@ -5447,6 +5451,7 @@ class ReturPesanan {
         aktif: _b(j['aktif']),
         bisa: _b(j['bisa']),
         alasanTidak: _s(j['alasan_tidak']),
+        perluTerima: _b(j['perlu_terima']),
         batas: _kosongNull(j['batas']),
         batasHari: _i(j['batas_hari'], 7),
         items: _list(j['items'], ReturPesananItem.fromJson),
