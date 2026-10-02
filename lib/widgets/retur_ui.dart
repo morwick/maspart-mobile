@@ -605,7 +605,11 @@ class ReturPesananCard extends StatelessWidget {
                 style: TextStyle(fontSize: 11.5, color: m.ink500)),
         ]),
         const SizedBox(height: 6),
-        if (!rt.bisa)
+        if (rt.perluTerima)
+          ReturKotak.teks(
+              '${rt.alasanTidak} Return masih bisa diajukan ${rt.batasHari} hari setelah pesanan diterima.',
+              tone: MasPillTone.warn)
+        else if (!rt.bisa)
           Text(rt.alasanTidak.isNotEmpty ? rt.alasanTidak : 'Pesanan ini tidak bisa diretur.',
               style: TextStyle(fontSize: 13, color: m.ink500))
         else
@@ -670,7 +674,13 @@ class ReturPesananCard extends StatelessWidget {
         onTap: it.bisa
             ? () => nav.go(MasScreen.returAjukan,
                 part: {'order_code': order.orderCode, 'pn': it.partNumber})
-            : null,
+            // Paket belum dipastikan sampai → ingatkan tombol "Pesanan Diterima" di atas.
+            : rt.perluTerima && (it.qtySisa ?? 1) > 0
+                ? () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(rt.alasanTidak),
+                      behavior: SnackBarBehavior.floating,
+                    ))
+                : null,
       );
       aksi = it.bisa || rt.alasanTidak.isEmpty
           ? tombol

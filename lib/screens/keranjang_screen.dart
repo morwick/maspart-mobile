@@ -80,9 +80,6 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
 
   int _weightGrams = 0;
 
-  /// Berat dus + isian + bungkus yang ikut ditimbang kurir — ditampilkan
-  /// terpisah supaya pembeli tak menyangka beratnya salah hitung.
-  int _packingGrams = 0;
   List<ShippingRate> _rates = [];
   // Jenis pengiriman ala marketplace: pilih kelompok dulu, lalu kurirnya.
   List<ShippingGroup> _kelompok = [];
@@ -385,7 +382,6 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       setState(() {
         _asal = null;
         _weightGrams = 0;
-        _packingGrams = 0;
         _rates = [];
         _rate = null;
       });
@@ -417,10 +413,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   Future<void> _refreshWeight() async {
     final beli = _itemsBeli;
     if (beli.isEmpty) {
-      setState(() {
-        _weightGrams = 0;
-        _packingGrams = 0;
-      });
+      setState(() => _weightGrams = 0);
       return;
     }
     final sig = beli.map((i) => '${i.partNumber}:${i.qty}').join(',');
@@ -432,9 +425,6 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
     final perkiraan = beli.fold<int>(0, (n, i) => n + i.qty) * 1000;
     setState(() {
       _weightGrams = perkiraan < 1000 ? 1000 : perkiraan;
-      // Angka kemasan keranjang LAMA tak boleh nyangkut di layar sampai jawaban
-      // server datang — lebih baik tak tampil daripada tampil salah.
-      _packingGrams = 0;
       // Berat berubah → ongkir lama tak berlaku lagi.
       _rates = [];
       _rate = null;
@@ -446,10 +436,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         [for (final i in beli) CartLine(partNumber: i.partNumber, qty: i.qty)],
       );
       if (!mounted) return;
-      setState(() {
-        _weightGrams = w.weightGrams;
-        _packingGrams = w.packingGrams;
-      });
+      setState(() => _weightGrams = w.weightGrams);
     } on ApiException {
       /* pakai estimasi — pembeli tetap bisa cek ongkir manual */
     }
@@ -1239,11 +1226,15 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   /// harus bergantian — pembeli tidak dibiarkan menebak.
   Widget _gudangPicker(MasColors m) => MasCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(
-            '📦 Keranjang berisi part dari ${_gudangList.length} gudang. '
-            'Satu pesanan hanya bisa dari satu gudang, jadi part dari gudang lain '
-            'tetap tersimpan dan bisa dipesan setelah ini.',
-            style: TextStyle(fontSize: 12.5, color: m.ink700, height: 1.45),
+          _ikonTeks(
+            Icons.inventory_2_outlined,
+            Text(
+              'Keranjang berisi part dari ${_gudangList.length} gudang. '
+              'Satu pesanan hanya bisa dari satu gudang, jadi part dari gudang lain '
+              'tetap tersimpan dan bisa dipesan setelah ini.',
+              style: TextStyle(fontSize: 12.5, color: m.ink700, height: 1.45),
+            ),
+            color: m.ink700,
           ),
           const SizedBox(height: 10),
           Wrap(spacing: 8, runSpacing: 8, children: [
@@ -1354,8 +1345,11 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
                 ],
                 if (gudang.isNotEmpty) ...[
                   const SizedBox(height: 3),
-                  Text('🚚 Dikirim dari gudang $gudang',
-                      style: TextStyle(fontSize: 11.5, color: m.ink500)),
+                  _ikonTeks(
+                      Icons.local_shipping_outlined,
+                      Text('Dikirim dari gudang $gudang',
+                          style: TextStyle(fontSize: 11.5, color: m.ink500)),
+                      color: m.ink500),
                 ],
               ],
             ),
@@ -1424,7 +1418,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   /// info + tombol Tambah Alamat (masukan penguji 2026-09-29, paritas web).
   Widget _alamatKosong(MasColors m) => MasCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('📍 Alamat Penerima',
+          Text('Alamat Penerima',
               style: TextStyle(
                   fontSize: 14, fontWeight: FontWeight.w600, color: m.ink900)),
           const SizedBox(height: 10),
@@ -1444,7 +1438,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Expanded(
-              child: Text('📍 Alamat Penerima',
+              child: Text('Alamat Penerima',
                   style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -1619,14 +1613,13 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       );
 
   Widget _ekspedisi(MasColors m) {
-    final weightKg = _weightGrams / 1000;
     final p = _pickup;
     return MasCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Expanded(
             child: Text(
-                _ambilSendiri ? '🏬 Ambil di Toko' : '🚚 Ekspedisi & Ongkir',
+                _ambilSendiri ? 'Ambil di Toko' : 'Ekspedisi & Ongkir',
                 style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -1647,11 +1640,11 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           const SizedBox(height: 8),
           Row(children: [
             Expanded(
-                child: _caraTerima(m, false, '🚚 Kirim ke alamat',
+                child: _caraTerima(m, false, Icons.local_shipping_outlined, 'Kirim ke alamat',
                     'Dikirim ekspedisi, ongkir sesuai tarif')),
             const SizedBox(width: 8),
             Expanded(
-                child: _caraTerima(m, true, '🏬 Ambil di toko',
+                child: _caraTerima(m, true, Icons.storefront_outlined, 'Ambil di toko',
                     'Gudang ${p.gudang} · ±${_km(p.jarakKm)} km · gratis ongkir')),
           ]),
         ],
@@ -1667,13 +1660,17 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           ),
           if (p != null && p.catatan.isNotEmpty) ...[
             const SizedBox(height: 4),
-            Text('📍 ${p.catatan}',
-                style: TextStyle(fontSize: 12, color: m.warn600, height: 1.4)),
+            _ikonTeks(
+                Icons.location_on_outlined,
+                Text(p.catatan,
+                    style: TextStyle(fontSize: 12, color: m.warn600, height: 1.4)),
+                color: m.warn600),
           ],
           if (p?.lat != null && p?.lon != null) ...[
             const SizedBox(height: 8),
             MasButton(
-              label: '🗺️ Lihat lokasi gudang',
+              label: 'Lihat lokasi gudang',
+              icon: Icons.map_outlined,
               primary: false,
               height: 34,
               onTap: () => _bukaUrl(
@@ -1685,36 +1682,39 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           // luar kota tak perlu diberi tahu fitur yang tak relevan.
           if (p != null && !p.tersedia && p.jarakKm != null) ...[
             const SizedBox(height: 8),
-            Text('🏬 ${p.alasan}',
-                style: TextStyle(fontSize: 12, color: m.ink500, height: 1.4)),
+            _ikonTeks(
+                Icons.storefront_outlined,
+                Text(p.alasan,
+                    style: TextStyle(fontSize: 12, color: m.ink500, height: 1.4)),
+                color: m.ink500),
             // S-17: titik peta diabaikan karena tak cocok dengan kode pos/alamat.
             if (p.catatan.isNotEmpty)
-              Text('📍 ${p.catatan}',
-                  style: TextStyle(fontSize: 12, color: m.warn600, height: 1.4)),
+              _ikonTeks(
+                  Icons.location_on_outlined,
+                  Text(p.catatan,
+                      style: TextStyle(fontSize: 12, color: m.warn600, height: 1.4)),
+                  color: m.warn600),
           ],
-          const SizedBox(height: 8),
-          // Berat tertagih = max(berat asli, volumetrik) + kemasan. Barang
-          // besar tapi ringan ditagih dari ukurannya, dan dus ikut ditimbang di
-          // konter — pembeli berhak tahu dasarnya.
-          Text(
-            'Berat kirim: ${weightKg.toStringAsFixed(weightKg % 1 == 0 ? 0 : 1)} kg '
-            '(yang lebih besar antara berat asli dan volumetrik'
-            '${_packingGrams > 0 ? ', termasuk kemasan $_packingGrams g' : ''})',
-            style: TextStyle(fontSize: 11.5, color: m.ink500),
-          ),
           if (_gudangAktif.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              '🚚 Ongkir dihitung dari Gudang $_gudangAktif'
-              '${_lintasGudang ? ' — untuk ${_itemsBeli.length} part dari gudang ini saja.' : '.'}',
-              style: TextStyle(fontSize: 11.5, color: m.ink500),
+            const SizedBox(height: 8),
+            _ikonTeks(
+              Icons.local_shipping_outlined,
+              Text(
+                'Ongkir dihitung dari Gudang $_gudangAktif'
+                '${_lintasGudang ? ' — untuk ${_itemsBeli.length} part dari gudang ini saja.' : '.'}',
+                style: TextStyle(fontSize: 11.5, color: m.ink500),
+              ),
+              color: m.ink500,
             ),
         ],
         // R-5: kurir pilihan pembeli hilang setelah hitung ulang → beri tahu.
         if (!_ambilSendiri && _kurirInfo != null) ...[
           const SizedBox(height: 10),
-          Text('⚠️ $_kurirInfo',
-              style: TextStyle(fontSize: 12, color: m.warn600, height: 1.4)),
+          _ikonTeks(
+              Icons.warning_amber_rounded,
+              Text(_kurirInfo!,
+                  style: TextStyle(fontSize: 12, color: m.warn600, height: 1.4)),
+              color: m.warn600),
         ],
         if (_rateErr != null) ...[
           const SizedBox(height: 10),
@@ -1772,7 +1772,21 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
   }
 
   /// Tombol pilihan cara terima barang (kirim ↔ ambil sendiri).
-  Widget _caraTerima(MasColors m, bool ambil, String judul, String sub) {
+  /// Ikon kecil + teks sebaris — pengganti emoji di awal teks (emoji tampil
+  /// sebagai kotak "?" di sebagian perangkat, mis. simulator iOS 26).
+  Widget _ikonTeks(IconData icon, Text text, {required Color color}) {
+    final size = (text.style?.fontSize ?? 12) + 2;
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Padding(
+        padding: const EdgeInsets.only(top: 1),
+        child: Icon(icon, size: size, color: color),
+      ),
+      const SizedBox(width: 5),
+      Expanded(child: text),
+    ]);
+  }
+
+  Widget _caraTerima(MasColors m, bool ambil, IconData icon, String judul, String sub) {
     final active = _ambilSendiri == ambil;
     return GestureDetector(
       onTap: () => setState(() => _ambilSendiri = ambil),
@@ -1787,11 +1801,14 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(judul,
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: m.ink900)),
+            _ikonTeks(
+                icon,
+                Text(judul,
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: m.ink900)),
+                color: active ? m.brand600 : m.ink700),
             Text(sub, style: TextStyle(fontSize: 11, color: m.ink500)),
           ],
         ),
@@ -1964,7 +1981,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
 
   Widget _pembayaran(MasColors m) => MasCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(_pilihKanal ? '💳 Metode Pembayaran' : '💳 Pembayaran Online',
+          Text(_pilihKanal ? 'Metode Pembayaran' : 'Pembayaran Online',
               style: TextStyle(
                   fontSize: 14, fontWeight: FontWeight.w600, color: m.ink900)),
           const SizedBox(height: 12),
@@ -2127,9 +2144,12 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
           const SizedBox(height: 8),
           Row(children: [
             Expanded(
-              child: Text('🎁 Tukar poin',
-                  style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600, color: m.ink700)),
+              child: _ikonTeks(
+                  Icons.card_giftcard_outlined,
+                  Text('Tukar poin',
+                      style: TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600, color: m.ink700)),
+                  color: m.ink700),
             ),
             Text('punya ${thousands(_poinSaldo)}',
                 style: TextStyle(fontSize: 11.5, color: m.ink500)),

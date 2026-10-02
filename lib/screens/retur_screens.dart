@@ -707,6 +707,14 @@ class _AjukanReturScreenState extends State<AjukanReturScreen> {
           const SizedBox(height: 4),
           Text('Batas pengajuan return ${retur.batasHari} hari setelah pesanan diterima.',
               style: TextStyle(fontSize: 12.5, color: m.ink500)),
+          if (retur.perluTerima) ...[
+            const SizedBox(height: 10),
+            MasButton(
+              label: '← Ke Pesanan',
+              height: 36,
+              onTap: () => nav.go(MasScreen.pesananDetail, part: {'order_code': _code}),
+            ),
+          ],
         ]),
       );
     } else {

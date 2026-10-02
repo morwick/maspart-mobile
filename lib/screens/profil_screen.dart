@@ -5,7 +5,9 @@
 // cerminan `frontend/src/app/profil/page.tsx`.
 // Alamat utama mengisi checkout & menentukan gudang terdekat + ongkir.
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../api_service.dart';
 import '../app/nav.dart';
@@ -134,6 +136,90 @@ class _ProfilScreenState extends State<ProfilScreen> {
       if (mounted) setState(() => _error = e.message);
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  // ── Foto profil ──
+  bool _fotoBusy = false;
+
+  Future<void> _gantiFoto() async {
+    final m = context.mas;
+    final adaFoto = _profil?.avatarUrl != null;
+    final pilih = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: m.paper,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(MasRadii.sheet))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Foto profil',
+                  style: TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w600, color: m.ink900)),
+            ),
+          ),
+          for (final (ikon, label, kunci, warna) in [
+            (Icons.photo_camera_outlined, 'Ambil foto', 'kamera', m.brand700),
+            (Icons.photo_library_outlined, 'Pilih dari galeri', 'galeri', m.brand700),
+            if (adaFoto) (Icons.delete_outline_rounded, 'Hapus foto', 'hapus', m.danger600),
+          ])
+            ListTile(
+              leading: Icon(ikon, color: warna),
+              title: Text(label,
+                  style: TextStyle(
+                      fontSize: 14, color: kunci == 'hapus' ? m.danger600 : m.ink900)),
+              onTap: () => Navigator.pop(ctx, kunci),
+            ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (pilih == null || !mounted) return;
+
+    Future<BuyerProfile> Function() kerja;
+    String sukses;
+    if (pilih == 'hapus') {
+      kerja = ApiService.hapusFotoProfil;
+      sukses = 'Foto profil dihapus.';
+    } else {
+      XFile? x;
+      try {
+        // Dikecilkan di sumber (hemat kuota); server tetap mengompres ulang.
+        x = await ImagePicker().pickImage(
+            source: pilih == 'kamera' ? ImageSource.camera : ImageSource.gallery,
+            maxWidth: 1024,
+            imageQuality: 85);
+      } catch (_) {
+        if (mounted) setState(() => _error = 'Tidak bisa membuka kamera / galeri.');
+        return;
+      }
+      if (x == null || !mounted) return;
+      final bytes = await x.readAsBytes();
+      final nama = x.name;
+      kerja = () => ApiService.uploadFotoProfil(bytes, filename: nama);
+      sukses = 'Foto profil diperbarui.';
+    }
+
+    setState(() {
+      _fotoBusy = true;
+      _error = null;
+      _msg = null;
+    });
+    try {
+      final p = await kerja();
+      if (mounted) {
+        setState(() {
+          _profil = p;
+          _msg = sukses;
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _fotoBusy = false);
     }
   }
 
@@ -477,20 +563,7 @@ class _ProfilScreenState extends State<ProfilScreen> {
               Positioned(
                 left: 16,
                 top: 26,
-                child: Container(
-                  padding: const EdgeInsets.all(3),
-                  decoration:
-                      BoxDecoration(color: m.paper, shape: BoxShape.circle),
-                  child: CircleAvatar(
-                    radius: 34,
-                    backgroundColor: m.brand600,
-                    child: Text(_inisial(p?.nama ?? '', p?.username ?? ''),
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.w700)),
-                  ),
-                ),
+                child: _avatar(m, p),
               ),
               if (!_editAkun)
                 Positioned(
@@ -742,6 +815,67 @@ class _ProfilScreenState extends State<ProfilScreen> {
                       : (bahaya ? m.danger600 : m.brand600))),
         ),
       );
+
+  /// Avatar = tombol ganti foto: foto profil bila ada, selain itu inisial,
+  /// + lencana kamera di pojok.
+  Widget _avatar(MasColors m, BuyerProfile? p) {
+    final url = p?.avatarUrl;
+    return Semantics(
+      button: true,
+      label: url != null ? 'Ganti foto profil' : 'Pasang foto profil',
+      child: GestureDetector(
+        onTap: _fotoBusy || p == null ? null : _gantiFoto,
+        child: Stack(clipBehavior: Clip.none, children: [
+          Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(color: m.paper, shape: BoxShape.circle),
+            child: CircleAvatar(
+              radius: 34,
+              backgroundColor: m.brand600,
+              foregroundImage: url != null ? CachedNetworkImageProvider(url) : null,
+              child: _fotoBusy
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
+                    )
+                  : Text(_inisial(p?.nama ?? '', p?.username ?? ''),
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700)),
+            ),
+          ),
+          if (_fotoBusy && url != null)
+            Positioned.fill(
+              child: Container(
+                margin: const EdgeInsets.all(3),
+                decoration: const BoxDecoration(color: Colors.black38, shape: BoxShape.circle),
+                child: const Center(
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
+          Positioned(
+            right: 0,
+            bottom: 2,
+            child: Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                color: m.paper,
+                shape: BoxShape.circle,
+                border: Border.all(color: m.ink200),
+              ),
+              child: Icon(Icons.photo_camera_outlined, size: 14, color: m.ink700),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
 
   static String _inisial(String nama, String username) {
     final kata = (nama.isNotEmpty ? nama : username)

@@ -111,6 +111,8 @@ class BuyerProfile {
   final String authProvider; // 'password' | 'google'
   final String? gudangLabel;
   final bool profileComplete;
+  /// URL foto profil; null = avatar inisial (belum unggah / migrasi 047 belum jalan).
+  final String? avatarUrl;
 
   const BuyerProfile({
     required this.username,
@@ -120,6 +122,7 @@ class BuyerProfile {
     this.authProvider = 'password',
     this.gudangLabel,
     this.profileComplete = false,
+    this.avatarUrl,
   });
 
   factory BuyerProfile.fromJson(Map<String, dynamic> j) => BuyerProfile(
@@ -130,6 +133,7 @@ class BuyerProfile {
         authProvider: _s(j['auth_provider'], 'password'),
         gudangLabel: _sOrNull((j['gudang'] as Map?)?['label']),
         profileComplete: _b(j['profile_complete']),
+        avatarUrl: _sOrNull(j['avatar_url']),
       );
 }
 
@@ -364,18 +368,52 @@ class AdminUser {
   final bool isActive;
   final String? createdAt;
 
+  /// AKUN GUDANG: nama gudang yang Pesanan Masuk-nya diproses akun ini
+  /// (["Pekanbaru"]). Dari config Lokasi Gudang; kosong = bukan akun gudang.
+  final List<String> gudangCabang;
+
+  /// Tanda AKUN GUDANG dari server (bertanda di Manajemen User atau memegang
+  /// gudang). null = server lama tanpa field ini.
+  final bool? akunGudangFlag;
+
   const AdminUser({
     required this.username,
     required this.role,
     this.isActive = true,
     this.createdAt,
+    this.gudangCabang = const [],
+    this.akunGudangFlag,
   });
+
+  /// Boleh dipilih sebagai "Akun Cabang" di Lokasi Gudang.
+  bool get akunGudang => akunGudangFlag ?? gudangCabang.isNotEmpty;
+
+  /// Sedang memegang gudang — tandanya tak bisa dicabut sebelum dipindah.
+  bool get pegangGudang => gudangCabang.isNotEmpty;
 
   factory AdminUser.fromJson(Map<String, dynamic> j) => AdminUser(
         username: _s(j['username']),
         role: _s(j['role']),
         isActive: _b(j['is_active'], true),
         createdAt: _sOrNull(j['created_at']),
+        gudangCabang: [
+          for (final g in (j['gudang_cabang'] as List?) ?? const []) '$g',
+        ],
+        akunGudangFlag: j['akun_gudang'] is bool ? j['akun_gudang'] as bool : null,
+      );
+}
+
+/// Gudang utama (lokasi pilihan pembeli) + akun pemroses pesanannya.
+class GudangUtama {
+  final String key;
+  final String display;
+  final String akun;
+  const GudangUtama({required this.key, required this.display, required this.akun});
+
+  factory GudangUtama.fromJson(Map<String, dynamic> j) => GudangUtama(
+        key: _s(j['key']),
+        display: _s(j['display'], _s(j['label'])),
+        akun: _s(j['akun']),
       );
 }
 
@@ -5428,6 +5466,9 @@ class ReturPesanan {
   final bool aktif;
   final bool bisa;
   final String alasanTidak;
+  /// Paket belum dipastikan sampai (masih di jalan / kurir tak bisa dilacak) →
+  /// arahkan pembeli ke "Pesanan Diterima" dulu, bukan tombol mati.
+  final bool perluTerima;
   final String? batas;
   final int batasHari;
   final List<ReturPesananItem> items;
@@ -5437,6 +5478,7 @@ class ReturPesanan {
     this.aktif = false,
     this.bisa = false,
     this.alasanTidak = '',
+    this.perluTerima = false,
     this.batas,
     this.batasHari = 7,
     this.items = const [],
@@ -5447,6 +5489,7 @@ class ReturPesanan {
         aktif: _b(j['aktif']),
         bisa: _b(j['bisa']),
         alasanTidak: _s(j['alasan_tidak']),
+        perluTerima: _b(j['perlu_terima']),
         batas: _kosongNull(j['batas']),
         batasHari: _i(j['batas_hari'], 7),
         items: _list(j['items'], ReturPesananItem.fromJson),
