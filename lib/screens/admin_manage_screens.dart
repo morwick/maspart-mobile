@@ -453,7 +453,7 @@ class _UsersScreenState extends State<UsersScreen> {
   }
 
   /// Atur pembayaran TEMPO satu akun pembeli (paritas web /admin/pelanggan).
-  /// Hanya akun yang sudah ditautkan ke pelanggan Accurate (lewat web).
+  /// Tautan Accurate tak disyaratkan — admin cabang yang menginput ke Accurate.
   Future<void> _aturTempo(AdminUser u) async {
     final t = _tempo?[u.username]?.tempo ?? const TempoAkun();
     var aktif = t.aktif;
@@ -474,15 +474,10 @@ class _UsersScreenState extends State<UsersScreen> {
             const SizedBox(height: 4),
             Text(
               'Pelanggan bisa checkout tanpa bayar dulu; tagihan jatuh tempo N hari setelah barang '
-              'dikirim. Lewat jatuh tempo → beku otomatis sampai dilunasi.',
+              'dikirim. Lewat jatuh tempo → beku otomatis sampai dilunasi. Pesanan tempo diinput '
+              'ke Accurate oleh admin cabang.',
               style: TextStyle(fontSize: 12, color: m.ink500, height: 1.4),
             ),
-            if (!t.tertaut) ...[
-              const SizedBox(height: 8),
-              Text('Akun belum ditautkan ke pelanggan Accurate — tautkan lewat web (Pelanggan Accurate) '
-                  'sebelum mengaktifkan tempo.',
-                  style: TextStyle(fontSize: 12, color: m.danger600, height: 1.4)),
-            ],
             if (t.jumlahTagihan > 0) ...[
               const SizedBox(height: 8),
               Text('Terpakai ${formatRupiah(t.terpakai)} dari ${t.jumlahTagihan} tagihan terbuka.',
@@ -492,7 +487,7 @@ class _UsersScreenState extends State<UsersScreen> {
               contentPadding: EdgeInsets.zero,
               title: const Text('Tempo aktif'),
               value: aktif,
-              onChanged: (!t.tertaut && !aktif) ? null : (v) => setLocal(() => aktif = v),
+              onChanged: (v) => setLocal(() => aktif = v),
             ),
             Row(children: [
               Expanded(
