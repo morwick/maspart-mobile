@@ -47,6 +47,17 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
   bool _loaded = false;
   String? _error;
 
+  /// Galat MEMUAT pesanan — terpisah dari [_error] (galat aksi) supaya hilang
+  /// sendiri begitu pemuatan berikutnya berhasil (dulu banner merahnya
+  /// tertinggal di atas "Pembayaran terverifikasi").
+  String? _galatMuat;
+
+  /// Pemuatan terakhir gagal karena server tak terjangkau (koneksi / 5xx):
+  /// pesanannya ADA — jangan tampilkan "Pesanan tidak ditemukan". Selama ini
+  /// true, [_ulangMuat] memuat ulang otomatis sampai tersambung lagi.
+  bool _muatPutus = false;
+  Timer? _ulangMuat;
+
   String? _senderPlace;
   bool _checking = false;
 
@@ -89,6 +100,7 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
   @override
   void dispose() {
     _poll?.cancel();
+    _ulangMuat?.cancel();
     super.dispose();
   }
 
@@ -119,23 +131,45 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
       setState(() {
         _order = o;
         _loaded = true;
+        _galatMuat = null;
+        _muatPutus = false;
         // #27: peringatan "pembayaran gagal" dari Snap basi begitu pesanan
         // tak lagi menunggu pembayaran (sudah lunas / batal).
         if (_error == _pesanSnapGagal && o.status != 'menunggu_pembayaran') {
           _error = null;
         }
       });
+      _ulangMuat?.cancel();
+      _ulangMuat = null;
       _syncPolling();
       _resolveSender();
       _lacak();
     } on ApiException catch (e) {
       if (!mounted) return;
+      final putus = _galatSementara(e);
       setState(() {
-        _error = e.message;
+        _muatPutus = putus;
+        _galatMuat = putus ? _pesanServerPutus : e.message;
         _loaded = true;
       });
+      // Server sempat tak terjangkau → muat ulang otomatis sampai pulih; pembeli
+      // yang baru membayar tak perlu menekan apa pun.
+      if (putus) {
+        _ulangMuat ??= Timer.periodic(const Duration(seconds: 8), (_) => _load());
+      }
     }
   }
+
+  /// Server tak terjangkau (koneksi putus / timeout = 0, atau 5xx) — sementara,
+  /// bukan "pesanan tidak ada".
+  static bool _galatSementara(ApiException e) =>
+      e.statusCode == 0 || e.statusCode >= 500;
+
+  /// Netral: koneksi putus bisa karena server kita ATAU internet pembeli.
+  static const _pesanServerPutus =
+      'Koneksi ke server MasPart terputus. Dicek ulang otomatis — bila Anda '
+      'sudah membayar, pembayaran tetap tercatat dan pesanan diproses begitu '
+      'tersambung lagi.';
 
   /// Auto-poll selama pembayaran gateway masih menunggu — status berubah
   /// sendiri begitu callback gateway masuk, tanpa pembeli menekan apa pun.
@@ -228,8 +262,13 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
       }
     } on ApiException catch (e) {
       // Polling berikutnya tetap mencoba; galatnya ditampilkan supaya pembeli
-      // tahu status belum bisa dicek (mis. koneksi / terlalu sering).
-      if (mounted) setState(() => _galatBayar = e.message);
+      // tahu status belum bisa dicek (mis. koneksi / terlalu sering). Koneksi
+      // putus: pesan menenangkan — uangnya tak lewat server kita & pelunasannya
+      // dikejar server begitu pulih (dulu "periksa internet" walau server mati).
+      if (mounted) {
+        setState(() => _galatBayar =
+            _galatSementara(e) ? _pesanServerPutus : e.message);
+      }
     } catch (_) {
       if (mounted && manual) {
         setState(() => _galatBayar = 'Status pembayaran gagal dicek. Coba lagi.');
@@ -531,13 +570,28 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
 
     if (o == null) {
       return Center(
-        child: _loaded
-            ? const MasEmpty(
-                icon: Icons.receipt_long_outlined,
-                title: 'Pesanan tidak ditemukan',
-                subtitle: 'Kode pesanan tidak dikenal atau bukan milik Anda.',
-              )
-            : CircularProgressIndicator(color: m.brand600),
+        child: !_loaded
+            ? CircularProgressIndicator(color: m.brand600)
+            : _muatPutus
+                ? MasEmpty(
+                    icon: Icons.cloud_off_rounded,
+                    title: 'Tidak bisa terhubung ke server',
+                    subtitle: 'Pesanan Anda tidak hilang. Layar ini mencoba lagi '
+                        'otomatis — bila Anda sudah membayar, pembayaran tetap '
+                        'tercatat dan pesanan diproses begitu tersambung lagi.',
+                    action: MasButton(
+                      label: 'Coba Lagi',
+                      primary: false,
+                      height: 38,
+                      onTap: _load,
+                    ),
+                  )
+                : MasEmpty(
+                    icon: Icons.receipt_long_outlined,
+                    title: 'Pesanan tidak ditemukan',
+                    subtitle: _galatMuat ??
+                        'Kode pesanan tidak dikenal atau bukan milik Anda.',
+                  ),
       );
     }
 
@@ -548,6 +602,11 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
         children: [
           if (_error != null) ...[
             _alert(m, _error!, tone: MasPillTone.danger),
+            const SizedBox(height: 14),
+          ],
+          if (_galatMuat != null) ...[
+            _alert(m, _galatMuat!,
+                tone: _muatPutus ? MasPillTone.warn : MasPillTone.danger),
             const SizedBox(height: 14),
           ],
 
@@ -1278,7 +1337,9 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                 _alert(m, 'Status diperbarui otomatis setelah pembayaran masuk.'),
               ],
 
-              if (_galatBayar != null) ...[
+              // Pesan putus yang sama sudah tampil di banner atas → jangan dobel.
+              if (_galatBayar != null &&
+                  !(_muatPutus && _galatBayar == _pesanServerPutus)) ...[
                 const SizedBox(height: 10),
                 _alert(m, _galatBayar!, tone: MasPillTone.warn),
               ],
