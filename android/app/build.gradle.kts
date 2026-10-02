@@ -32,6 +32,18 @@ if (file("google-services.json").exists()) {
 //   keytool -genkey -v -keystore maspart-release.jks -keyalg RSA //           -keysize 2048 -validity 10000 -alias maspart
 // ⚠️ Setelah beralih ke kunci baru, pengguna yang sudah memasang APK
 //    lama HARUS meng-uninstall dulu — Android menolak update beda kunci.
+// API key Google Maps SDK for Android — opsional & TIDAK ikut ke git.
+// Isi `MAPS_API_KEY=AIza...` di android/local.properties (atau env MAPS_API_KEY
+// di CI). Batasi kuncinya di Google Cloud ke package com.example.maspart_mobile +
+// SHA-1 sertifikat, API = "Maps SDK for Android". Kosong = layar peta memakai
+// OpenStreetMap (MainActivity melaporkannya ke Dart lewat kanal maspart/peta).
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(FileInputStream(localPropertiesFile))
+}
+val mapsApiKey = (localProperties.getProperty("MAPS_API_KEY") ?: System.getenv("MAPS_API_KEY") ?: "").trim()
+
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 val hasReleaseKey = keystorePropertiesFile.exists()
@@ -60,6 +72,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
     }
 
     signingConfigs {

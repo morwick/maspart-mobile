@@ -3,17 +3,20 @@
 //
 // • PilihLokasiScreen — pembeli memilih GUDANG tempat dia berbelanja. Stok &
 //   harga di etalase di-scope backend ke gudang ini.
-// • PilihLokasiPeta   — pemetik ALAMAT KIRIM di peta (padanan MapPicker web,
-//   Leaflet + OpenStreetMap → flutter_map, sama-sama tanpa API key).
+// • PilihLokasiPeta   — pemetik ALAMAT KIRIM di peta (padanan MapPicker web).
+//   Google Maps bila API key terpasang (lib/peta_google.dart), selain itu
+//   flutter_map + OpenStreetMap — sama seperti web (Google / Leaflet).
 //   Dibuka sebagai halaman penuh dan mengembalikan [GeoPlace].
 
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart' as gm;
 import 'package:latlong2/latlong.dart';
 
 import '../api_service.dart';
 import '../app/nav.dart';
+import '../peta_google.dart';
 import '../theme/mas_theme.dart';
 import '../widgets/mas_ui.dart';
 
@@ -197,6 +200,9 @@ class PilihLokasiPeta extends StatefulWidget {
 
 class _PilihLokasiPetaState extends State<PilihLokasiPeta> {
   final _mapCtl = MapController();
+  gm.GoogleMapController? _gCtl;
+  /// null = masih bertanya ke native; true = Google Maps; false = OpenStreetMap.
+  bool? _google;
   final _searchCtl = TextEditingController();
   Timer? _debounce;
 
@@ -210,6 +216,9 @@ class _PilihLokasiPetaState extends State<PilihLokasiPeta> {
   @override
   void initState() {
     super.initState();
+    PetaGoogle.siap().then((v) {
+      if (mounted) setState(() => _google = v);
+    });
     if (widget.initial != null) {
       _picked = widget.initial;
       _resolve(widget.initial!);
@@ -220,7 +229,17 @@ class _PilihLokasiPetaState extends State<PilihLokasiPeta> {
   void dispose() {
     _debounce?.cancel();
     _searchCtl.dispose();
+    _gCtl?.dispose();
     super.dispose();
+  }
+
+  void _pindahKamera(LatLng p, double zoom) {
+    if (_google == true) {
+      _gCtl?.animateCamera(
+          gm.CameraUpdate.newLatLngZoom(gm.LatLng(p.latitude, p.longitude), zoom));
+    } else if (_google == false) {
+      _mapCtl.move(p, zoom);
+    }
   }
 
   /// Koordinat → alamat + kode pos (kode pos inilah yang dipakai hitung ongkir).
@@ -269,13 +288,40 @@ class _PilihLokasiPetaState extends State<PilihLokasiPeta> {
       _results = [];
       _searchCtl.clear();
     });
-    _mapCtl.move(p, 16);
+    _pindahKamera(p, 16);
     FocusScope.of(context).unfocus();
+    // Hasil setingkat kawasan sering tanpa kode pos — ambil dari titiknya,
+    // karena kode pos itulah yang dipakai menghitung ongkir.
+    if (g.postal.isEmpty) _resolve(p);
   }
 
   void _tap(LatLng p) {
     setState(() => _picked = p);
     _resolve(p);
+  }
+
+  Widget _petaGoogle() {
+    final p = _picked;
+    final awal = p ?? _defaultCenter;
+    return gm.GoogleMap(
+      initialCameraPosition: gm.CameraPosition(
+        target: gm.LatLng(awal.latitude, awal.longitude),
+        zoom: p != null ? 16 : 11,
+      ),
+      onMapCreated: (c) => _gCtl = c,
+      onTap: (t) => _tap(LatLng(t.latitude, t.longitude)),
+      markers: {
+        if (p != null)
+          gm.Marker(
+            markerId: const gm.MarkerId('titik'),
+            position: gm.LatLng(p.latitude, p.longitude),
+          ),
+      },
+      myLocationButtonEnabled: false,
+      mapToolbarEnabled: false,
+      zoomControlsEnabled: false,
+      compassEnabled: false,
+    );
   }
 
   @override
@@ -349,7 +395,14 @@ class _PilihLokasiPetaState extends State<PilihLokasiPeta> {
 
         Expanded(
           child: Stack(children: [
-            FlutterMap(
+            if (_google == null)
+              Center(
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: m.brand600))
+            else if (_google!)
+              _petaGoogle()
+            else
+              FlutterMap(
               mapController: _mapCtl,
               options: MapOptions(
                 initialCenter: _picked ?? _defaultCenter,

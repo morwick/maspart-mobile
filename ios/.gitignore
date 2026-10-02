@@ -32,3 +32,6 @@ Runner/GeneratedPluginRegistrant.*
 !default.mode2v3
 !default.pbxuser
 !default.perspectivev3
+
+# API key (Google Maps) — lihat Flutter/Secrets.xcconfig.example
+Flutter/Secrets.xcconfig
