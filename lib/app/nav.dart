@@ -424,6 +424,23 @@ Set<MasScreen> accessibleScreens(List<NavSection> sections) => {
       if (b.isNotEmpty) 'buyer': b,
     });
   }
+  // Tujuan notifikasi promo (siaran admin /admin/promo-push — pilihan
+  // "Saat diketuk, buka" di panel web).
+  if (seg.length >= 2 && seg[0] == 'part') {
+    return (MasScreen.part, {'part_number': seg[1]});
+  }
+  if (seg.length == 1) {
+    final layar = const {
+      'toko': MasScreen.toko,
+      'voucher': MasScreen.voucher,
+      'keranjang': MasScreen.keranjang,
+      'beli-lagi': MasScreen.beliLagi,
+      'poin': MasScreen.poin,
+      'pesanan': MasScreen.pesanan,
+      'profil': MasScreen.profil,
+    }[seg[0]];
+    if (layar != null) return (layar, <String, dynamic>{});
+  }
   return null;
 }
 

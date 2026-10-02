@@ -16,6 +16,10 @@
 //   • tiap push     → data['badge'] = jumlah belum dibaca → angka di ikon
 //                     aplikasi (lib/ikon_badge.dart), juga saat aplikasi tertutup.
 //                     Pesan data-saja {badge} = sinkron angka (dibaca di web).
+//   • promo         → data['jenis']=='promo' (siaran admin, /admin/promo-push):
+//                     kanal "promo" sendiri (bisa dimatikan pembeli tanpa
+//                     kehilangan kabar pesanan), gambar kecil di kanan & besar
+//                     saat dibentangkan, TANPA badge (bukan notifikasi lonceng).
 // ⛔ Tak ada fungsi di sini yang boleh melempar galat ke pemanggil.
 
 import 'dart:async';
@@ -24,6 +28,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:http/http.dart' as http;
 
 import 'api_service.dart';
 import 'ikon_badge.dart';
@@ -69,6 +74,16 @@ class Push {
     importance: Importance.high,
   );
 
+  /// Kanal siaran promo — samakan dengan `CHANNEL_PROMO` di backend
+  /// (services/push.py). Saat aplikasi di latar belakang/tertutup, FCM sendiri
+  /// yang menampilkan notifikasinya (lengkap dengan gambar) di kanal ini.
+  static const _kanalPromo = AndroidNotificationChannel(
+    'promo',
+    'Promo & Penawaran',
+    description: 'Promo, voucher & penawaran spesial MasPart',
+    importance: Importance.high,
+  );
+
   static StreamSubscription<String>? _subRefresh;
 
   /// Token FCM terakhir yang berhasil dikirim ke server (untuk dilepas saat logout).
@@ -93,9 +108,10 @@ class Push {
         ),
         onDidReceiveNotificationResponse: (r) => _buka(r.payload),
       );
-      await _lokal
-          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-          ?.createNotificationChannel(_kanal);
+      final android = _lokal
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+      await android?.createNotificationChannel(_kanal);
+      await android?.createNotificationChannel(_kanalPromo);
 
       // Latar depan: FCM TIDAK menampilkan notifikasi sendiri → tampilkan lokal.
       FirebaseMessaging.onMessage.listen(_tampilkanDepan);
@@ -184,26 +200,51 @@ class Push {
     tautanTertunda.value = t;
   }
 
+  /// Unduh gambar notifikasi promo (null = tak ada / gagal → tampil tanpa gambar).
+  static Future<Uint8List?> _unduhGambar(String? url) async {
+    if (url == null || !url.startsWith('https://')) return null;
+    try {
+      final r = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 6));
+      return r.statusCode == 200 && r.bodyBytes.isNotEmpty ? r.bodyBytes : null;
+    } catch (e) {
+      debugPrint('Push: unduh gambar promo gagal ($e)');
+      return null;
+    }
+  }
+
   static Future<void> _tampilkanDepan(RemoteMessage m) async {
-    final badge = IkonBadge.dariData(m.data);
+    final promo = m.data['jenis']?.toString() == 'promo';
+    final badge = promo ? null : IkonBadge.dariData(m.data);
     if (badge != null) IkonBadge.pasang(badge);
     try {
       final judul = m.notification?.title ?? m.data['judul']?.toString() ?? '';
       final isi = m.notification?.body ?? m.data['isi']?.toString() ?? '';
       if (judul.isEmpty && isi.isEmpty) return;
+      final kanal = promo ? _kanalPromo : _kanal;
+      // Promo bergambar: kecil di kanan saat ringkas (largeIcon), besar saat
+      // dibentangkan (BigPicture) — sama dengan tampilan FCM di latar belakang.
+      final gambar = promo
+          ? await _unduhGambar(
+              m.notification?.android?.imageUrl ?? m.data['gambar']?.toString())
+          : null;
+      final bmp = gambar == null ? null : ByteArrayAndroidBitmap(gambar);
       await _lokal.show(
         id: (m.messageId ?? '${DateTime.now().microsecondsSinceEpoch}').hashCode & 0x7fffffff,
         title: judul,
         body: isi,
         notificationDetails: NotificationDetails(
           android: AndroidNotificationDetails(
-            _kanal.id,
-            _kanal.name,
-            channelDescription: _kanal.description,
+            kanal.id,
+            kanal.name,
+            channelDescription: kanal.description,
             importance: Importance.high,
             priority: Priority.high,
             icon: _ikon,
-            styleInformation: BigTextStyleInformation(isi),
+            largeIcon: bmp,
+            styleInformation: bmp != null
+                ? BigPictureStyleInformation(bmp,
+                    contentTitle: judul, summaryText: isi, hideExpandedLargeIcon: true)
+                : BigTextStyleInformation(isi),
             number: badge,
           ),
         ),
