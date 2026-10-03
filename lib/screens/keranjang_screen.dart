@@ -606,6 +606,24 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
                       Text('Harga', style: TextStyle(fontSize: 11, color: m.ink500)),
                       Text(harga > 0 ? formatRupiah(harga) : '—',
                           style: masMono(size: 12.5, color: m.ink700)),
+                      // Flash Sale: harga di atas = harga tagih; normal dicoret.
+                      if (harga > 0 && (s?.hargaNormal ?? 0) > 0)
+                        Text.rich(TextSpan(children: [
+                          TextSpan(
+                            text: formatRupiah(s!.hargaNormal),
+                            style: TextStyle(
+                              decoration: TextDecoration.lineThrough,
+                              decorationColor: m.ink400,
+                            ),
+                          ),
+                          TextSpan(
+                            text: '  ${s.promoPersen}%',
+                            style: const TextStyle(
+                              color: Color(0xFFC81E1E),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ]), style: TextStyle(fontSize: 11, color: m.ink400)),
                     ],
                   ),
                 ),

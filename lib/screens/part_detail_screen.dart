@@ -651,6 +651,34 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
     return (lokal != null && lokal > 0) ? formatRupiah(lokal) : '—';
   }
 
+  /// Flash Sale: `harga` Accurate dari server sudah harga tagih; harga normal
+  /// dicoret di bawahnya (paritas web).
+  Widget? _hargaCoret(MasColors m) {
+    final promo = (_acc?.harga ?? 0) > 0 ? _acc?.promo : null;
+    if (promo == null) return null;
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        Text(formatRupiah(promo.hargaNormal),
+            style: TextStyle(
+              fontSize: 12,
+              color: m.ink400,
+              decoration: TextDecoration.lineThrough,
+              decorationColor: m.ink400,
+            )),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+          decoration: BoxDecoration(
+            color: const Color(0xFFC81E1E),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text('Flash Sale ${promo.persen}%',
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
+        ),
+      ]),
+    );
+  }
+
   /// Berat satuan (gram): katalog dulu, lalu spesifikasi SIMS.
   int get _beratGram {
     final lokal = asInt(_part['berat']);
@@ -899,6 +927,7 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
         ]),
         const SizedBox(height: 8),
         Text(_hargaStr, style: masMono(size: 17, weight: FontWeight.w600, color: m.brand700)),
+        ?_hargaCoret(m),
       ]),
     );
 
@@ -1212,6 +1241,7 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
               ]),
               const SizedBox(height: 8),
               Text(_hargaStr, style: masMono(size: 17, weight: FontWeight.w600, color: m.brand700)),
+              ?_hargaCoret(m),
               // S-18: harga katalog = SEBELUM PPN; PPN ditambahkan di checkout.
               if (hasPrice(_hargaStr)) ...[
                 const SizedBox(height: 3),

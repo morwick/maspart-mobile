@@ -1145,6 +1145,10 @@ class ApiService {
     return TokoCatalog.fromJson(_Api._obj(data));
   }
 
+  /// Strip Flash Sale etalase — kampanye diatur admin (web /admin/flash-sale).
+  static Future<FlashSaleData> flashSale() async =>
+      FlashSaleData.fromJson(_Api._obj(await _Api.get('/api/buyer/flash-sale')));
+
   /// "Produk serupa" di bawah detail part (masukan penguji 2026-09-29), khusus
   /// pembeli. Rute backend `{pn:path}` → PN ber-'/' aman walau di-encode.
   static Future<TokoSerupa> tokoSerupa(String pn) async => TokoSerupa.fromJson(

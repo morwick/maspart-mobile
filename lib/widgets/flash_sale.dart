@@ -4,54 +4,23 @@
 // mundur, kartu produk mendatar dengan badge persen, harga coret, harga promo,
 // dan bar sisa stok.
 //
-// ⚠️ STATUS: TAMPILAN SAJA. Harga promo BELUM berlaku saat checkout —
-// penagihan dihitung ulang di server (`harga.price_for_buyer()`) dari harga
-// Accurate apa adanya. Karena itu strip DIKUNCI MATI di build rilis selama
-// `FlashSaleKampanye.aktif == false`; di build debug/profile ia tampil sebagai
-// PRATINJAU berpita peringatan (padanan NODE_ENV !== 'production' di web).
-// ⚠️ Konfigurasi di bawah WAJIB disamakan dengan `KAMPANYE` di FlashSale.tsx.
+// Isi strip = GET /api/buyer/flash-sale (kampanye diatur admin di web
+// /admin/flash-sale). `harga` tiap kartu SUDAH harga promo dari server —
+// dihitung di `harga.price_for_buyer()`, titik yang sama dengan keranjang &
+// checkout — jadi yang dipajang = yang ditagih. Aplikasi tak menghitung diskon.
 
 import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 
 import '../api_service.dart';
 import '../theme/mas_theme.dart';
 import '../utils.dart';
 
-/// ── KONFIGURASI KAMPANYE — samakan dengan `KAMPANYE` di FlashSale.tsx. ──
-class FlashSaleKampanye {
-  FlashSaleKampanye._();
-
-  /// ⛔ Biarkan false sampai diskon benar-benar berlaku di price_for_buyer().
-  static const bool aktif = false;
-  static const String judul = 'Flash Sale Part Pilihan';
-
-  /// Waktu berakhir, ISO-8601 dengan zona. Lewat tenggat → strip hilang.
-  static const String berakhir = '2026-12-31T23:59:59+07:00';
-
-  /// Peserta promo: part_number → persen diskon. Hanya yang terdaftar ikut.
-  static const Map<String, int> diskon = {};
-
-  /// Persen yang dipakai HANYA di pratinjau, saat `diskon` kosong.
-  static const int diskonPratinjau = 20;
-
-  /// Stok di bawah/sama dengan angka ini diberi label "Terbatas".
-  static const int ambangTerbatas = 3;
-
-  /// Batas kartu yang dipajang.
-  static const int maksKartu = 24;
-
-  /// Pratinjau = kampanye belum aktif & bukan build rilis.
-  static bool get pratinjau => !aktif && !kReleaseMode;
-
-  /// Strip boleh tampil sama sekali? (dipakai layar untuk tak menarik data
-  /// percuma bila strip toh disembunyikan).
-  static bool get tampil => aktif || pratinjau;
-}
+/// Stok di bawah/sama dengan angka ini diberi label "Terbatas".
+const _ambangTerbatas = 3;
 
 const _merahBadge = Color(0xFFC81E1E);
 const _amberTerbatas = Color(0xFFD97706);
@@ -60,12 +29,20 @@ const _panahInk = Color(0xFF1B211D);
 String _dua(int n) => n.toString().padLeft(2, '0');
 
 class FlashSale extends StatefulWidget {
-  /// Kolam produk (ready, berharga, berfoto) — ditarik terpisah oleh layar,
-  /// sekali, supaya strip TIDAK ikut berubah saat pembeli mengetik di cari.
-  final List<TokoProduct> items;
+  /// Kampanye berjalan — ditarik terpisah oleh layar, supaya strip TIDAK ikut
+  /// berubah saat pembeli mengetik di cari. null = belum dimuat / gagal.
+  final FlashSaleData? data;
   final ValueChanged<TokoProduct> onOpen;
 
-  const FlashSale({super.key, required this.items, required this.onOpen});
+  /// Hitung mundur mencapai nol → layar boleh menarik ulang (strip hilang).
+  final VoidCallback? onHabis;
+
+  const FlashSale({
+    super.key,
+    required this.data,
+    required this.onOpen,
+    this.onHabis,
+  });
 
   @override
   State<FlashSale> createState() => _FlashSaleState();
@@ -80,13 +57,29 @@ class _FlashSaleState extends State<FlashSale> {
   @override
   void initState() {
     super.initState();
-    _target = DateTime.tryParse(FlashSaleKampanye.berakhir);
-    if (FlashSaleKampanye.tampil && _target != null) {
-      _hitung();
-      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (mounted) setState(_hitung);
-      });
+    _mulaiTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant FlashSale old) {
+    super.didUpdateWidget(old);
+    if (old.data?.berakhir != widget.data?.berakhir ||
+        old.data?.aktif != widget.data?.aktif) {
+      _mulaiTimer();
     }
+  }
+
+  void _mulaiTimer() {
+    _timer?.cancel();
+    _timer = null;
+    _sisa = null;
+    final d = widget.data;
+    _target = (d != null && d.aktif) ? DateTime.tryParse(d.berakhir) : null;
+    if (_target == null) return;
+    _hitung();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(_hitung);
+    });
   }
 
   @override
@@ -101,7 +94,12 @@ class _FlashSaleState extends State<FlashSale> {
     if (t == null) return;
     final d = t.difference(DateTime.now());
     _sisa = d.isNegative ? Duration.zero : d;
-    if (_sisa == Duration.zero) _timer?.cancel();
+    if (_sisa == Duration.zero) {
+      _timer?.cancel();
+      // Setelah frame ini: induk menarik ulang → server bilang aktif=false.
+      final cb = widget.onHabis;
+      if (cb != null) WidgetsBinding.instance.addPostFrameCallback((_) => cb());
+    }
   }
 
   String _teksMundur(Duration s) {
@@ -113,21 +111,10 @@ class _FlashSaleState extends State<FlashSale> {
     return d > 0 ? '$d hari $hms' : hms;
   }
 
-  List<(TokoProduct, int)> _peserta() {
-    // Foto wajib: kartu promo tanpa gambar melemahkan strip.
-    final src = widget.items
-        .where((p) => p.ready && p.harga > 0 && (p.foto ?? '').isNotEmpty);
-    if (FlashSaleKampanye.aktif) {
-      return [
-        for (final p in src)
-          if ((FlashSaleKampanye.diskon[p.partNumber] ?? 0) > 0)
-            (p, FlashSaleKampanye.diskon[p.partNumber]!),
-      ];
-    }
-    return [
-      for (final p in src.take(FlashSaleKampanye.maksKartu))
-        (p, FlashSaleKampanye.diskonPratinjau),
-    ];
+  List<TokoProduct> _peserta() {
+    final d = widget.data;
+    if (d == null || !d.aktif) return const [];
+    return [for (final p in d.items) if (p.promo) p];
   }
 
   void _geser() {
@@ -143,7 +130,6 @@ class _FlashSaleState extends State<FlashSale> {
 
   @override
   Widget build(BuildContext context) {
-    if (!FlashSaleKampanye.tampil) return const SizedBox.shrink();
     final peserta = _peserta();
     if (peserta.isEmpty) return const SizedBox.shrink();
     final sisa = _sisa;
@@ -174,8 +160,11 @@ class _FlashSaleState extends State<FlashSale> {
                   runSpacing: 8,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    const Text(FlashSaleKampanye.judul,
-                        style: TextStyle(
+                    Text(
+                        (widget.data?.judul ?? '').isNotEmpty
+                            ? widget.data!.judul
+                            : 'Flash Sale',
+                        style: const TextStyle(
                           fontSize: 17,
                           fontWeight: FontWeight.w800,
                           letterSpacing: -0.17,
@@ -207,30 +196,6 @@ class _FlashSaleState extends State<FlashSale> {
                           ]),
                         ),
                       ),
-                    if (FlashSaleKampanye.pratinjau)
-                      Tooltip(
-                        message:
-                            'Harga promo belum berlaku saat checkout — strip ini hanya tampil di build debug',
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.35),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.45)),
-                          ),
-                          child: const Text(
-                            'PRATINJAU · harga promo belum berlaku di checkout',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.44,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
                   ],
                 ),
               ),
@@ -256,9 +221,8 @@ class _FlashSaleState extends State<FlashSale> {
                   for (int k = 0; k < peserta.length; k++) ...[
                     if (k > 0) const SizedBox(width: 10),
                     _KartuPromo(
-                      p: peserta[k].$1,
-                      persen: peserta[k].$2,
-                      onOpen: () => widget.onOpen(peserta[k].$1),
+                      p: peserta[k],
+                      onOpen: () => widget.onOpen(peserta[k]),
                     ),
                   ],
                 ],
@@ -299,20 +263,15 @@ class _FlashSaleState extends State<FlashSale> {
 
 class _KartuPromo extends StatelessWidget {
   final TokoProduct p;
-  final int persen;
   final VoidCallback onOpen;
 
-  const _KartuPromo({
-    required this.p,
-    required this.persen,
-    required this.onOpen,
-  });
+  const _KartuPromo({required this.p, required this.onOpen});
 
   @override
   Widget build(BuildContext context) {
     final m = context.mas;
-    final promo = (p.harga * (100 - persen) / 100).round();
-    final terbatas = p.stok <= FlashSaleKampanye.ambangTerbatas;
+    final habis = p.stok <= 0;
+    final terbatas = !habis && p.stok <= _ambangTerbatas;
     // Bar = ilustrasi sisa stok relatif ambang "banyak" (10 pcs); MASPART tak
     // punya kuota promo, jadi ini BUKAN "sudah terjual sekian".
     final isiBar = ((p.stok / 10) * 100).clamp(8.0, 100.0) / 100;
@@ -359,7 +318,7 @@ class _KartuPromo extends StatelessWidget {
                       borderRadius:
                           BorderRadius.only(bottomRight: Radius.circular(8)),
                     ),
-                    child: Text('$persen%',
+                    child: Text('${p.promoPersen}%',
                         style: const TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w700,
@@ -367,6 +326,17 @@ class _KartuPromo extends StatelessWidget {
                         )),
                   ),
                 ),
+                if (habis)
+                  Container(
+                    color: Colors.white.withValues(alpha: 0.6),
+                    alignment: Alignment.center,
+                    child: Text('Stok habis',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: m.ink700,
+                        )),
+                  ),
               ]),
             ),
             Padding(
@@ -388,7 +358,7 @@ class _KartuPromo extends StatelessWidget {
                         )),
                   ),
                   const SizedBox(height: 3),
-                  Text(formatRupiah(p.harga),
+                  Text(formatRupiah(p.hargaNormal),
                       style: TextStyle(
                         fontSize: 11,
                         color: m.ink400,
@@ -396,7 +366,7 @@ class _KartuPromo extends StatelessWidget {
                         decorationColor: m.ink400,
                       )),
                   const SizedBox(height: 3),
-                  Text(formatRupiah(promo),
+                  Text(formatRupiah(p.harga),
                       style: TextStyle(
                         fontSize: 14.5,
                         fontWeight: FontWeight.w800,
@@ -422,9 +392,11 @@ class _KartuPromo extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    terbatas
-                        ? 'Terbatas · sisa ${thousands(p.stok)}'
-                        : 'Tersedia · ${thousands(p.stok)}',
+                    habis
+                        ? 'Stok habis'
+                        : terbatas
+                            ? 'Terbatas · sisa ${thousands(p.stok)}'
+                            : 'Tersedia · ${thousands(p.stok)}',
                     style: TextStyle(fontSize: 10.5, color: m.ink500),
                   ),
                 ],

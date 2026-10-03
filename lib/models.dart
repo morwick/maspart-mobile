@@ -1258,7 +1258,12 @@ class AccurateStockDetail {
   final String name;
   final String no;
   final String itemType;
+
+  /// Harga TAGIH (sudah dipotong Flash Sale bila ada).
   final double? harga;
+
+  /// Flash Sale berjalan → harga normal untuk dicoret. null = tanpa promo.
+  final PromoInfo? promo;
   final List<GudangQty> perGudang;
 
   const AccurateStockDetail({
@@ -1269,6 +1274,7 @@ class AccurateStockDetail {
     this.no = '',
     this.itemType = '',
     this.harga,
+    this.promo,
     this.perGudang = const [],
   });
 
@@ -1281,7 +1287,32 @@ class AccurateStockDetail {
         no: _s(j['no']),
         itemType: _s(j['item_type']),
         harga: _dOrNull(j['harga']),
+        promo: j['promo'] is Map
+            ? PromoInfo.fromJson((j['promo'] as Map).cast<String, dynamic>())
+            : null,
         perGudang: _list(j['per_gudang'], GudangQty.fromJson),
+      );
+}
+
+/// Flash Sale yang sedang berlaku untuk satu part (kembaran `PromoInfo` web).
+class PromoInfo {
+  final int persen;
+  final double hargaNormal;
+  final String berakhir;
+  final String judul;
+
+  const PromoInfo({
+    this.persen = 0,
+    this.hargaNormal = 0,
+    this.berakhir = '',
+    this.judul = '',
+  });
+
+  factory PromoInfo.fromJson(Map<String, dynamic> j) => PromoInfo(
+        persen: _i(j['persen']),
+        hargaNormal: _d(j['harga_normal']),
+        berakhir: _s(j['berakhir']),
+        judul: _s(j['judul']),
       );
 }
 
@@ -2940,6 +2971,11 @@ class CartGudangItem {
   /// `ApiService.partImageUrl`). null = belum ada foto → ikon gir.
   final String? foto;
 
+  /// Flash Sale: [harga] sudah harga promo; harga normal hanya untuk dicoret
+  /// (0 = tanpa promo).
+  final double hargaNormal;
+  final int promoPersen;
+
   const CartGudangItem({
     required this.partNumber,
     this.gudang = '',
@@ -2951,6 +2987,8 @@ class CartGudangItem {
     this.hanyaAmbil = false,
     this.stok = 0,
     this.foto,
+    this.hargaNormal = 0,
+    this.promoPersen = 0,
   });
 
   factory CartGudangItem.fromJson(Map<String, dynamic> j) => CartGudangItem(
@@ -2964,6 +3002,8 @@ class CartGudangItem {
         hanyaAmbil: _b(j['hanya_ambil']),
         stok: _i(j['stok']),
         foto: _sOrNull(j['foto']),
+        hargaNormal: _d(j['harga_normal']),
+        promoPersen: _i(j['promo_persen']),
       );
 }
 
@@ -3187,6 +3227,11 @@ class TokoProduct {
   final int ulasan;
   final int terjual;
 
+  /// Flash Sale: [harga] sudah harga promo; harga normal hanya untuk dicoret
+  /// (0 = tanpa promo).
+  final double hargaNormal;
+  final int promoPersen;
+
   const TokoProduct({
     required this.partNumber,
     this.name = '',
@@ -3201,7 +3246,11 @@ class TokoProduct {
     this.rating = 0,
     this.ulasan = 0,
     this.terjual = 0,
+    this.hargaNormal = 0,
+    this.promoPersen = 0,
   });
+
+  bool get promo => promoPersen > 0 && hargaNormal > harga;
 
   factory TokoProduct.fromJson(Map<String, dynamic> j) => TokoProduct(
         partNumber: _s(j['part_number']),
@@ -3217,6 +3266,31 @@ class TokoProduct {
         rating: _d(j['rating']),
         ulasan: _i(j['ulasan']),
         terjual: _i(j['terjual']),
+        hargaNormal: _d(j['harga_normal']),
+        promoPersen: _i(j['promo_persen']),
+      );
+}
+
+/// Strip Flash Sale etalase (GET /api/buyer/flash-sale): kampanye yang sedang
+/// berjalan + kartu peserta. Harga kartu SUDAH harga promo dari server.
+class FlashSaleData {
+  final bool aktif;
+  final String judul;
+  final String berakhir;
+  final List<TokoProduct> items;
+
+  const FlashSaleData({
+    this.aktif = false,
+    this.judul = '',
+    this.berakhir = '',
+    this.items = const [],
+  });
+
+  factory FlashSaleData.fromJson(Map<String, dynamic> j) => FlashSaleData(
+        aktif: _b(j['aktif']),
+        judul: _s(j['judul']),
+        berakhir: _s(j['berakhir']),
+        items: _list(j['items'], TokoProduct.fromJson),
       );
 }
 

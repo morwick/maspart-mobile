@@ -44,8 +44,8 @@ class _TokoScreenState extends State<TokoScreen> {
   TokoCatalog? _cat;
   List<TokoProduct> _items = [];
 
-  /// Isi strip flash sale — ditarik SENDIRI, sekali (lihat [_loadFlash]).
-  List<TokoProduct> _flashItems = [];
+  /// Strip flash sale — ditarik SENDIRI (lihat [_loadFlash]).
+  FlashSaleData? _flash;
 
   bool _loading = true;
   bool _loadingMore = false;
@@ -63,7 +63,7 @@ class _TokoScreenState extends State<TokoScreen> {
     _cart.addListener(_onCartChanged);
     _loadHome();
     _loadCatalog();
-    if (FlashSaleKampanye.tampil) _loadFlash();
+    _loadFlash();
   }
 
   @override
@@ -89,21 +89,14 @@ class _TokoScreenState extends State<TokoScreen> {
     }
   }
 
-  /// Kolam strip flash sale — permintaan TERPISAH dari grid (sama seperti web):
-  /// `/api/buyer/home` terlalu sedikit setelah disaring, dan memakai `_items`
-  /// membuat isi promo ikut bergeser saat pembeli mengetik di kolom cari.
-  /// sort "relevan" + 100 (backend mendahulukan yang berfoto), lalu yang tak
-  /// berfoto dibuang dan diurutkan stok terbanyak di sini.
+  /// Strip flash sale dari /api/buyer/flash-sale (kampanye diatur admin) —
+  /// permintaan TERPISAH dari grid (sama seperti web) supaya isi promo tak
+  /// ikut bergeser saat pembeli mengetik di kolom cari. Harga kartu sudah
+  /// harga promo dari server.
   Future<void> _loadFlash() async {
     try {
-      final r = await ApiService.tokoCatalog(
-          ready: true, sort: 'relevan', page: 1, pageSize: 100);
-      if (!mounted) return;
-      final berfoto = r.items
-          .where((p) => (p.foto ?? '').isNotEmpty)
-          .toList()
-        ..sort((a, b) => b.stok.compareTo(a.stok));
-      setState(() => _flashItems = berfoto);
+      final r = await ApiService.flashSale();
+      if (mounted) setState(() => _flash = r);
     } catch (_) {
       /* strip promo tak sepenting katalog — diam saja bila gagal */
     }
@@ -239,7 +232,8 @@ class _TokoScreenState extends State<TokoScreen> {
           if (_browsing) ...[
             const PromoBanner(),
             FlashSale(
-              items: _flashItems,
+              data: _flash,
+              onHabis: _loadFlash,
               onOpen: (p) => nav.go(MasScreen.part,
                   part: {'part_number': p.partNumber, 'part_name': p.name}),
             ),
@@ -794,6 +788,26 @@ class TokoProductCard extends StatelessWidget {
                     height: 19,
                   ),
                 ),
+                if (p.promo)
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFC81E1E),
+                        borderRadius:
+                            BorderRadius.only(bottomLeft: Radius.circular(8)),
+                      ),
+                      child: Text('${p.promoPersen}%',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          )),
+                    ),
+                  ),
               ]),
             ),
 
@@ -828,6 +842,15 @@ class TokoProductCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         color: m.brand700,
                       )),
+                  // Flash Sale: harga di atas = harga tagih; normal dicoret.
+                  if (p.promo)
+                    Text(formatRupiah(p.hargaNormal),
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: m.ink400,
+                          decoration: TextDecoration.lineThrough,
+                          decorationColor: m.ink400,
+                        )),
                   // S-18: harga etalase = SEBELUM PPN (paritas web).
                   Text(kKetHargaBelumPpn,
                       style: TextStyle(fontSize: 10, color: m.ink400)),
