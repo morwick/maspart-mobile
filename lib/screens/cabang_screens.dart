@@ -1209,7 +1209,8 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
   }
 
   Widget _penerima(MasColors m, OrderDetail o) => MasSectionCard(
-        title: '📍 Penerima',
+        title: 'Penerima',
+        icon: Icons.location_on_outlined,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
@@ -1260,7 +1261,8 @@ class _CabangPesananDetailScreenState extends State<CabangPesananDetailScreen> {
     final resi = o.trackingNo ?? '';
 
     return MasSectionCard(
-      title: '🚚 Pengiriman',
+      title: 'Pengiriman',
+      icon: Icons.local_shipping_outlined,
       children: [
         MasKeyValue(label: 'Kurir', value: kurir.isNotEmpty ? kurir : '—'),
         MasKeyValue(

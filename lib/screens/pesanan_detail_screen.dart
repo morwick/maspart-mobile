@@ -702,7 +702,8 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
           // Invoice hanya untuk pesanan LUNAS (setara halaman invoice web).
           if (invoiceTersedia(o)) ...[
             MasButton(
-              label: _invoiceBusy ? 'Menyiapkan…' : '🧾 Cetak Invoice (PDF)',
+              label: _invoiceBusy ? 'Menyiapkan…' : 'Cetak Invoice (PDF)',
+              icon: Icons.receipt_long_outlined,
               primary: false,
               expand: true,
               loading: _invoiceBusy,
@@ -936,7 +937,8 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
   Widget _pengiriman(MasColors m, OrderDetail o) {
     final resi = o.trackingNo!;
     return MasSectionCard(
-      title: '🚚 Pengiriman',
+      title: 'Pengiriman',
+      icon: Icons.local_shipping_outlined,
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
@@ -1061,7 +1063,8 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
         ? o.pickupGudang!
         : (_gudangKirim(o).isNotEmpty ? _gudangKirim(o) : o.gudang);
     return MasSectionCard(
-      title: '🏬 Ambil di Toko',
+      title: 'Ambil di Toko',
+      icon: Icons.storefront_outlined,
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
@@ -1174,7 +1177,8 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
   Widget _pengirim(MasColors m, OrderDetail o) {
     final kirim = _gudangKirim(o);
     return MasSectionCard(
-      title: '📦 Lokasi Pengirim',
+      title: 'Lokasi Pengirim',
+      icon: Icons.warehouse_outlined,
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
@@ -1229,7 +1233,8 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
   }
 
   Widget _penerima(MasColors m, OrderDetail o) => MasSectionCard(
-        title: '📍 Penerima',
+        title: 'Penerima',
+        icon: Icons.location_on_outlined,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
@@ -1479,7 +1484,8 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
               if (o.status == 'dikirim' && !o.pickup) ...[
                 const SizedBox(height: 10),
                 MasButton(
-                  label: _busy == 'confirm' ? 'Memproses…' : '✓ Pesanan Diterima',
+                  label: _busy == 'confirm' ? 'Memproses…' : 'Pesanan Diterima',
+                  icon: Icons.check_circle_outline,
                   expand: true,
                   loading: _busy == 'confirm',
                   onTap: _busy != null ? null : _doConfirm,
@@ -1516,7 +1522,8 @@ class _PesananDetailScreenState extends State<PesananDetailScreen> {
                     MasButton(
                       label: _busy == 'proof'
                           ? 'Mengunggah…'
-                          : '📎 Upload Bukti Transfer',
+                          : 'Upload Bukti Transfer',
+                      icon: Icons.attach_file_rounded,
                       primary: false,
                       height: 38,
                       expand: true,
