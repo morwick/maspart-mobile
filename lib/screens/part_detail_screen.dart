@@ -840,7 +840,7 @@ class _PartDetailScreenState extends State<PartDetailScreen> {
         // yang sama dengan Toko; khusus pembeli (paritas web ProdukSerupa).
         // Kosong / gagal → tak tampil sama sekali.
         if (pn.isNotEmpty && isBuyer)
-          _ProdukSerupaSection(key: ValueKey('serupa-$pn'), pn: pn),
+          ProdukSerupaSection(key: ValueKey('serupa-$pn'), pn: pn),
         // Penilaian pembeli ala Shopee — rata-rata, sebaran, filter, ulasan.
         // Hanya di tampilan pembeli (penjualan), sama dengan baris ★ di atas.
         if (pn.isNotEmpty && isBuyer) ...[
@@ -2450,17 +2450,18 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
 
 // ══════════════════════════════════════════════════════════════════════
 // Produk serupa (masukan penguji 2026-09-29) — paritas web ProdukSerupa
+// Publik: dipakai ulang tombol "Produk Serupa" di baris Keranjang.
 // ══════════════════════════════════════════════════════════════════════
 
-class _ProdukSerupaSection extends StatefulWidget {
+class ProdukSerupaSection extends StatefulWidget {
   final String pn;
-  const _ProdukSerupaSection({super.key, required this.pn});
+  const ProdukSerupaSection({super.key, required this.pn});
 
   @override
-  State<_ProdukSerupaSection> createState() => _ProdukSerupaSectionState();
+  State<ProdukSerupaSection> createState() => _ProdukSerupaSectionState();
 }
 
-class _ProdukSerupaSectionState extends State<_ProdukSerupaSection> {
+class _ProdukSerupaSectionState extends State<ProdukSerupaSection> {
   final _cart = CartStore.instance;
   List<TokoProduct> _items = [];
 

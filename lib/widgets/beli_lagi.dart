@@ -47,6 +47,10 @@ Future<int> masukkanBeliLagi(
   ];
   if (baris.isEmpty) return 0;
   await CartStore.instance.addMany(baris);
+  // Pola Shopee (paritas web `masukkanKeKeranjang`): barang hasil Beli Lagi
+  // langsung TERCENTANG di keranjang — pembeli tinggal menekan Checkout
+  // (centang lama diganti, bukan ditambah).
+  await CartStore.instance.setPilihan(baris.map((b) => b.partNumber));
   return baris.length;
 }
 

@@ -23,6 +23,7 @@ enum MasScreen {
   // Pembeli
   toko,
   keranjang,
+  checkout,
   pesanan,
   pesananDetail,
   beliLagi,
@@ -82,7 +83,9 @@ const Map<MasScreen, (String, String)> kScreenTitles = {
   MasScreen.rak: ('Rak & Kartu Stok', 'Lokasi rak & foto kartu stok per gudang'),
 
   MasScreen.toko: ('Belanja Part', 'Etalase part siap kirim dari gudang terdekat'),
-  MasScreen.keranjang: ('Keranjang', 'Tinjau part, pilih ekspedisi, lalu bayar'),
+  // Pola Shopee (2026-10-03): Keranjang = daftar + centang, Checkout = bayar.
+  MasScreen.keranjang: ('Keranjang Saya', 'Centang part yang mau dibeli, lalu Checkout'),
+  MasScreen.checkout: ('Checkout', 'Alamat, ekspedisi, dan pembayaran untuk part yang dipilih'),
   MasScreen.pesanan: ('Pesanan Saya', 'Riwayat & status pesanan'),
   MasScreen.tagihanTempo: ('Tagihan Tempo', 'Bayar belakangan — limit & jatuh tempo'),
   MasScreen.pesananDetail: ('Detail Pesanan', ''),
@@ -245,6 +248,7 @@ const Set<MasScreen> _kChildScreens = {
   MasScreen.orderDetail,
   MasScreen.cabangPesananDetail,
   MasScreen.keranjang,
+  MasScreen.checkout,
   MasScreen.returAjukan,
   MasScreen.returDetail,
   MasScreen.cabangReturDetail,
@@ -376,6 +380,7 @@ const Set<MasScreen> kNoBottomBar = {
   MasScreen.orderDetail,
   MasScreen.cabangPesananDetail,
   MasScreen.keranjang,
+  MasScreen.checkout,
   MasScreen.pilihLokasi,
   MasScreen.returAjukan,
   MasScreen.returDetail,

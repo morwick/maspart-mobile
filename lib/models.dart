@@ -2913,6 +2913,10 @@ class CartGudangItem {
   /// server memberi alasan "stok tinggal N" dan keranjang menawarkan "Jadikan N".
   final int stok;
 
+  /// Foto etalase (path/URL mentah — tampilkan lewat
+  /// `ApiService.partImageUrl`). null = belum ada foto → ikon gir.
+  final String? foto;
+
   const CartGudangItem({
     required this.partNumber,
     this.gudang = '',
@@ -2923,6 +2927,7 @@ class CartGudangItem {
     this.alasan = '',
     this.hanyaAmbil = false,
     this.stok = 0,
+    this.foto,
   });
 
   factory CartGudangItem.fromJson(Map<String, dynamic> j) => CartGudangItem(
@@ -2935,6 +2940,7 @@ class CartGudangItem {
         alasan: _s(j['alasan']),
         hanyaAmbil: _b(j['hanya_ambil']),
         stok: _i(j['stok']),
+        foto: _sOrNull(j['foto']),
       );
 }
 

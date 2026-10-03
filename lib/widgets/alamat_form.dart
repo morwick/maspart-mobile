@@ -641,3 +641,106 @@ class _WilayahPickerState extends State<_WilayahPicker> {
     ]);
   }
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// Lembar "Tambah Alamat" — dipakai Keranjang & Checkout (paritas web modal
+// `alm-modal`). Dipindah dari keranjang_screen.dart saat keranjang dipecah
+// jadi daftar (Keranjang) + Checkout, supaya keduanya memakai lembar yang sama.
+// ══════════════════════════════════════════════════════════════════════
+
+/// Hasil lembar Tambah Alamat: daftar alamat TERBARU dari server, plus alamat
+/// yang baru disimpan (null bila tak bisa dikenali dari daftar).
+typedef HasilTambahAlamat = ({List<Alamat> list, Alamat? baru});
+
+/// Buka lembar Tambah Alamat. Isian halaman pemanggil tak hilang karena tak
+/// pindah halaman. [pertama] = belum ada alamat sama sekali → alamat ini
+/// otomatis jadi alamat utama. [sebelum] = id alamat yang sudah ada, untuk
+/// mengenali alamat baru di daftar hasil. null = dibatalkan.
+Future<HasilTambahAlamat?> tampilkanTambahAlamat(
+  BuildContext context, {
+  required bool pertama,
+  Set<int> sebelum = const {},
+  String prefillNama = '',
+  String prefillTelepon = '',
+}) {
+  return showModalBottomSheet<HasilTambahAlamat>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (ctx) {
+      final m = ctx.mas;
+      String? err;
+      var busy = false;
+      var tertutup = false;
+      return StatefulBuilder(builder: (ctx, setLocal) {
+        return Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: Container(
+            constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height * 0.92),
+            decoration: BoxDecoration(
+              color: m.paper,
+              borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(MasRadii.sheet)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(pertama ? 'Tambah Alamat Pengiriman' : 'Tambah Alamat Baru',
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: m.ink900)),
+                    if (pertama) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Alamat ini disimpan ke profil sebagai alamat utama — '
+                        'lain kali tak perlu diisi lagi.',
+                        style: TextStyle(fontSize: 12.5, color: m.ink500),
+                      ),
+                    ],
+                    if (err != null) ...[
+                      const SizedBox(height: 8),
+                      Text(err ?? '', style: TextStyle(fontSize: 12.5, color: m.danger600)),
+                    ],
+                    const SizedBox(height: 12),
+                    AlamatForm(
+                      prefillNama: prefillNama,
+                      prefillTelepon: prefillTelepon,
+                      forceDefault: pertama,
+                      submitting: busy,
+                      submitLabel: 'Simpan & pakai alamat ini',
+                      onCancel: () => Navigator.pop(ctx),
+                      onSubmit: (body) async {
+                        setLocal(() => busy = true);
+                        try {
+                          await ApiService.createAlamat(body);
+                          final list = await ApiService.listAlamat();
+                          Alamat? baru;
+                          for (final a in list) {
+                            if (!sebelum.contains(a.id)) baru = a;
+                          }
+                          tertutup = true;
+                          if (ctx.mounted) Navigator.pop(ctx, (list: list, baru: baru));
+                        } on ApiException catch (e) {
+                          if (!tertutup) setLocal(() => err = e.message);
+                        } finally {
+                          busy = false;
+                          if (!tertutup && ctx.mounted) setLocal(() {});
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      });
+    },
+  );
+}

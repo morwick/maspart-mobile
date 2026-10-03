@@ -7,6 +7,7 @@
 // `ApiService.cartGudang()` — keadaan server yang menang, supaya yang dilihat
 // pembeli = yang ditagih.
 
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -135,11 +136,20 @@ class CartStore extends ChangeNotifier {
   List<CartItem> _items = [];
   bool _loaded = false;
 
+  /// PN yang DICENTANG untuk checkout (pola Shopee, paritas web
+  /// `getPilihan`/`setPilihan`). Bisa berisi PN yang sudah keluar dari
+  /// keranjang — [pilihan] menyaringnya saat dibaca.
+  List<String> _pilih = [];
+
   List<CartItem> get items => List.unmodifiable(_items);
   bool get isEmpty => _items.isEmpty;
   int get count => _items.fold(0, (n, i) => n + i.qty);
 
   String get _key => 'maspart_cart_$_username';
+
+  /// Centang checkout per-username — sama dengan kunci web
+  /// `maspart_cart_pilih_<username>`.
+  String get _pilihKey => 'maspart_cart_pilih_$_username';
 
   /// ⛔ WAJIB per-username, sama seperti [_key]. Kunci global membuat akun BARU
   /// di HP yang sama mewarisi nama, nomor HP, dan alamat lengkap milik akun
@@ -161,6 +171,7 @@ class CartStore extends ChangeNotifier {
     await _pindahKunciLama(prefs, _key);
     await _pindahKunciLama(prefs, _alamatKey);
     _items = _decode(prefs.getString(_key));
+    _pilih = _decodePilih(prefs.getString(_pilihKey));
     _loaded = true;
     notifyListeners();
   }
@@ -185,6 +196,7 @@ class CartStore extends ChangeNotifier {
   void reset() {
     _username = 'anon';
     _items = [];
+    _pilih = [];
     _loaded = false;
     notifyListeners();
   }
@@ -202,6 +214,62 @@ class CartStore extends ChangeNotifier {
       // Keranjang rusak → mulai bersih daripada meledak di layar pembeli.
       return [];
     }
+  }
+
+  List<String> _decodePilih(String? raw) {
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final list = jsonDecode(raw);
+      if (list is! List) return [];
+      return list.whereType<String>().toSet().toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // ── Pilihan checkout (centang ala Shopee) ─────────────────────────────
+  // Layar Keranjang hanya DAFTAR + centang; part yang dicentang dibawa ke
+  // layar Checkout. Disimpan per-username supaya centang bertahan saat pembeli
+  // bolak-balik keranjang ↔ checkout (dan setelah aplikasi ditutup).
+
+  /// PN yang sedang dicentang — hanya yang MASIH ada di keranjang, urutan
+  /// sesuai keranjang, tanpa duplikat.
+  List<String> get pilihan {
+    final set = _pilih.toSet();
+    return [
+      for (final i in _items)
+        if (set.contains(i.partNumber)) i.partNumber,
+    ];
+  }
+
+  /// Item keranjang yang dicentang (urutan keranjang).
+  List<CartItem> get itemsTerpilih {
+    final set = _pilih.toSet();
+    return _items.where((i) => set.contains(i.partNumber)).toList();
+  }
+
+  /// Ganti SELURUH centang dengan [pns] (bukan menambah).
+  Future<void> setPilihan(Iterable<String> pns) async {
+    _pilih = pns.where((p) => p.isNotEmpty).toSet().toList();
+    await _savePilih();
+  }
+
+  Future<void> _savePilih() async {
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_pilihKey, jsonEncode(_pilih));
+    } catch (_) {
+      /* gagal simpan → centang tetap hidup di memori */
+    }
+  }
+
+  /// PN yang keluar dari keranjang ikut lepas dari centang — supaya part yang
+  /// kelak dimasukkan lagi tidak muncul sudah tercentang.
+  void _buangPilih(Set<String> pns) {
+    if (!_pilih.any(pns.contains)) return;
+    _pilih = _pilih.where((p) => !pns.contains(p)).toList();
+    unawaited(_savePilih());
   }
 
   Future<void> _save() async {
@@ -254,6 +322,7 @@ class CartStore extends ChangeNotifier {
 
   Future<void> remove(String pn) async {
     _items.removeWhere((e) => e.partNumber == pn);
+    _buangPilih({pn});
     await _save();
   }
 
@@ -262,11 +331,13 @@ class CartStore extends ChangeNotifier {
   Future<void> removeAll(Iterable<String> pns) async {
     final set = pns.toSet();
     _items.removeWhere((e) => set.contains(e.partNumber));
+    _buangPilih(set);
     await _save();
   }
 
   Future<void> clear() async {
     _items = [];
+    _buangPilih(_pilih.toSet());
     await _save();
   }
 
