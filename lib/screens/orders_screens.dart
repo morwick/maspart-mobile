@@ -1698,7 +1698,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           // rujukan admin bila pembeli mengaku belum mengambil barang.
           if (o.pickup && (o.pickupProofUrl ?? '').isNotEmpty) ...[
             MasSectionCard(
-              title: '🏬 Serah Terima',
+              title: 'Serah Terima',
+              icon: Icons.handshake_outlined,
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
@@ -1715,7 +1716,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               o.packingBuktiAktif &&
               (o.packingBukti.isNotEmpty || o.status == 'diproses')) ...[
             MasSectionCard(
-              title: '🎥 Bukti Packing',
+              title: 'Bukti Packing',
+              icon: Icons.videocam_outlined,
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
@@ -1885,7 +1887,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       ]);
 
   Widget _penerima(MasColors m, OrderDetail o) => MasSectionCard(
-        title: '📍 Penerima',
+        title: 'Penerima',
+        icon: Icons.location_on_outlined,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
@@ -1917,7 +1920,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final beda = o.pengirim.isNotEmpty && o.pengirim != o.gudang;
 
     return MasSectionCard(
-      title: '📦 Gudang',
+      title: 'Gudang',
+      icon: Icons.warehouse_outlined,
       children: [
         MasKeyValue(label: 'Gudang pengirim (fisik)', value: o.pengirim.isNotEmpty ? o.pengirim : '—'),
         MasKeyValue(
@@ -1940,7 +1944,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 
   Widget _pengiriman(MasColors m, OrderDetail o) => MasSectionCard(
-        title: '🚚 Pengiriman',
+        title: 'Pengiriman',
+        icon: Icons.local_shipping_outlined,
         children: [
           MasKeyValue(
             label: 'Kurir',
@@ -2052,7 +2057,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final dibuat = st == 'created';
 
     return MasSectionCard(
-      title: '🧾 Penawaran Accurate',
+      title: 'Penawaran Accurate',
+      icon: Icons.request_quote_outlined,
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
@@ -2573,8 +2579,10 @@ class _BuktiTransfer extends StatelessWidget {
 }
 
 // ── Piutang Tempo (admin, migrasi 048) — paritas web /admin/piutang ──────────
-// Umur piutang pesanan TEMPO yang belum dibayar + per pelanggan. "Tandai lunas"
-// ada di detail pesanan (alur Lunasi manual: alasan + bukti, gateway dicek dulu).
+// Laporan umur piutang pesanan TEMPO yang belum dibayar: KPI → umur piutang
+// (klik kelompok = saring) → per pelanggan / semua tagihan (cari, lokasi, urut).
+// "Tandai lunas" ada di detail pesanan (alur Lunasi manual: alasan + bukti,
+// gateway dicek dulu).
 class PiutangScreen extends StatefulWidget {
   const PiutangScreen({super.key});
 
@@ -2582,12 +2590,21 @@ class PiutangScreen extends StatefulWidget {
   State<PiutangScreen> createState() => _PiutangScreenState();
 }
 
+typedef _Tagihan = ({PiutangOrder o, PiutangPelanggan p});
+
 class _PiutangScreenState extends State<PiutangScreen> {
   PiutangData? _data;
   bool _loading = true;
   String? _error;
   String _filter = '';
+  String _gudang = '';
+  String _cari = '';
+  int _tampil = 0; // 0 = per pelanggan, 1 = semua tagihan
+  String _urutPlg = 'risiko';
+  String _urutTagihan = 'jatuh_tempo';
+  final Map<String, bool> _buka = {};
 
+  static const _segeraHari = 7;
   static const _kelompok = <(String, String)>[
     ('belum_kirim', 'Belum dikirim'),
     ('belum_jatuh_tempo', 'Belum jatuh tempo'),
@@ -2595,6 +2612,7 @@ class _PiutangScreenState extends State<PiutangScreen> {
     ('lewat_31_60', 'Lewat 31–60 hari'),
     ('lewat_60_plus', 'Lewat > 60 hari'),
   ];
+  static const _lewat = {'lewat_1_30', 'lewat_31_60', 'lewat_60_plus'};
 
   @override
   void initState() {
@@ -2623,96 +2641,612 @@ class _PiutangScreenState extends State<PiutangScreen> {
     }
   }
 
+  /// Warna kelompok umur (sama dgn token --pt-u* web), terang/gelap.
+  Color _warna(String k, bool gelap) => switch (k) {
+        'belum_kirim' => gelap ? const Color(0xFF6D756F) : const Color(0xFF9EA5A0),
+        'belum_jatuh_tempo' => gelap ? const Color(0xFF1EA83A) : const Color(0xFF028912),
+        'lewat_1_30' => gelap ? const Color(0xFFE5A355) : const Color(0xFFD08A00),
+        'lewat_31_60' => gelap ? const Color(0xFFF0884F) : const Color(0xFFE0552D),
+        _ => gelap ? const Color(0xFFFF5A52) : const Color(0xFFA3211A),
+      };
+
+  static double _persen(int a, int b) => b > 0 ? a / b * 100 : 0;
+  static String _fmtPersen(double v) {
+    final s = v < 10 ? v.toStringAsFixed(1) : v.toStringAsFixed(0);
+    return '${s.endsWith('.0') ? s.substring(0, s.length - 2) : s.replaceAll('.', ',')}%';
+  }
+
+  static String _inisial(String s) {
+    final w = s.split(RegExp(r'[\s._-]+')).where((x) => x.isNotEmpty).take(2);
+    final r = w.map((x) => x[0]).join().toUpperCase();
+    return r.isEmpty ? '?' : r;
+  }
+
+  (String, MasPillTone) _posisi(PiutangOrder o) => switch (o.tahap) {
+        'belum_kirim' => ('Belum berjalan', MasPillTone.neutral),
+        'jatuh_tempo_hari_ini' => ('Jatuh tempo hari ini', MasPillTone.warn),
+        'lewat' => ('Lewat ${o.hariLewat} hari', MasPillTone.danger),
+        _ => ('${o.hariLagi} hari lagi', o.hariLagi <= _segeraHari ? MasPillTone.warn : MasPillTone.brand),
+      };
+
+  bool _cocok(PiutangOrder o, PiutangPelanggan p) {
+    final q = _cari.trim().toLowerCase();
+    return (_filter.isEmpty || o.kelompok == _filter) &&
+        (_gudang.isEmpty || o.gudang == _gudang) &&
+        (q.isEmpty ||
+            o.orderCode.toLowerCase().contains(q) ||
+            p.nama.toLowerCase().contains(q) ||
+            p.username.toLowerCase().contains(q) ||
+            p.customerNo.toLowerCase().contains(q));
+  }
+
+  bool get _adaSaring => _filter.isNotEmpty || _gudang.isNotEmpty || _cari.trim().isNotEmpty;
+
   @override
   Widget build(BuildContext context) {
     final m = context.mas;
-    final nav = AppNav.of(context);
+    final gelap = m.isDark;
     if (_loading && _data == null) return const Center(child: CircularProgressIndicator());
     final d = _data;
     if (d == null) return MasErrorState(message: _error ?? 'Piutang gagal dimuat.', onRetry: _load);
+
+    // ── Turunan ──
+    final semua = <_Tagihan>[for (final p in d.perPelanggan) for (final o in p.orders) (o: o, p: p)];
+    final total = d.ringkasan['total'] ?? 0;
+    final lewat = semua.where((t) => _lewat.contains(t.o.kelompok)).toList();
+    final segera = semua.where((t) => t.o.segera(_segeraHari)).toList();
+    final lewatRp = lewat.fold<int>(0, (a, t) => a + t.o.sisa);
+    final segeraRp = segera.fold<int>(0, (a, t) => a + t.o.sisa);
+    final aktif = d.perPelanggan.where((p) => p.tempo.aktif).toList();
+    final totalLimit = aktif.fold<int>(0, (a, p) => a + p.tempo.limit);
+    final terpakaiAktif = aktif.fold<int>(0, (a, p) => a + p.tempo.terpakai);
+    final beku = d.perPelanggan.where((p) => p.tempo.beku).length;
+    final bekuOtomatis = d.perPelanggan.where((p) => p.tempo.beku && !p.tempo.bekuManual).length;
+    final rataLewat =
+        lewatRp > 0 ? (lewat.fold<int>(0, (a, t) => a + t.o.hariLewat * t.o.sisa) / lewatRp).round() : 0;
+    final tertua = lewat.fold<int>(0, (a, t) => t.o.hariLewat > a ? t.o.hariLewat : a);
+    final daftarGudang = {for (final t in semua) if ((t.o.gudang ?? '').isNotEmpty) t.o.gudang!}.toList()..sort();
+    final pakaiTotal = _persen(terpakaiAktif, totalLimit);
+
+    final tagihan = semua.where((t) => _cocok(t.o, t.p)).toList()
+      ..sort((a, b) => switch (_urutTagihan) {
+            'sisa' => b.o.sisa.compareTo(a.o.sisa),
+            'lewat' => b.o.hariLewat.compareTo(a.o.hariLewat),
+            _ => (a.o.jatuhTempo ?? '9999').compareTo(b.o.jatuhTempo ?? '9999'),
+          });
+    final q = _cari.trim().toLowerCase();
     final pelanggan = [
-      for (final p in d.perPelanggan)
-        (p, _filter.isEmpty ? p.orders : p.orders.where((o) => o.kelompok == _filter).toList()),
-    ].where((e) => _filter.isEmpty || e.$2.isNotEmpty).toList();
+      for (final p in d.perPelanggan) (p: p, orders: p.orders.where((o) => _cocok(o, p)).toList()),
+    ].where((e) {
+      if (!_adaSaring || e.orders.isNotEmpty) return true;
+      return _filter.isEmpty && _gudang.isEmpty && q.isNotEmpty &&
+          (e.p.nama.toLowerCase().contains(q) || e.p.username.contains(q));
+    }).toList();
+    double pakai(PiutangPelanggan p) =>
+        p.tempo.limit > 0 ? p.tempo.terpakai / p.tempo.limit : (p.tempo.terpakai > 0 ? 9 : 0);
+    pelanggan.sort((a, b) => switch (_urutPlg) {
+          'nama' => a.p.nama.toLowerCase().compareTo(b.p.nama.toLowerCase()),
+          'terpakai' => b.p.tempo.terpakai.compareTo(a.p.tempo.terpakai),
+          'pemakaian' => pakai(b.p).compareTo(pakai(a.p)),
+          _ => b.p.tertuaLewat != a.p.tertuaLewat
+              ? b.p.tertuaLewat.compareTo(a.p.tertuaLewat)
+              : b.p.tempo.lewatNominal != a.p.tempo.lewatNominal
+                  ? b.p.tempo.lewatNominal.compareTo(a.p.tempo.lewatNominal)
+                  : b.p.tempo.terpakai.compareTo(a.p.tempo.terpakai),
+        });
+
+    final judulKecil = TextStyle(fontSize: 11.5, color: m.ink500);
 
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
         children: [
+          // ── KPI ──
+          _kartu(m,
+              utama: true,
+              ikon: Icons.account_balance_wallet_outlined,
+              label: 'Total piutang',
+              nilai: formatRupiah(total),
+              kaki: '${d.jumlah['total'] ?? 0} tagihan · '
+                  '${d.perPelanggan.where((p) => p.orders.isNotEmpty).length} pelanggan'
+                  '${d.hariIni.isNotEmpty ? ' · per ${tglJatuhTempo(d.hariIni)}' : ''}'),
+          const SizedBox(height: 8),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(
+              child: _kartu(m,
+                  nada: lewatRp > 0 ? m.danger600 : null,
+                  ikon: Icons.warning_amber_rounded,
+                  label: 'Lewat jatuh tempo',
+                  nilai: formatRupiah(lewatRp),
+                  kaki: lewat.isEmpty
+                      ? 'Tidak ada yang terlambat'
+                      : '${_fmtPersen(_persen(lewatRp, total))} · ${lewat.length} tagihan'),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _kartu(m,
+                  nada: segeraRp > 0 ? m.warn600 : null,
+                  ikon: Icons.schedule_rounded,
+                  label: 'Jatuh tempo ≤ $_segeraHari hari',
+                  nilai: formatRupiah(segeraRp),
+                  kaki: segera.isEmpty ? 'Belum ada' : '${segera.length} tagihan perlu ditagih'),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(
+              child: _kartu(m,
+                  ikon: Icons.local_shipping_outlined,
+                  label: 'Belum berjalan',
+                  nilai: formatRupiah(d.ringkasan['belum_kirim'] ?? 0),
+                  kaki: '${d.jumlah['belum_kirim'] ?? 0} pesanan belum dikirim'),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _kartu(m,
+                  ikon: Icons.speed_rounded,
+                  label: 'Pemakaian limit',
+                  nilai: _fmtPersen(pakaiTotal),
+                  bar: _meter(m, pakaiTotal),
+                  kaki: '${aktif.length} akun aktif${beku > 0 ? ' · $beku beku' : ''}'),
+            ),
+          ]),
+          if (bekuOtomatis > 0) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: m.danger50,
+                borderRadius: BorderRadius.circular(MasRadii.card),
+                border: Border.all(color: m.dangerBorder),
+              ),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Icon(Icons.warning_amber_rounded, size: 17, color: m.danger600),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                      '$bekuOtomatis pelanggan otomatis tidak bisa checkout tempo karena ada tagihan '
+                      'lewat jatuh tempo. Tempo pulih setelah tagihan terlambatnya dilunasi.',
+                      style: TextStyle(fontSize: 12, color: m.danger600, height: 1.4)),
+                ),
+              ]),
+            ),
+          ],
+          const SizedBox(height: 12),
+
+          // ── Umur piutang ──
           MasCard(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Total piutang', style: TextStyle(fontSize: 11.5, color: m.ink500)),
-              Text(formatRupiah(d.ringkasan['total'] ?? 0),
-                  style: masMono(size: 18, weight: FontWeight.w700, color: m.ink900)),
-              Text('${d.jumlah['total'] ?? 0} pesanan',
-                  style: TextStyle(fontSize: 11.5, color: m.ink500)),
+              Text('Umur piutang', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: m.ink900)),
+              const SizedBox(height: 2),
+              Text('Sisa tagihan menurut jarak ke jatuh tempo. Ketuk kelompok untuk menyaring.', style: judulKecil),
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(MasRadii.pill),
+                child: SizedBox(
+                  height: 12,
+                  child: total <= 0
+                      ? Container(color: m.ink100)
+                      : Row(children: [
+                          for (final (k, _) in _kelompok)
+                            if ((d.ringkasan[k] ?? 0) > 0)
+                              Expanded(
+                                flex: ((d.ringkasan[k] ?? 0) * 1000 ~/ total).clamp(8, 1000),
+                                child: Opacity(
+                                  opacity: _filter.isNotEmpty && _filter != k ? .3 : 1,
+                                  child: Container(
+                                    margin: const EdgeInsets.only(right: 2),
+                                    color: _warna(k, gelap),
+                                  ),
+                                ),
+                              ),
+                        ]),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(children: [
+                _statKecil(m, 'Lancar', _fmtPersen(_persen(total - lewatRp, total))),
+                _statKecil(m, 'Rata-rata telat', lewat.isEmpty ? '—' : '$rataLewat hari'),
+                _statKecil(m, 'Tertua lewat', tertua > 0 ? '$tertua hari' : '—',
+                    warna: tertua > 0 ? m.danger600 : null),
+              ]),
+              const SizedBox(height: 8),
+              for (final (k, label) in _kelompok)
+                InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () => setState(() => _filter = _filter == k ? '' : k),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: _filter == k ? m.brand50 : null,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(children: [
+                      Container(
+                          width: 10,
+                          height: 10,
+                          decoration:
+                              BoxDecoration(color: _warna(k, gelap), borderRadius: BorderRadius.circular(3))),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text.rich(TextSpan(children: [
+                          TextSpan(text: label, style: TextStyle(fontSize: 13, color: m.ink800)),
+                          TextSpan(text: '  ${d.jumlah[k] ?? 0}', style: judulKecil),
+                        ])),
+                      ),
+                      SizedBox(
+                        width: 46,
+                        child: Text(_fmtPersen(_persen(d.ringkasan[k] ?? 0, total)),
+                            textAlign: TextAlign.right, style: judulKecil),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(formatRupiah(d.ringkasan[k] ?? 0),
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: m.ink900)),
+                    ]),
+                  ),
+                ),
             ]),
           ),
-          const SizedBox(height: 10),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            for (final (k, label) in _kelompok)
-              FilterChip(
-                label: Text('$label · ${formatRupiah(d.ringkasan[k] ?? 0)}',
-                    style: const TextStyle(fontSize: 12)),
-                selected: _filter == k,
-                onSelected: (_) => setState(() => _filter = _filter == k ? '' : k),
-              ),
+          const SizedBox(height: 14),
+
+          // ── Daftar ──
+          Row(children: [
+            MasSegmentTabs(
+                tabs: const ['Per pelanggan', 'Semua tagihan'],
+                index: _tampil,
+                onChanged: (i) => setState(() => _tampil = i)),
+            const Spacer(),
+            _menuUrut(m),
           ]),
-          const SizedBox(height: 12),
-          if (pelanggan.isEmpty)
-            const MasEmpty(
-              icon: Icons.account_balance_wallet_outlined,
-              title: 'Tidak ada piutang',
-              subtitle: 'Pengaturan tempo per pelanggan ada di Manajemen User (ikon dompet).',
-            ),
-          for (final (p, orders) in pelanggan)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: MasSectionCard(
-                title: p.customerName.isNotEmpty ? p.customerName : p.username,
-                trailing: p.tempo.beku
-                    ? MasPill(
-                        label: p.tempo.bekuManual ? 'Dibekukan' : 'Beku · ${p.tempo.lewat} lewat',
-                        tone: MasPillTone.danger,
-                        height: 20)
-                    : null,
-                children: [
-                  MasKeyValue(
-                    label: '@${p.username}',
-                    value: 'terpakai ${formatRupiah(p.tempo.terpakai)}'
-                        '${p.tempo.aktif ? ' / ${formatRupiah(p.tempo.limit)}' : ''}',
-                  ),
-                  for (final o in orders)
-                    InkWell(
-                      onTap: () => nav.go(MasScreen.orderDetail, part: {'order_code': o.orderCode}),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        child: Row(children: [
-                          Expanded(
-                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text(o.orderCode,
-                                  style: masMono(size: 13, weight: FontWeight.w600, color: m.ink900)),
-                              Text(
-                                  '${orderStatusLabel(o.status)} · '
-                                  '${o.jatuhTempo != null ? 'JT ${tglJatuhTempo(o.jatuhTempo)}' : 'belum dikirim'}'
-                                  '${o.hariLewat > 0 ? ' · lewat ${o.hariLewat} hari' : ''}',
-                                  style: TextStyle(
-                                      fontSize: 11.5,
-                                      color: o.hariLewat > 0 ? m.danger600 : m.ink500)),
-                            ]),
-                          ),
-                          Text(formatRupiah(o.sisa),
-                              style: masMono(size: 13, weight: FontWeight.w700, color: m.ink900)),
-                          const SizedBox(width: 4),
-                          Icon(Icons.chevron_right_rounded, size: 18, color: m.ink400),
-                        ]),
-                      ),
+          const SizedBox(height: 10),
+          MasInput(
+            hint: 'Cari pelanggan, username, no. pesanan…',
+            height: 42,
+            prefix: Icon(Icons.search_rounded, size: 18, color: m.ink400),
+            onChanged: (v) => setState(() => _cari = v),
+          ),
+          if (daftarGudang.length > 1) ...[
+            const SizedBox(height: 8),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                for (final g in ['', ...daftarGudang])
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ChoiceChip(
+                      label: Text(g.isEmpty ? 'Semua lokasi' : g, style: const TextStyle(fontSize: 12)),
+                      selected: _gudang == g,
+                      onSelected: (_) => setState(() => _gudang = g),
                     ),
-                ],
-              ),
+                  ),
+              ]),
             ),
+          ],
+          if (_adaSaring) ...[
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                child: Text(
+                    'Menampilkan ${tagihan.length} tagihan · '
+                    '${formatRupiah(tagihan.fold<int>(0, (a, t) => a + t.o.sisa))}'
+                    '${_filter.isNotEmpty ? ' · ${_kelompok.firstWhere((x) => x.$1 == _filter).$2}' : ''}',
+                    style: TextStyle(fontSize: 12, color: m.ink600)),
+              ),
+              TextButton(
+                onPressed: () => setState(() {
+                  _filter = '';
+                  _gudang = '';
+                }),
+                child: const Text('Reset saring'),
+              ),
+            ]),
+          ],
+          const SizedBox(height: 10),
+          if (_tampil == 1) ...[
+            if (tagihan.isEmpty)
+              MasEmpty(
+                icon: Icons.receipt_long_outlined,
+                title: _adaSaring ? 'Tidak ada yang cocok' : 'Tidak ada tagihan terbuka',
+                subtitle: _adaSaring ? 'Ubah atau reset saringan.' : 'Semua tagihan tempo sudah lunas.',
+              )
+            else
+              MasCard(
+                padding: EdgeInsets.zero,
+                child: Column(children: [
+                  for (var i = 0; i < tagihan.length; i++)
+                    _tagihanTile(m, tagihan[i].o, pelanggan: tagihan[i].p, garis: i > 0),
+                ]),
+              ),
+          ] else if (pelanggan.isEmpty)
+            MasEmpty(
+              icon: Icons.account_balance_wallet_outlined,
+              title: _adaSaring ? 'Tidak ada yang cocok' : 'Belum ada piutang tempo',
+              subtitle: 'Pengaturan tempo per pelanggan ada di Manajemen User (ikon dompet).',
+            )
+          else
+            for (final e in pelanggan)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _kartuPelanggan(m, e.p, e.orders, pelanggan.length),
+              ),
+          const SizedBox(height: 6),
+          Text(
+              'Sisa tagihan = total pesanan − potongan retur. Termin dihitung sejak pesanan dikirim. '
+              'Pelanggan dengan tagihan lewat jatuh tempo otomatis tak bisa checkout tempo sampai lunas. '
+              'Limit, termin & pembekuan diatur di Manajemen User (ikon dompet).',
+              style: TextStyle(fontSize: 11.5, color: m.ink500, height: 1.5)),
         ],
+      ),
+    );
+  }
+
+  Widget _kartu(MasColors m,
+      {required IconData ikon,
+      required String label,
+      required String nilai,
+      String? kaki,
+      Widget? bar,
+      Color? nada,
+      bool utama = false}) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+      decoration: BoxDecoration(
+        color: utama ? m.brand50 : m.paper,
+        borderRadius: BorderRadius.circular(MasRadii.card),
+        border: Border.all(color: utama ? m.brand100 : m.ink150),
+        boxShadow: m.shadow1,
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(ikon, size: 14, color: nada ?? (utama ? m.brand700 : m.ink500)),
+          const SizedBox(width: 5),
+          Expanded(
+              child: Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11.5, color: m.ink500))),
+        ]),
+        const SizedBox(height: 4),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(nilai,
+              style: TextStyle(
+                  fontSize: utama ? 22 : 17,
+                  fontWeight: FontWeight.w700,
+                  color: nada ?? (utama ? m.brand700 : m.ink900))),
+        ),
+        if (bar != null) ...[const SizedBox(height: 5), bar],
+        if (kaki != null) ...[
+          const SizedBox(height: 3),
+          Text(kaki, style: TextStyle(fontSize: 10.5, color: m.ink500)),
+        ],
+      ]),
+    );
+  }
+
+  Widget _meter(MasColors m, double persen) {
+    final c = persen >= 90 ? m.danger600 : (persen >= 70 ? m.warn600 : m.brand600);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(MasRadii.pill),
+      child: Container(
+        height: 6,
+        color: m.ink100,
+        child: FractionallySizedBox(
+          alignment: Alignment.centerLeft,
+          widthFactor: (persen / 100).clamp(0, 1),
+          child: Container(color: c),
+        ),
+      ),
+    );
+  }
+
+  Widget _statKecil(MasColors m, String k, String v, {Color? warna}) => Expanded(
+        child: Container(
+          padding: const EdgeInsets.only(left: 8),
+          decoration: BoxDecoration(border: Border(left: BorderSide(color: m.ink150, width: 2))),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(k, style: TextStyle(fontSize: 10.5, color: m.ink500)),
+            Text(v, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: warna ?? m.ink900)),
+          ]),
+        ),
+      );
+
+  Widget _menuUrut(MasColors m) {
+    final pilihan = _tampil == 0
+        ? const [
+            ('risiko', 'Risiko tertinggi'),
+            ('terpakai', 'Piutang terbesar'),
+            ('pemakaian', 'Pemakaian limit'),
+            ('nama', 'Nama A–Z'),
+          ]
+        : const [
+            ('jatuh_tempo', 'Jatuh tempo terdekat'),
+            ('sisa', 'Sisa terbesar'),
+            ('lewat', 'Paling lama lewat'),
+          ];
+    final aktif = _tampil == 0 ? _urutPlg : _urutTagihan;
+    return PopupMenuButton<String>(
+      tooltip: 'Urutkan',
+      initialValue: aktif,
+      onSelected: (v) => setState(() => _tampil == 0 ? _urutPlg = v : _urutTagihan = v),
+      itemBuilder: (_) => [for (final (k, l) in pilihan) PopupMenuItem(value: k, child: Text(l))],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.sort_rounded, size: 18, color: m.ink600),
+          const SizedBox(width: 4),
+          Text('Urut', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: m.ink700)),
+        ]),
+      ),
+    );
+  }
+
+  Widget _kartuPelanggan(MasColors m, PiutangPelanggan p, List<PiutangOrder> orders, int jumlahPlg) {
+    final t = p.tempo;
+    final terbuka = _buka[p.username] ?? (p.tertuaLewat > 0 || _adaSaring || jumlahPlg <= 3);
+    final pakai = _persen(t.terpakai, t.limit);
+    final segera = p.orders.where((o) => o.segera(_segeraHari)).length;
+    final (pillTeks, pillNada) = t.beku
+        ? (t.bekuManual ? 'Dibekukan admin' : 'Beku · lewat JT', MasPillTone.danger)
+        : t.aktif
+            ? ('Aktif', MasPillTone.brand)
+            : ('Tempo nonaktif', MasPillTone.neutral);
+    Widget metrik(String k, String v, String s, {Color? warna, Widget? bawah}) => Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(k.toUpperCase(),
+                style: TextStyle(fontSize: 10, letterSpacing: .4, fontWeight: FontWeight.w600, color: m.ink500)),
+            const SizedBox(height: 2),
+            Text(v, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: warna ?? m.ink900)),
+            if (bawah != null) Padding(padding: const EdgeInsets.only(top: 4, right: 12), child: bawah),
+            if (s.isNotEmpty) Text(s, style: TextStyle(fontSize: 10.5, color: m.ink500)),
+          ]),
+        );
+    return MasCard(
+      padding: EdgeInsets.zero,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        InkWell(
+          onTap: () => setState(() => _buka[p.username] = !terbuka),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: t.beku ? m.danger50 : (t.aktif ? m.brand50 : m.ink100),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(_inisial(p.nama),
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: t.beku ? m.danger600 : (t.aktif ? m.brand700 : m.ink500))),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(p.nama,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: m.ink900)),
+                    Text(
+                        '@${p.username}${p.customerNo.isNotEmpty ? ' · ${p.customerNo}' : ''} · termin ${t.terminHari} hari',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11, color: m.ink500)),
+                  ]),
+                ),
+                const SizedBox(width: 6),
+                MasPill(label: pillTeks, tone: pillNada, dot: pillNada == MasPillTone.brand, height: 20),
+                AnimatedRotation(
+                  turns: terbuka ? .25 : 0,
+                  duration: const Duration(milliseconds: 150),
+                  child: Icon(Icons.chevron_right_rounded, size: 20, color: m.ink400),
+                ),
+              ]),
+              const SizedBox(height: 12),
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                metrik('Sisa tagihan', formatRupiah(t.terpakai), '${t.jumlahTagihan} tagihan'),
+                metrik(
+                  'Lewat jatuh tempo',
+                  t.lewatNominal > 0 ? formatRupiah(t.lewatNominal) : '—',
+                  t.lewat > 0
+                      ? '${t.lewat} tagihan · tertua ${p.tertuaLewat} hari'
+                      : (segera > 0 ? '$segera jatuh tempo ≤ $_segeraHari hari' : 'Lancar'),
+                  warna: t.lewatNominal > 0 ? m.danger600 : null,
+                ),
+              ]),
+              const SizedBox(height: 10),
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                metrik('Limit kredit', t.aktif || t.limit > 0 ? formatRupiah(t.limit) : '—',
+                    'Sisa limit ${formatRupiah(t.sisa)}'),
+                metrik('Pemakaian', t.limit > 0 ? _fmtPersen(pakai) : '—', '', bawah: _meter(m, pakai)),
+              ]),
+            ]),
+          ),
+        ),
+        if (terbuka) ...[
+          if (t.beku && t.bekuManual && t.bekuAlasan.isNotEmpty)
+            Container(
+              color: m.danger50,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Text('Alasan dibekukan: ${t.bekuAlasan}', style: TextStyle(fontSize: 12, color: m.danger600)),
+            ),
+          if (orders.isEmpty)
+            Container(
+              decoration: BoxDecoration(border: Border(top: BorderSide(color: m.ink150))),
+              padding: const EdgeInsets.all(14),
+              child: Text(_adaSaring ? 'Tidak ada tagihan yang cocok dengan saringan.' : 'Tidak ada tagihan terbuka.',
+                  style: TextStyle(fontSize: 12.5, color: m.ink500)),
+            )
+          else ...[
+            for (final o in orders) _tagihanTile(m, o, garis: true),
+            if (orders.length > 1)
+              Container(
+                color: m.ink50,
+                padding: const EdgeInsets.fromLTRB(14, 9, 14, 9),
+                child: Row(children: [
+                  Text('${orders.length} tagihan',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: m.ink700)),
+                  const Spacer(),
+                  Text(formatRupiah(orders.fold<int>(0, (a, o) => a + o.sisa)),
+                      style: masMono(size: 13, weight: FontWeight.w700, color: m.ink900)),
+                ]),
+              ),
+          ],
+        ],
+      ]),
+    );
+  }
+
+  Widget _tagihanTile(MasColors m, PiutangOrder o, {PiutangPelanggan? pelanggan, bool garis = false}) {
+    final nav = AppNav.of(context);
+    final (teks, nada) = _posisi(o);
+    final meta = [
+      if (pelanggan != null) pelanggan.nama,
+      if ((o.gudang ?? '').isNotEmpty) o.gudang!,
+      orderStatusLabel(o.status),
+    ].join(' · ');
+    return InkWell(
+      onTap: () => nav.go(MasScreen.orderDetail, part: {'order_code': o.orderCode}),
+      child: Container(
+        decoration: BoxDecoration(border: garis ? Border(top: BorderSide(color: m.ink150)) : null),
+        padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+        child: Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Flexible(
+                  child: Text(o.orderCode,
+                      overflow: TextOverflow.ellipsis,
+                      style: masMono(size: 13, weight: FontWeight.w600, color: m.ink900)),
+                ),
+                const SizedBox(width: 6),
+                MasPill(label: teks, tone: nada, height: 19),
+              ]),
+              const SizedBox(height: 2),
+              Text(meta,
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: m.ink500)),
+              Text(
+                  o.jatuhTempo != null
+                      ? 'JT ${tglJatuhTempo(o.jatuhTempo)}${o.terminHari != null ? ' · termin ${o.terminHari} hari' : ''}'
+                      : 'Dipesan ${tglJatuhTempo(o.createdAt)} · belum dikirim',
+                  style: TextStyle(fontSize: 11, color: m.ink500)),
+            ]),
+          ),
+          const SizedBox(width: 8),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Text(formatRupiah(o.sisa),
+                style: masMono(size: 13, weight: FontWeight.w700, color: o.tahap == 'lewat' ? m.danger600 : m.ink900)),
+            if (o.potonganRetur > 0)
+              Text('retur −${formatRupiah(o.potonganRetur)}', style: TextStyle(fontSize: 10.5, color: m.ink500)),
+          ]),
+          Icon(Icons.chevron_right_rounded, size: 18, color: m.ink400),
+        ]),
       ),
     );
   }

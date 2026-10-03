@@ -334,44 +334,64 @@ class TempoAdmin {
 /// Satu pesanan di halaman Piutang Tempo (admin).
 class PiutangOrder {
   final String orderCode;
+  final String? gudang;
   final String status;
   final int total;
   final int potonganRetur;
   final int sisa;
+  final String? createdAt;
+  final String? dikirimAt;
   final String? jatuhTempo;
   final int hariLewat;
+  /// Hari menuju jatuh tempo (tahap `berjalan`).
+  final int hariLagi;
+  final int? terminHari;
   final String tahap;
   final String kelompok;
-  const PiutangOrder({required this.orderCode, this.status = '', this.total = 0, this.potonganRetur = 0,
-      this.sisa = 0, this.jatuhTempo, this.hariLewat = 0, this.tahap = '', this.kelompok = ''});
+  const PiutangOrder({required this.orderCode, this.gudang, this.status = '', this.total = 0,
+      this.potonganRetur = 0, this.sisa = 0, this.createdAt, this.dikirimAt, this.jatuhTempo,
+      this.hariLewat = 0, this.hariLagi = 0, this.terminHari, this.tahap = '', this.kelompok = ''});
   factory PiutangOrder.fromJson(Map<String, dynamic> j) => PiutangOrder(
         orderCode: _s(j['order_code']),
+        gudang: _sOrNull(j['gudang']),
         status: _s(j['status']),
         total: _i(j['total']),
         potonganRetur: _i(j['potongan_retur']),
         sisa: _i(j['sisa']),
+        createdAt: _sOrNull(j['created_at']),
+        dikirimAt: _sOrNull(j['dikirim_at']),
         jatuhTempo: _sOrNull(j['jatuh_tempo']),
         hariLewat: _i(j['hari_lewat']),
+        hariLagi: _i(j['hari_lagi']),
+        terminHari: j['termin_hari'] == null ? null : _i(j['termin_hari']),
         tahap: _s(j['tahap']),
         kelompok: _s(j['kelompok']),
       );
+
+  /// Jatuh tempo hari ini atau ≤ [hari] hari lagi — perlu ditagih segera.
+  bool segera([int hari = 7]) =>
+      tahap == 'jatuh_tempo_hari_ini' || (tahap == 'berjalan' && hariLagi <= hari);
 }
 
 class PiutangPelanggan {
   final String username;
   final String customerName;
+  final String customerNo;
   final TempoAkun tempo;
   final List<PiutangOrder> orders;
   final int tertuaLewat;
-  const PiutangPelanggan({required this.username, this.customerName = '', this.tempo = const TempoAkun(),
-      this.orders = const [], this.tertuaLewat = 0});
+  const PiutangPelanggan({required this.username, this.customerName = '', this.customerNo = '',
+      this.tempo = const TempoAkun(), this.orders = const [], this.tertuaLewat = 0});
   factory PiutangPelanggan.fromJson(Map<String, dynamic> j) => PiutangPelanggan(
         username: _s(j['username']),
         customerName: _s(j['customer_name']),
+        customerNo: _s(j['customer_no']),
         tempo: TempoAkun.fromJson(j),
         orders: _list(j['orders'], PiutangOrder.fromJson),
         tertuaLewat: _i(j['tertua_lewat']),
       );
+
+  String get nama => customerName.isNotEmpty ? customerName : username;
 }
 
 class PiutangData {
@@ -379,7 +399,9 @@ class PiutangData {
   final Map<String, int> ringkasan;
   final Map<String, int> jumlah;
   final List<PiutangPelanggan> perPelanggan;
-  const PiutangData({this.ringkasan = const {}, this.jumlah = const {}, this.perPelanggan = const []});
+  final String hariIni;
+  const PiutangData({this.ringkasan = const {}, this.jumlah = const {}, this.perPelanggan = const [],
+      this.hariIni = ''});
   factory PiutangData.fromJson(Map<String, dynamic> j) {
     Map<String, int> peta(dynamic v) =>
         (v is Map) ? v.map((k, x) => MapEntry(k.toString(), _i(x))) : const {};
@@ -387,6 +409,7 @@ class PiutangData {
       ringkasan: peta(j['ringkasan']),
       jumlah: peta(j['jumlah']),
       perPelanggan: _list(j['per_pelanggan'], PiutangPelanggan.fromJson),
+      hariIni: _s(j['hari_ini']),
     );
   }
 }
