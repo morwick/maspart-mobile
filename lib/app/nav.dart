@@ -450,6 +450,11 @@ Set<MasScreen> accessibleScreens(List<NavSection> sections) => {
   }
   // Tujuan notifikasi promo (siaran admin /admin/promo-push — pilihan
   // "Saat diketuk, buka" di panel web).
+  // Keranjang ala Shopee (2026-10-03): checkout = halaman terpisah di web.
+  // Tanpa centang, layar Checkout menampilkan "Belum ada part yang dipilih".
+  if (seg.length == 2 && seg[0] == 'keranjang' && seg[1] == 'checkout') {
+    return (MasScreen.checkout, <String, dynamic>{});
+  }
   if (seg.length >= 2 && seg[0] == 'part') {
     return (MasScreen.part, {'part_number': seg[1]});
   }

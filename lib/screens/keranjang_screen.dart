@@ -27,6 +27,7 @@ import '../utils.dart';
 import '../widgets/alamat_form.dart';
 import '../widgets/foto_part.dart';
 import '../widgets/mas_ui.dart';
+import 'login_screen.dart';
 import 'part_detail_screen.dart' show ProdukSerupaSection;
 
 /// Kunci kelompok untuk part yang gudangnya belum diketahui (memuat / tanpa alamat).
@@ -95,11 +96,22 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
         _alamatList = list;
         _alamatStatus = list.isEmpty ? 'kosong' : 'ok';
       });
+    } on ApiException catch (e) {
+      // Sesi habis (paritas web) → ke halaman login, bukan diam-diam lanjut.
+      if (e.isAuth) return _keLogin();
+      if (mounted) setState(() => _alamatStatus = 'gagal');
     } catch (_) {
       // Fitur alamat belum aktif / offline → tetap coba harga.
       if (mounted) setState(() => _alamatStatus = 'gagal');
     }
     _jadwalAsal(paksa: true);
+  }
+
+  /// Token sudah dibuang ApiService saat 401 — buka layar login dari awal.
+  void _keLogin() {
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()), (r) => false);
   }
 
   /// Tanda tangan isi keranjang (PN×qty) — centang saja tak memicu permintaan.
@@ -135,6 +147,7 @@ class _KeranjangScreenState extends State<KeranjangScreen> {
       setState(() => _asal = r);
     } catch (e) {
       if (!mounted || id != _req) return;
+      if (e is ApiException && e.isAuth) return _keLogin();
       setState(() => _asalErr = e is ApiException && e.message.isNotEmpty
           ? e.message
           : 'Gagal memuat harga terkini');

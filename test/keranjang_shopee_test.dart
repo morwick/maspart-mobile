@@ -12,6 +12,7 @@ import 'package:maspart_mobile/auth_storage.dart';
 import 'package:maspart_mobile/cart.dart';
 import 'package:maspart_mobile/screens/checkout_screen.dart';
 import 'package:maspart_mobile/screens/keranjang_screen.dart';
+import 'package:maspart_mobile/screens/login_screen.dart';
 import 'package:maspart_mobile/theme/mas_theme.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -99,9 +100,10 @@ void main() {
         ),
       );
 
-  Future<void> jalankan(WidgetTester tester, Widget layar, Future<void> Function() body) async {
+  Future<void> jalankan(WidgetTester tester, Widget layar, Future<void> Function() body,
+      {http.Client? klien, Size ukuran = const Size(375, 812)}) async {
     // Ukuran HP kecil — memastikan baris & bilah bawah tak meluap.
-    tester.view.physicalSize = const Size(375 * 3, 812 * 3);
+    tester.view.physicalSize = ukuran * 3;
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
     await http.runWithClient(() async {
@@ -111,7 +113,7 @@ void main() {
       await tester.pump();
       await body();
       await tester.pumpWidget(const SizedBox());
-    }, () => _client);
+    }, () => klien ?? _client);
   }
 
   testWidgets('dikelompokkan per gudang; centang gudang lain melepas gudang lama',
@@ -173,4 +175,21 @@ void main() {
       expect(tujuan, [MasScreen.keranjang]);
     });
   });
+
+  // Paritas web: sesi habis (401) di keranjang → langsung ke halaman login,
+  // baik saat memuat daftar alamat maupun saat memuat harga/gudang.
+  for (final jalur in ['/api/buyer/alamat', '/api/cart/gudang']) {
+    testWidgets('401 dari $jalur → ke halaman login', (tester) async {
+      final klien = MockClient((req) async => req.url.path == jalur
+          ? http.Response(jsonEncode({'detail': 'Sesi habis'}), 401,
+              headers: {'content-type': 'application/json'})
+          : _client.send(req).then(http.Response.fromStream));
+      await jalankan(tester, const KeranjangScreen(), () async {
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(find.byType(LoginScreen), findsOneWidget);
+        // Layar login dirender dengan font tes Ahem (glif lebar) — beri ruang
+        // supaya yang diuji di sini hanya perpindahannya, bukan tata letak login.
+      }, klien: klien, ukuran: const Size(900, 1400));
+    });
+  }
 }

@@ -9,6 +9,7 @@ void main() {
     expect(tujuanTautan('/toko')?.$1, MasScreen.toko);
     expect(tujuanTautan('/voucher')?.$1, MasScreen.voucher);
     expect(tujuanTautan('/keranjang')?.$1, MasScreen.keranjang);
+    expect(tujuanTautan('/keranjang/checkout')?.$1, MasScreen.checkout);
     expect(tujuanTautan('/beli-lagi')?.$1, MasScreen.beliLagi);
     expect(tujuanTautan('/poin')?.$1, MasScreen.poin);
     final part = tujuanTautan('/part/WG%209725520274');
